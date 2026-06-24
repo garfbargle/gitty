@@ -25,6 +25,7 @@ type TopBarProps = {
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
   pushPhase?: PushPhase;
+  repoSwitching?: boolean;
   ahead?: number;
   behind?: number;
   unpushedTags?: number;
@@ -55,6 +56,7 @@ export function TopBar({
   viewingCommit,
   loading,
   pushPhase = "idle",
+  repoSwitching = false,
   ahead = 0,
   behind = 0,
   unpushedTags = 0,
@@ -79,6 +81,7 @@ export function TopBar({
           className={`view-mode-toggle ${viewMode}`}
           title={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
           aria-label={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
+          disabled={repoSwitching}
           onClick={onToggleView}
         >
           {viewMode === "working" ? <History size={15} /> : <GitCompareArrows size={15} />}
@@ -93,6 +96,7 @@ export function TopBar({
           <select
             className="top-select branch-select-top"
             value={branch}
+            disabled={repoSwitching || loading}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
             {branches.map((name) => (
@@ -148,10 +152,10 @@ export function TopBar({
             {changeCount > 0 ? <em>{changeCount}</em> : null}
           </button>
         ) : null}
-        <button type="button" className="ghost-btn" title="Refresh" disabled={loading} onClick={onRefresh}>
-          <RefreshCw size={15} className={loading ? "spin" : ""} />
+        <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
+          <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>
-        {onPush && onForcePush ? (
+        {onPush && onForcePush && !repoSwitching ? (
           <PushButton
             ahead={ahead}
             behind={behind}

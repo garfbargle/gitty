@@ -11,6 +11,7 @@ type RepoSidebarProps = {
   discoveredRepos: DiscoveredRepoEntry[];
   discovering: boolean;
   selectedPath: string;
+  contentPath: string;
   onSelect: (path: string) => void;
   onSaveDiscovered: (path: string) => void;
   onRemoveRepo: (path: string) => void;
@@ -25,6 +26,7 @@ export const RepoSidebar = memo(function RepoSidebar({
   discoveredRepos,
   discovering,
   selectedPath,
+  contentPath,
   onSelect,
   onSaveDiscovered,
   onRemoveRepo,
@@ -42,20 +44,20 @@ export const RepoSidebar = memo(function RepoSidebar({
   const activePath = optimisticPath ?? selectedPath;
 
   useEffect(() => {
-    if (optimisticPath !== null && optimisticPath === selectedPath) {
+    if (optimisticPath !== null && optimisticPath === contentPath) {
       setOptimisticPath(null);
     }
-  }, [selectedPath, optimisticPath]);
+  }, [contentPath, optimisticPath]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const handleSelect = useCallback(
     (path: string) => {
-      if (path === selectedPath) return;
+      if (path === selectedPath && path === contentPath) return;
       setOptimisticPath(path);
       onSelect(path);
     },
-    [onSelect, selectedPath],
+    [contentPath, onSelect, selectedPath],
   );
 
   function openRepoContextMenu(event: React.MouseEvent, path: string, isSaved: boolean) {

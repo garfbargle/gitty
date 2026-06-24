@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderPlus, GitBranch } from "lucide-react";
+import { FolderPlus, GitBranch, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
@@ -119,6 +119,12 @@ function emptySummaryCache(): SummaryCache {
   return { all: null, staged: null, displayScope: "all" };
 }
 
+const SNAPSHOT_SUPERSEDED = "__superseded__";
+
+function isSupersededSnapshotError(err: unknown): boolean {
+  return String(err).includes(SNAPSHOT_SUPERSEDED);
+}
+
 function waitForPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -186,9 +192,12 @@ function App() {
   }, [snapshot]);
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
-  const repoSwitching = Boolean(
-    selectedPath && snapshot && snapshot.repo.path !== selectedPath,
-  );
+  const contentPath = snapshot?.repo.path ?? "";
+  const displaySnapshot =
+    snapshot && snapshot.repo.path === selectedPath ? snapshot : null;
+  const repoSwitching = Boolean(selectedPath && contentPath !== selectedPath);
+  const switchingRepoName =
+    repos.find((repo) => repo.path === selectedPath)?.name ?? "repository";
   const discoveryStarted = useRef(false);
   const selectRepoRequestRef = useRef(0);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
@@ -450,28 +459,34 @@ function App() {
   }
 
   async function selectRepo(path: string): Promise<void> {
-    if (path === selectedPath && snapshot?.repo.path === path) return;
+    if (path === selectedPath && contentPath === path) return;
 
     const requestId = ++selectRepoRequestRef.current;
-
-    await waitForPaint();
 
     setSelectedPath(path);
     applyRepoSwitchCleanup();
 
     await waitForPaint();
 
-    const result = await refreshRepoQuiet(path, { updateState: false });
+    const result = await refreshRepoQuiet(path, {
+      updateState: false,
+      generation: requestId,
+    });
     if (requestId !== selectRepoRequestRef.current) return;
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-    } else if (snapshot?.repo.path) {
-      setSelectedPath(snapshot.repo.path);
+      return;
     }
+
+    setSelectedPath((current) => {
+      if (requestId !== selectRepoRequestRef.current) return current;
+      return contentPath || current;
+    });
   }
 
   function applyRepoSwitchCleanup() {
+    snapshotGenerationRef.current += 1;
     setViewingCommit(null);
     setViewingCommitMessage("");
     setCommitFiles([]);
@@ -501,19 +516,24 @@ function App() {
 
   async function refreshRepoQuiet(
     path = selectedPath,
-    options?: { updateState?: boolean },
+    options?: { updateState?: boolean; generation?: number },
   ): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const updateState = options?.updateState !== false;
-    const generation = snapshotGenerationRef.current;
+    const stateGeneration = snapshotGenerationRef.current;
     try {
-      const result = await invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 });
-      if (updateState && generation === snapshotGenerationRef.current) {
+      const result = await invoke<RepoSnapshot>("repo_snapshot", {
+        path,
+        limit: 200,
+        generation: options?.generation ?? null,
+      });
+      if (updateState && stateGeneration === snapshotGenerationRef.current) {
         setSnapshot(result);
         setSelectedPath(result.repo.path);
       }
       return result;
     } catch (err) {
+      if (isSupersededSnapshotError(err)) return null;
       setError(String(err));
       return null;
     }
@@ -1432,6 +1452,7 @@ function App() {
         discoveredRepos={discoveredRepos}
         discovering={discovering}
         selectedPath={selectedPath}
+        contentPath={contentPath}
         onSelect={(path) => void selectRepo(path)}
         onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
         onRemoveRepo={(path) => void removeRepo(path)}
@@ -1448,23 +1469,49 @@ function App() {
       />
 
       <section className={`main-area${repoSwitching ? " repo-switching" : ""}`}>
-        {snapshot ? (
+        {repoSwitching ? (
           <>
             <TopBar
               repos={repos}
               selectedPath={selectedPath}
-              branch={snapshot.branch}
-              branches={branchNames.length > 0 ? branchNames : [snapshot.branch]}
-              commits={snapshot.commits}
-              aheadCommits={snapshot.aheadCommits ?? []}
-              aheadBranch={snapshot.aheadBranch}
-              changeCount={snapshot.changes.length}
+              branch="…"
+              branches={["…"]}
+              commits={[]}
+              changeCount={0}
+              viewMode={viewMode}
+              loading
+              repoSwitching
+              onRepoChange={(path) => void selectRepo(path)}
+              onBranchChange={() => {}}
+              onToggleView={() => {}}
+              onReturnToWorkingTree={() => {}}
+              onSelectCommit={() => {}}
+              onRefresh={() => {}}
+            />
+            <div className="repo-loading-state" aria-busy="true" aria-live="polite">
+              <RefreshCw size={28} className="spin" aria-hidden="true" />
+              <p>
+                Loading <strong>{switchingRepoName}</strong>…
+              </p>
+            </div>
+          </>
+        ) : displaySnapshot ? (
+          <>
+            <TopBar
+              repos={repos}
+              selectedPath={selectedPath}
+              branch={displaySnapshot.branch}
+              branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
+              commits={displaySnapshot.commits}
+              aheadCommits={displaySnapshot.aheadCommits ?? []}
+              aheadBranch={displaySnapshot.aheadBranch}
+              changeCount={displaySnapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
               pushPhase={pushPhase}
-              ahead={snapshot.ahead}
-              behind={snapshot.behind}
-              unpushedTags={snapshot.unpushedTags?.length ?? 0}
+              ahead={displaySnapshot.ahead}
+              behind={displaySnapshot.behind}
+              unpushedTags={displaySnapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
@@ -1493,10 +1540,10 @@ function App() {
             {viewMode === "working" ? (
               <div className="working-view">
                 <HistoryTimeline
-                  key={snapshot.repo.path}
-                  commits={snapshot.commits}
-                  aheadCommits={snapshot.aheadCommits ?? []}
-                  changeCount={snapshot.changes.length}
+                  key={displaySnapshot.repo.path}
+                  commits={displaySnapshot.commits}
+                  aheadCommits={displaySnapshot.aheadCommits ?? []}
+                  changeCount={displaySnapshot.changes.length}
                   unpushedTags={unpushedTagSet}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
@@ -1508,12 +1555,12 @@ function App() {
                 />
 
                 {showGittyEmptyState ? (
-                  <GittyEmptyState projectName={snapshot.repo.name} />
+                  <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
                     <ChangesList
                       ref={changesListRef}
-                      changes={viewingCommit ? commitFiles : snapshot.changes}
+                      changes={viewingCommit ? commitFiles : displaySnapshot.changes}
                       repoPath={selectedPath}
                       variant={viewingCommit ? "commit" : "working"}
                       selectedKey={selectedFileKey}
@@ -1531,7 +1578,7 @@ function App() {
                       onStage={(files, anchor) => void stageFiles(files, anchor)}
                       onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
                       onResetAll={
-                        workingTreeActive && snapshot.changes.length > 0
+                        workingTreeActive && displaySnapshot.changes.length > 0
                           ? () => setResetAllOpen(true)
                           : undefined
                       }
@@ -1552,8 +1599,8 @@ function App() {
                     <CommitPanel
                       message={commitMessage}
                       messageInputRef={commitMessageRef}
-                      branch={snapshot.branch}
-                      branches={snapshot.branches ?? []}
+                      branch={displaySnapshot.branch}
+                      branches={displaySnapshot.branches ?? []}
                       amend={amend}
                       resetMode={resetMode}
                       selectedCommit={selectedCommit}
@@ -1603,8 +1650,8 @@ function App() {
                     <HistoryTable
                       commits={historyCommits}
                       aheadHashes={
-                        snapshot.aheadCommits?.length
-                          ? new Set(snapshot.aheadCommits.map((commit) => commit.hash))
+                        displaySnapshot.aheadCommits?.length
+                          ? new Set(displaySnapshot.aheadCommits.map((commit) => commit.hash))
                           : undefined
                       }
                       unpushedTags={unpushedTagSet}

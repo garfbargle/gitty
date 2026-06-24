@@ -11,7 +11,11 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
 };
+
+static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
+const SNAPSHOT_SUPERSEDED: &str = "__superseded__";
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -756,11 +760,31 @@ fn repo_changes(path: String) -> Result<RepoChanges, String> {
     })
 }
 
+fn snapshot_was_superseded(generation: Option<u64>) -> bool {
+    generation.is_some_and(|g| g != SNAPSHOT_GENERATION.load(Ordering::SeqCst))
+}
+
 #[tauri::command]
-async fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
-    tauri::async_runtime::spawn_blocking(move || repo_snapshot_blocking(path, limit))
-        .await
-        .map_err(|err| format!("Snapshot task failed: {err}"))?
+async fn repo_snapshot(
+    path: String,
+    limit: Option<u32>,
+    generation: Option<u64>,
+) -> Result<RepoSnapshot, String> {
+    if let Some(g) = generation {
+        SNAPSHOT_GENERATION.store(g, Ordering::SeqCst);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        if snapshot_was_superseded(generation) {
+            return Err(SNAPSHOT_SUPERSEDED.to_string());
+        }
+        let result = repo_snapshot_blocking(path, limit)?;
+        if snapshot_was_superseded(generation) {
+            return Err(SNAPSHOT_SUPERSEDED.to_string());
+        }
+        Ok(result)
+    })
+    .await
+    .map_err(|err| format!("Snapshot task failed: {err}"))?
 }
 
 fn commit_files(repo_path: &Path, commit: &str) -> Result<Vec<FileChange>, String> {
