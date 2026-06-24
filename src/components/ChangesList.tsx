@@ -74,6 +74,15 @@ export function ChangesList({
     selectEntry(entries[next]);
   }
 
+  function toggleStage(entry: ChangeEntry) {
+    if (disabled) return;
+    if (entry.section === "unstaged") {
+      onStage([entry.file.path]);
+    } else {
+      onUnstage([entry.file.path]);
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -81,6 +90,10 @@ export function ChangesList({
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       moveSelection(-1);
+    } else if (event.key === " " || event.code === "Space") {
+      event.preventDefault();
+      if (activeIndex < 0) return;
+      toggleStage(entries[activeIndex]);
     }
   }
 
@@ -101,7 +114,7 @@ export function ChangesList({
           type="checkbox"
           checked={isStagedRow}
           disabled={disabled}
-          onChange={() => (isStagedRow ? onUnstage([entry.file.path]) : onStage([entry.file.path]))}
+          onChange={() => toggleStage(entry)}
         />
         <button
           type="button"

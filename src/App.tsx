@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch } from "lucide-react";
 import { ChangesList } from "./components/ChangesList";
@@ -15,6 +16,7 @@ import type {
   ChangeSection,
   CommitEntry,
   DiffFocus,
+  DiscoveredRepoEntry,
   FileChange,
   RepoEntry,
   RepoSnapshot,
@@ -23,11 +25,15 @@ import { isStaged, isUnstaged, parseRefs, primaryRef } from "./lib/git";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
+const MAX_DISCOVERED = 48;
 
 type ViewMode = "working" | "history";
 
 function App() {
   const [repos, setRepos] = useState<RepoEntry[]>([]);
+  const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepoEntry[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [reposLoaded, setReposLoaded] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("working");
@@ -56,9 +62,55 @@ function App() {
     return [...local, ...remote];
   }, [snapshot]);
 
+  const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
+  const discoveryStarted = useRef(false);
+
+  const startDiscovery = useCallback((paths: string[]) => {
+    void invoke("start_repo_discovery", { savedPaths: paths }).catch(() => {
+      setDiscovering(false);
+    });
+  }, []);
+
   useEffect(() => {
     void loadRepos();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const unlistenFound = listen<DiscoveredRepoEntry>("repo-discovery-found", (event) => {
+      if (!active) return;
+      const repo = event.payload;
+      setDiscoveredRepos((current) => {
+        const next = [repo, ...current.filter((item) => item.path !== repo.path)];
+        return next.slice(0, MAX_DISCOVERED);
+      });
+    });
+    const unlistenStarted = listen("repo-discovery-started", () => {
+      if (active) setDiscovering(true);
+    });
+    const unlistenFinished = listen("repo-discovery-finished", () => {
+      if (active) setDiscovering(false);
+    });
+
+    return () => {
+      active = false;
+      void unlistenFound.then((unlisten) => unlisten());
+      void unlistenStarted.then((unlisten) => unlisten());
+      void unlistenFinished.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!reposLoaded || discoveryStarted.current) return;
+    discoveryStarted.current = true;
+    startDiscovery(savedPaths);
+  }, [reposLoaded, savedPaths, startDiscovery]);
+
+  useEffect(() => {
+    setDiscoveredRepos((current) =>
+      current.filter((repo) => !savedPaths.includes(repo.path)),
+    );
+  }, [savedPaths]);
 
   useEffect(() => {
     if (!snapshot || viewMode !== "working") return;
@@ -93,6 +145,7 @@ function App() {
         await selectRepo(result[0].path);
       }
     }
+    setReposLoaded(true);
   }
 
   async function selectRepo(path: string) {
@@ -106,24 +159,45 @@ function App() {
     await refreshRepo(path);
   }
 
-  async function refreshRepo(path = selectedPath) {
-    if (!path) return;
+  async function refreshRepo(path = selectedPath): Promise<RepoSnapshot | null> {
+    if (!path) return null;
     const result = await run(() =>
       invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 }),
     );
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      return result;
     }
+    return null;
+  }
+
+  async function syncFileSelectionAfterToggle(paths: string[]) {
+    if (paths.length !== 1) return;
+    const snap = await refreshRepo();
+    if (!snap) return;
+    const updated = snap.changes.find((change) => change.path === paths[0]);
+    if (!updated) {
+      setFocus(null);
+      setDiff(emptyDiff);
+      return;
+    }
+    const section: ChangeSection = isStaged(updated) ? "staged" : "unstaged";
+    await inspectFile(updated, section);
   }
 
   async function addRepo(path: string) {
     const result = await run(() => invoke<RepoEntry[]>("add_repo", { path }));
     if (result) {
       setRepos(result);
+      setDiscoveredRepos((current) => current.filter((repo) => repo.path !== path));
       const repo = result.find((item) => item.path === path) ?? result[result.length - 1];
       if (repo) await selectRepo(repo.path);
     }
+  }
+
+  async function saveDiscoveredRepo(path: string) {
+    await addRepo(path);
   }
 
   async function chooseRepoFolder() {
@@ -182,14 +256,14 @@ function App() {
     const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: true }),
     );
-    if (result) await refreshRepo();
+    if (result) await syncFileSelectionAfterToggle(files);
   }
 
   async function unstageFiles(files: string[]) {
     const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: false }),
     );
-    if (result) await refreshRepo();
+    if (result) await syncFileSelectionAfterToggle(files);
   }
 
   async function commit() {
@@ -296,8 +370,11 @@ function App() {
     <main className="app-shell">
       <RepoSidebar
         repos={repos}
+        discoveredRepos={discoveredRepos}
+        discovering={discovering}
         selectedPath={selectedPath}
         onSelect={(path) => void selectRepo(path)}
+        onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
       />

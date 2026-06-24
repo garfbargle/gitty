@@ -4,6 +4,10 @@ export type RepoEntry = {
   path: string;
 };
 
+export type DiscoveredRepoEntry = RepoEntry & {
+  discoveredAt: number;
+};
+
 export type CommitEntry = {
   hash: string;
   shortHash: string;

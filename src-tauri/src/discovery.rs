@@ -1,0 +1,220 @@
+use crate::RepoEntry;
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::{SystemTime, UNIX_EPOCH},
+};
+use tauri::{AppHandle, Emitter, Manager};
+
+const MAX_DEPTH: usize = 8;
+const MAX_DISCOVERED: usize = 48;
+
+const SKIP_DIR_NAMES: &[&str] = &[
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    ".next",
+    "vendor",
+    "Pods",
+    "DerivedData",
+    "Library",
+    "Applications",
+    ".Trash",
+    "Caches",
+    "Cache",
+    "go",
+    ".cargo",
+    ".npm",
+    ".pnpm",
+    ".yarn",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".gradle",
+    ".idea",
+    ".vscode",
+    "tmp",
+    "temp",
+];
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredRepoEntry {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub discovered_at: u64,
+}
+
+pub struct RepoDiscovery {
+    cancel: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl Default for RepoDiscovery {
+    fn default() -> Self {
+        Self {
+            cancel: Mutex::new(None),
+        }
+    }
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn should_skip_dir(name: &str) -> bool {
+    SKIP_DIR_NAMES
+        .iter()
+        .any(|skip| name.eq_ignore_ascii_case(skip))
+}
+
+fn quick_repo_entry(path: &Path) -> Option<RepoEntry> {
+    if !path.join(".git").exists() {
+        return None;
+    }
+
+    let canonical = fs::canonicalize(path).ok()?;
+    let path_string = canonical.to_string_lossy().to_string();
+    let name = canonical
+        .file_name()
+        .and_then(|part| part.to_str())
+        .unwrap_or("Repository")
+        .to_string();
+
+    Some(RepoEntry {
+        id: path_string.clone(),
+        name,
+        path: path_string,
+    })
+}
+
+fn discovery_roots(home: &Path, saved_paths: &[String]) -> Vec<PathBuf> {
+    let mut roots = vec![
+        home.join("Developer"),
+        home.join("Projects"),
+        home.join("Code"),
+        home.join("Sites"),
+        home.join("Work"),
+        home.join("Documents"),
+        home.to_path_buf(),
+    ];
+
+    for saved in saved_paths {
+        let path = PathBuf::from(saved);
+        if let Some(parent) = path.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+
+    roots.sort();
+    roots.dedup();
+    roots.retain(|root| root.is_dir());
+    roots
+}
+
+fn scan_roots(
+    app: &AppHandle,
+    roots: Vec<PathBuf>,
+    saved: HashSet<String>,
+    cancel: Arc<AtomicBool>,
+) {
+    let mut seen = HashSet::new();
+    let mut found = 0usize;
+
+    let _ = app.emit("repo-discovery-started", ());
+
+    for root in roots {
+        if cancel.load(Ordering::Relaxed) || found >= MAX_DISCOVERED {
+            break;
+        }
+
+        let mut stack = vec![(root, 0usize)];
+
+        while let Some((dir, depth)) = stack.pop() {
+            if cancel.load(Ordering::Relaxed) || found >= MAX_DISCOVERED {
+                break;
+            }
+
+            if dir.join(".git").exists() {
+                if let Some(repo) = quick_repo_entry(&dir) {
+                    if !saved.contains(&repo.path) && seen.insert(repo.path.clone()) {
+                        found += 1;
+                        let _ = app.emit(
+                            "repo-discovery-found",
+                            DiscoveredRepoEntry {
+                                id: repo.id,
+                                name: repo.name,
+                                path: repo.path,
+                                discovered_at: now_millis(),
+                            },
+                        );
+                    }
+                }
+                continue;
+            }
+
+            if depth >= MAX_DEPTH {
+                continue;
+            }
+
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            for entry in entries.flatten() {
+                let file_type = match entry.file_type() {
+                    Ok(file_type) => file_type,
+                    Err(_) => continue,
+                };
+
+                if !file_type.is_dir() || file_type.is_symlink() {
+                    continue;
+                }
+
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('.') || should_skip_dir(&name) {
+                    continue;
+                }
+
+                stack.push((entry.path(), depth + 1));
+            }
+        }
+    }
+
+    let _ = app.emit("repo-discovery-finished", found);
+}
+
+#[tauri::command]
+pub fn start_repo_discovery(app: AppHandle, saved_paths: Vec<String>) -> Result<(), String> {
+    let state = app.state::<RepoDiscovery>();
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    if let Ok(mut current) = state.cancel.lock() {
+        if let Some(previous) = current.take() {
+            previous.store(true, Ordering::Relaxed);
+        }
+        *current = Some(cancel.clone());
+    }
+
+    let home = dirs::home_dir().ok_or_else(|| "Could not locate home directory.".to_string())?;
+    let saved: HashSet<String> = saved_paths.into_iter().collect();
+    let roots = discovery_roots(&home, &saved.iter().cloned().collect::<Vec<_>>());
+
+    thread::spawn(move || {
+        scan_roots(&app, roots, saved, cancel);
+    });
+
+    Ok(())
+}

@@ -219,6 +219,124 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.repo-discovered-section {
+  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.repo-discovered-label {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 10px;
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+.discovering-dot {
+  animation: discover-pulse 1.4s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 999px;
+  height: 5px;
+  margin-left: auto;
+  width: 5px;
+}
+
+.discovering-pulse {
+  animation: discover-spin 2.4s linear infinite;
+  color: var(--accent);
+}
+
+@keyframes discover-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes discover-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.repo-item.discovered {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
+  display: flex;
+  gap: 4px;
+  opacity: 0.82;
+  padding: 4px 4px 4px 0;
+}
+
+.repo-item.discovered:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  opacity: 1;
+}
+
+.repo-item.discovered.active {
+  background: color-mix(in srgb, var(--bg-active) 88%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  opacity: 1;
+}
+
+.repo-item-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  min-width: 0;
+  padding: 5px 6px 5px 10px;
+  text-align: left;
+}
+
+.repo-save-btn {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-sidebar) 70%, var(--accent) 8%);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  display: flex;
+  flex-shrink: 0;
+  height: 28px;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
+  width: 28px;
+}
+
+.repo-item.discovered:hover .repo-save-btn,
+.repo-item.discovered:focus-within .repo-save-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.repo-save-btn:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-sidebar));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
 .sidebar-footer {
   align-items: center;
   border-top: 1px solid var(--border);

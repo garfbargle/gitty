@@ -1,3 +1,6 @@
+mod discovery;
+
+use discovery::{start_repo_discovery, RepoDiscovery};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -8,7 +11,7 @@ use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RepoEntry {
+pub struct RepoEntry {
     id: String,
     name: String,
     path: String,
@@ -680,6 +683,7 @@ fn set_remote(path: String, name: String, url: String) -> Result<ActionResult, S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(RepoDiscovery::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -687,6 +691,7 @@ pub fn run() {
             list_repos,
             add_repo,
             remove_repo,
+            start_repo_discovery,
             repo_snapshot,
             commit_diff,
             file_diff,
