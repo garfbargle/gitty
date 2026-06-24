@@ -37,6 +37,7 @@ import {
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
+import { pickerCommits } from "./lib/commitDisplay";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -198,6 +199,13 @@ function App() {
   const summaryHiddenUntilNewRef = useRef(false);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits, snapshot.aheadCommits ?? []) : []),
+    [snapshot?.commits, snapshot?.aheadCommits],
+  );
+  const historyCommits = useMemo(
+    () =>
+      snapshot
+        ? pickerCommits(snapshot.commits, snapshot.aheadCommits ?? [])
+        : [],
     [snapshot?.commits, snapshot?.aheadCommits],
   );
 
@@ -1396,7 +1404,12 @@ function App() {
                   onSplitChange={setHistorySplit}
                   primary={
                     <HistoryTable
-                      commits={snapshot.commits}
+                      commits={historyCommits}
+                      aheadHashes={
+                        snapshot.aheadCommits?.length
+                          ? new Set(snapshot.aheadCommits.map((commit) => commit.hash))
+                          : undefined
+                      }
                       selectedHash={selectedCommit?.hash}
                       search=""
                       onSelect={(commit) => void inspectCommitHistory(commit)}

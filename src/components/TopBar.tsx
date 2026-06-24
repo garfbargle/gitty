@@ -102,7 +102,7 @@ export function TopBar({
       </div>
 
       <div className="top-bar-right">
-        {viewMode === "working" && aheadCommits.length > 0 && aheadBranch && onResumeBranch ? (
+        {(aheadCommits.length > 0 && aheadBranch && onResumeBranch && branch.includes("detached")) ? (
           <button
             type="button"
             className="resume-branch-btn"

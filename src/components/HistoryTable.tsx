@@ -10,6 +10,7 @@ import { buildGraphRows, laneColor } from "../lib/graph";
 
 type HistoryTableProps = {
   commits: CommitEntry[];
+  aheadHashes?: Set<string>;
   selectedHash?: string;
   search: string;
   onSelect: (commit: CommitEntry) => void;
@@ -18,6 +19,7 @@ type HistoryTableProps = {
 
 export function HistoryTable({
   commits,
+  aheadHashes,
   selectedHash,
   search,
   onSelect,
@@ -55,10 +57,11 @@ export function HistoryTable({
             const mainRef = primaryRef(row.commit.refs);
             const active = row.commit.hash === selectedHash;
             const refColor = laneColor(row.lane);
+            const isAhead = aheadHashes?.has(row.commit.hash) ?? false;
 
             return (
               <button
-                className={`history-row ${active ? "active" : ""}`}
+                className={`history-row ${active ? "active" : ""} ${isAhead ? "ahead" : ""}`}
                 key={row.commit.hash}
                 type="button"
                 onClick={() => onSelect(row.commit)}
@@ -115,6 +118,7 @@ export function HistoryTable({
 
                 <div className="col-message" title={row.commit.subject}>
                   {row.commit.subject}
+                  {isAhead ? <span className="option-ahead-badge">ahead</span> : null}
                 </div>
                 <div className="col-hash">{row.commit.shortHash}</div>
                 <div className="col-date">{formatCommitDate(row.commit.date)}</div>

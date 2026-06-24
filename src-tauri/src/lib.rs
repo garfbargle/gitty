@@ -184,6 +184,10 @@ fn current_branch(repo_path: &Path) -> String {
         })
 }
 
+fn is_detached_branch(branch: &str) -> bool {
+    branch.contains("detached") || branch == "no commits"
+}
+
 fn upstream(repo_path: &Path) -> Option<String> {
     git(
         repo_path,
@@ -238,8 +242,7 @@ fn ahead_behind(repo_path: &Path, branch: &str, upstream: &Option<String>) -> (u
         return parse_ahead_behind(&output);
     }
 
-    let is_detached = branch.contains("detached") || branch == "no commits";
-    if !is_detached {
+    if !is_detached_branch(branch) {
         if let Some(remote) = default_remote_name(repo_path) {
             let remote_ref = format!("{remote}/{branch}");
             if git(repo_path, &["rev-parse", "--verify", &remote_ref])
@@ -442,7 +445,9 @@ fn ahead_commits(
     let mut resume_branch: Option<String> = None;
     let mut best_count = 0usize;
 
-    let relevant_branches: Vec<String> = if current_branch.is_empty() {
+    let relevant_branches: Vec<String> = if current_branch.is_empty()
+        || is_detached_branch(current_branch)
+    {
         branches_containing(repo_path, &head)
     } else {
         vec![current_branch.to_string()]
@@ -478,7 +483,7 @@ fn ahead_commits(
         None
     } else {
         resume_branch.or_else(|| {
-            if current_branch.is_empty() {
+            if current_branch.is_empty() || is_detached_branch(current_branch) {
                 None
             } else {
                 Some(current_branch.to_string())
@@ -617,8 +622,9 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
     });
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
+    let is_detached = is_detached_branch(&branch);
     let (ahead_commits, ahead_branch) =
-        ahead_commits(&repo_path, &commits, log_limit, &branch, false);
+        ahead_commits(&repo_path, &commits, log_limit, &branch, is_detached);
 
     Ok(RepoSnapshot {
         repo,
@@ -1111,8 +1117,7 @@ fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String>
     }
 
     if upstream(repo_path).is_none() {
-        let is_detached = branch.contains("detached") || branch == "no commits";
-        if !is_detached {
+        if !is_detached_branch(&branch) {
             if let Some(remote) = default_remote_name(repo_path) {
                 args.push("-u".to_string());
                 args.push(remote);
