@@ -137,6 +137,16 @@ button:focus-visible {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.main-area.repo-switching::after {
+  background: color-mix(in srgb, var(--bg-base) 28%, transparent);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
 }
 
 /* ── Sidebar ── */
@@ -2997,23 +3007,6 @@ button:focus-visible {
   justify-content: center;
   padding: 48px;
   text-align: center;
-}
-
-.repo-loading-state {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 12px;
-  justify-content: center;
-  padding: 48px;
-  text-align: center;
-}
-
-.repo-loading-state p {
-  font-size: 13px;
-  margin: 0;
 }
 
 .empty-state h2 {

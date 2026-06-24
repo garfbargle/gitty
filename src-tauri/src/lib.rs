@@ -429,6 +429,7 @@ fn ahead_commits(
     head_commits: &[CommitEntry],
     limit: u32,
     current_branch: &str,
+    include_reflog: bool,
 ) -> (Vec<CommitEntry>, Option<String>) {
     let head = match git(repo_path, &["rev-parse", "HEAD"]) {
         Ok(hash) if !hash.is_empty() => hash,
@@ -457,7 +458,7 @@ fn ahead_commits(
         append_unique_commits(&mut collected, &mut seen, branch_commits);
     }
 
-    if collected.is_empty() {
+    if collected.is_empty() && include_reflog {
         for branch in &relevant_branches {
             let reflog_commits =
                 branch_descendant_commits_from_reflog(repo_path, &head, branch, limit, &mut seen);
@@ -589,8 +590,7 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     Ok(repos)
 }
 
-#[tauri::command]
-fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
+fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let log_limit = limit.unwrap_or(120);
@@ -617,7 +617,8 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
     });
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
-    let (ahead_commits, ahead_branch) = ahead_commits(&repo_path, &commits, log_limit, &branch);
+    let (ahead_commits, ahead_branch) =
+        ahead_commits(&repo_path, &commits, log_limit, &branch, false);
 
     Ok(RepoSnapshot {
         repo,
@@ -633,6 +634,13 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
         remotes,
         branches,
     })
+}
+
+#[tauri::command]
+async fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || repo_snapshot_blocking(path, limit))
+        .await
+        .map_err(|err| format!("Snapshot task failed: {err}"))?
 }
 
 fn commit_files(repo_path: &Path, commit: &str) -> Result<Vec<FileChange>, String> {
@@ -863,8 +871,7 @@ fn file_image_preview(
     })
 }
 
-#[tauri::command]
-fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<String, String> {
+fn file_diff_blocking(path: String, file_path: String, commit: Option<String>) -> Result<String, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
 
@@ -922,6 +929,13 @@ fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<
     } else {
         Ok(combined)
     }
+}
+
+#[tauri::command]
+async fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || file_diff_blocking(path, file_path, commit))
+        .await
+        .map_err(|err| format!("Diff task failed: {err}"))?
 }
 
 #[tauri::command]
