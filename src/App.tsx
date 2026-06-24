@@ -30,11 +30,18 @@ import type {
   FileChange,
   RepoEntry,
   RepoChanges,
+  RepoEnrichment,
   RepoSnapshot,
   SelectionAnchor,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey, tagName } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
+import {
+  appendUniqueCommits,
+  COMMIT_PAGE_SIZE,
+  commitsPageHasMore,
+  INITIAL_COMMIT_LIMIT,
+} from "./lib/commits";
 import {
   buildTimelineItems,
   moveTimelineSelection,
@@ -173,6 +180,8 @@ function App() {
   const [historySplit, setHistorySplit] = useState(0.55);
   const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [loading, setLoading] = useState(false);
+  const [loadingMoreCommits, setLoadingMoreCommits] = useState(false);
+  const [commitsHasMore, setCommitsHasMore] = useState(false);
   const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -200,6 +209,7 @@ function App() {
     repos.find((repo) => repo.path === selectedPath)?.name ?? "repository";
   const discoveryStarted = useRef(false);
   const selectRepoRequestRef = useRef(0);
+  const loadingMoreCommitsRef = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
   const focusRefreshContextRef = useRef({
     selectedPath,
@@ -472,12 +482,13 @@ function App() {
       updateState: false,
       generation: requestId,
       lite: true,
-      limit: 80,
+      limit: INITIAL_COMMIT_LIMIT,
     });
     if (requestId !== selectRepoRequestRef.current) return;
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      setCommitsHasMore(commitsPageHasMore(result.commits.length, INITIAL_COMMIT_LIMIT));
       void enrichRepoSnapshot(path, requestId);
       return;
     }
@@ -490,6 +501,9 @@ function App() {
 
   function applyRepoSwitchCleanup() {
     snapshotGenerationRef.current += 1;
+    setCommitsHasMore(false);
+    setLoadingMoreCommits(false);
+    loadingMoreCommitsRef.current = false;
     setViewingCommit(null);
     setViewingCommitMessage("");
     setCommitFiles([]);
@@ -505,24 +519,71 @@ function App() {
   }
 
   async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
-    const result = await refreshRepoQuiet(path, {
-      updateState: false,
-      limit: 200,
-    });
-    if (switchGeneration !== selectRepoRequestRef.current) return;
-    if (result) {
-      setSnapshot(result);
+    try {
+      const result = await invoke<RepoEnrichment>("repo_enrich", {
+        path,
+        aheadLimit: INITIAL_COMMIT_LIMIT,
+      });
+      if (switchGeneration !== selectRepoRequestRef.current) return;
+      setSnapshot((prev) =>
+        prev && prev.repo.path === path
+          ? {
+              ...prev,
+              aheadCommits: result.aheadCommits,
+              aheadBranch: result.aheadBranch,
+              tags: result.tags,
+              unpushedTags: result.unpushedTags,
+            }
+          : prev,
+      );
+    } catch (err) {
+      if (switchGeneration !== selectRepoRequestRef.current) return;
+      setError(String(err));
+    }
+  }
+
+  async function loadMoreCommits(): Promise<void> {
+    const path = selectedPath;
+    if (!path || !commitsHasMore || loadingMoreCommitsRef.current) return;
+
+    loadingMoreCommitsRef.current = true;
+    setLoadingMoreCommits(true);
+    try {
+      const skip = snapshot?.repo.path === path ? snapshot.commits.length : 0;
+      const more = await invoke<CommitEntry[]>("repo_commits", {
+        path,
+        skip,
+        limit: COMMIT_PAGE_SIZE,
+      });
+      if (selectedPath !== path) return;
+      setCommitsHasMore(commitsPageHasMore(more.length, COMMIT_PAGE_SIZE));
+      if (more.length === 0) return;
+      setSnapshot((prev) =>
+        prev && prev.repo.path === path
+          ? { ...prev, commits: appendUniqueCommits(prev.commits, more) }
+          : prev,
+      );
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      loadingMoreCommitsRef.current = false;
+      setLoadingMoreCommits(false);
     }
   }
 
   async function refreshRepo(path = selectedPath): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const result = await run(() =>
-      invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200, lite: false }),
+      invoke<RepoSnapshot>("repo_snapshot", {
+        path,
+        limit: INITIAL_COMMIT_LIMIT,
+        lite: false,
+      }),
     );
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      setCommitsHasMore(commitsPageHasMore(result.commits.length, INITIAL_COMMIT_LIMIT));
       return result;
     }
     return null;
@@ -538,7 +599,7 @@ function App() {
     try {
       const result = await invoke<RepoSnapshot>("repo_snapshot", {
         path,
-        limit: options?.limit ?? 200,
+        limit: options?.limit ?? INITIAL_COMMIT_LIMIT,
         generation: options?.generation ?? null,
         lite: options?.lite ?? false,
       });
@@ -1664,6 +1725,9 @@ function App() {
                   primary={
                     <HistoryTable
                       commits={historyCommits}
+                      hasMore={commitsHasMore}
+                      loadingMore={loadingMoreCommits}
+                      onLoadMore={() => void loadMoreCommits()}
                       aheadHashes={
                         displaySnapshot.aheadCommits?.length
                           ? new Set(displaySnapshot.aheadCommits.map((commit) => commit.hash))

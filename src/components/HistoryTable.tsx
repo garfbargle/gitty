@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import type { CommitEntry } from "../types";
 import {
   authorInitials,
@@ -20,11 +21,16 @@ type HistoryTableProps = {
   unpushedTags?: Set<string>;
   selectedHash?: string;
   search: string;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   onSelect: (commit: CommitEntry) => void;
   onDoubleClick: (commit: CommitEntry) => void;
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
 };
+
+const SCROLL_LOAD_THRESHOLD = 120;
 
 export function HistoryTable({
   commits,
@@ -32,11 +38,34 @@ export function HistoryTable({
   unpushedTags,
   selectedHash,
   search,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   onSelect,
   onDoubleClick,
   onCreateTag,
   onDeleteTag,
 }: HistoryTableProps) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  loadingMoreRef.current = loadingMore;
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !onLoadMore || !hasMore) return;
+
+    function handleScroll() {
+      const container = bodyRef.current;
+      if (!container || loadingMoreRef.current) return;
+      const remaining = container.scrollHeight - container.clientHeight - container.scrollTop;
+      if (remaining <= SCROLL_LOAD_THRESHOLD) {
+        onLoadMore?.();
+      }
+    }
+
+    body.addEventListener("scroll", handleScroll, { passive: true });
+    return () => body.removeEventListener("scroll", handleScroll);
+  }, [hasMore, onLoadMore]);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -86,7 +115,7 @@ export function HistoryTable({
           <span className="col-author">Author</span>
         </div>
 
-        <div className="history-body">
+        <div className="history-body" ref={bodyRef}>
           {rows.map((row) => {
             const refs = parseRefs(row.commit.refs);
             const mainRef = primaryRef(row.commit.refs);
@@ -176,6 +205,20 @@ export function HistoryTable({
               </button>
             );
           })}
+
+          {hasMore ? (
+            <div className="history-load-more">
+              <button
+                type="button"
+                className="ghost-btn history-load-more-btn"
+                disabled={loadingMore}
+                onClick={() => onLoadMore?.()}
+              >
+                {loadingMore ? <Loader2 size={14} className="spin" /> : null}
+                {loadingMore ? "Loading older commits…" : "Load older commits"}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 

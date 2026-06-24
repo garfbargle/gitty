@@ -49,6 +49,13 @@ export type RepoChanges = {
   isClean: boolean;
 };
 
+export type RepoEnrichment = {
+  aheadCommits: CommitEntry[];
+  aheadBranch?: string | null;
+  tags: TagEntry[];
+  unpushedTags: string[];
+};
+
 export type RepoSnapshot = {
   repo: RepoEntry;
   branch: string;

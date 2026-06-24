@@ -474,8 +474,13 @@ fn commit_log_with_args(repo_path: &Path, extra_args: &[&str]) -> Vec<CommitEntr
 }
 
 fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
-    let limit = limit.clamp(25, 400).to_string();
-    commit_log_with_args(repo_path, &["-n", &limit])
+    commit_log_page(repo_path, 0, limit)
+}
+
+fn commit_log_page(repo_path: &Path, skip: u32, limit: u32) -> Vec<CommitEntry> {
+    let limit = limit.clamp(1, 100).to_string();
+    let skip = skip.to_string();
+    commit_log_with_args(repo_path, &["-n", &limit, "--skip", &skip])
 }
 
 fn is_ancestor(repo_path: &Path, ancestor: &str, descendant: &str) -> bool {
@@ -737,7 +742,7 @@ fn repo_snapshot_blocking(
 ) -> Result<RepoSnapshot, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
-    let log_limit = limit.unwrap_or(120);
+    let log_limit = limit.unwrap_or(40);
 
     let branch = current_branch(&repo_path);
     let upstream = upstream(&repo_path);
@@ -813,6 +818,60 @@ fn repo_snapshot_blocking(
 struct RepoChanges {
     changes: Vec<FileChange>,
     is_clean: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoEnrichment {
+    ahead_commits: Vec<CommitEntry>,
+    ahead_branch: Option<String>,
+    tags: Vec<TagEntry>,
+    unpushed_tags: Vec<String>,
+}
+
+fn repo_enrich_blocking(path: String, ahead_limit: Option<u32>) -> Result<RepoEnrichment, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let branch = current_branch(&repo_path);
+    let limit = ahead_limit.unwrap_or(40).clamp(1, 400);
+
+    let repo_path_ahead = repo_path.clone();
+    let repo_path_tags = repo_path;
+    let branch_for_ahead = branch.clone();
+    std::thread::scope(|scope| {
+        let ahead_handle = scope.spawn(move || {
+            ahead_commits(&repo_path_ahead, &[], limit, &branch_for_ahead)
+        });
+        let tags_handle = scope.spawn(move || {
+            let unpushed = unpushed_tags(&repo_path_tags);
+            let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
+            let tags = tag_list(&repo_path_tags, &unpushed_set);
+            (tags, unpushed)
+        });
+        let (ahead_commits, ahead_branch) = ahead_handle.join().unwrap();
+        let (tags, unpushed) = tags_handle.join().unwrap();
+        Ok(RepoEnrichment {
+            ahead_commits,
+            ahead_branch,
+            tags,
+            unpushed_tags: unpushed,
+        })
+    })
+}
+
+#[tauri::command]
+async fn repo_enrich(path: String, ahead_limit: Option<u32>) -> Result<RepoEnrichment, String> {
+    tauri::async_runtime::spawn_blocking(move || repo_enrich_blocking(path, ahead_limit))
+        .await
+        .map_err(|err| format!("Enrich task failed: {err}"))?
+}
+
+#[tauri::command]
+fn repo_commits(path: String, skip: Option<u32>, limit: Option<u32>) -> Result<Vec<CommitEntry>, String> {
+    let repo = normalize_repo(&path)?;
+    let skip = skip.unwrap_or(0);
+    let limit = limit.unwrap_or(50);
+    Ok(commit_log_page(Path::new(&repo.path), skip, limit))
 }
 
 #[tauri::command]
@@ -1565,6 +1624,8 @@ pub fn run() {
             remove_repo,
             start_repo_discovery,
             repo_snapshot,
+            repo_enrich,
+            repo_commits,
             repo_changes,
             commit_files_command,
             commit_diff,
