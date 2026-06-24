@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a macOS app icon: crop glyph, inset, and apply a squircle mask."""
+"""Prepare a macOS app icon: inset tile, sized glyph, squircle mask."""
 
 from __future__ import annotations
 
@@ -8,6 +8,9 @@ import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+
+# Apple HIG uses an 824pt keyline on a 1024pt canvas (~80.5%).
+DEFAULT_TILE_SCALE = 824 / 1024
 
 
 def superellipse_polygon(size: int, n: float, points: int = 720) -> list[tuple[float, float]]:
@@ -74,16 +77,16 @@ def strip_dark_background(image: Image.Image, threshold: int = 24) -> Image.Imag
     return image
 
 
-def fit_glyph(image: Image.Image, size: int, art_scale: float) -> Image.Image:
+def fit_glyph(image: Image.Image, tile_size: int, art_scale: float) -> Image.Image:
     cropped = strip_dark_background(image.crop(content_bounds(image)))
     bounds = content_bounds(cropped, threshold=1)
     glyph = cropped.crop(bounds)
 
-    art_size = max(1, round(size * art_scale))
+    art_size = max(1, round(tile_size * art_scale))
     glyph = glyph.resize((art_size, art_size), Image.LANCZOS)
 
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    offset = (size - art_size) // 2
+    canvas = Image.new("RGBA", (tile_size, tile_size), (0, 0, 0, 0))
+    offset = (tile_size - art_size) // 2
     canvas.paste(glyph, (offset, offset), glyph)
     return canvas
 
@@ -92,19 +95,25 @@ def apply_macos_squircle(
     src: Path,
     dst: Path,
     size: int = 1024,
-    art_scale: float = 0.42,
+    tile_scale: float = DEFAULT_TILE_SCALE,
+    art_scale: float = 0.62,
     squircle_n: float = 3.8,
     background: tuple[int, int, int, int] = (0, 0, 0, 255),
 ) -> None:
     source = Image.open(src).convert("RGBA")
-    glyph_layer = fit_glyph(source, size, art_scale)
 
-    canvas = Image.new("RGBA", (size, size), background)
-    canvas.alpha_composite(glyph_layer)
+    tile_size = max(1, round(size * tile_scale))
+    tile_offset = (size - tile_size) // 2
 
-    mask = squircle_mask(size, squircle_n)
+    tile = Image.new("RGBA", (tile_size, tile_size), background)
+    tile.alpha_composite(fit_glyph(source, tile_size, art_scale))
+
+    tile_mask = squircle_mask(tile_size, squircle_n)
+    masked_tile = Image.new("RGBA", (tile_size, tile_size), (0, 0, 0, 0))
+    masked_tile.paste(tile, (0, 0), tile_mask)
+
     output = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    output.paste(canvas, (0, 0), mask)
+    output.paste(masked_tile, (tile_offset, tile_offset), masked_tile)
     output.save(dst, "PNG")
 
 
@@ -120,10 +129,16 @@ def main() -> None:
     )
     parser.add_argument("--size", type=int, default=1024, help="Output size in pixels")
     parser.add_argument(
+        "--tile-scale",
+        type=float,
+        default=DEFAULT_TILE_SCALE,
+        help="Squircle tile scale on canvas (default: 824/1024)",
+    )
+    parser.add_argument(
         "--art-scale",
         type=float,
-        default=0.42,
-        help="Glyph scale relative to canvas after crop (default: 0.42)",
+        default=0.62,
+        help="Glyph scale relative to tile (default: 0.62)",
     )
     parser.add_argument(
         "--squircle-n",
@@ -136,6 +151,7 @@ def main() -> None:
         args.input,
         args.output,
         size=args.size,
+        tile_scale=args.tile_scale,
         art_scale=args.art_scale,
         squircle_n=args.squircle_n,
     )
