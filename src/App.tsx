@@ -1149,6 +1149,7 @@ function App() {
                     <ChangesList
                       ref={changesListRef}
                       changes={viewingCommit ? commitFiles : snapshot.changes}
+                      repoPath={selectedPath}
                       variant={viewingCommit ? "commit" : "working"}
                       selectedKey={selectedFileKey}
                       onFocusZone={() => setNavZone("files")}

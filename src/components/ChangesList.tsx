@@ -1,7 +1,9 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ChangeSection, FileChange, SelectionAnchor } from "../types";
 import { buildChangeEntries, moveChangeSelection, type ChangeEntry } from "../lib/changeEntries";
+import { joinRepoPath, revealInFinder } from "../lib/finder";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
 export type ChangesListHandle = {
   focus: () => void;
@@ -9,6 +11,7 @@ export type ChangesListHandle = {
 
 type ChangesListProps = {
   changes: FileChange[];
+  repoPath?: string;
   selectedKey?: string;
   variant?: "working" | "commit";
   onSelect: (file: FileChange, section: ChangeSection) => void;
@@ -28,6 +31,7 @@ function statusClass(status: string) {
 export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(function ChangesList(
   {
   changes,
+  repoPath,
   selectedKey,
   variant = "working",
   onSelect,
@@ -43,6 +47,29 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   const listRef = useRef<HTMLElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isCommitView = variant === "commit";
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  function openFileContextMenu(event: React.MouseEvent, filePath: string) {
+    if (!repoPath) return;
+    event.preventDefault();
+    const absolutePath = joinRepoPath(repoPath, filePath);
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: "Open in Finder",
+          onClick: () => void revealInFinder(absolutePath),
+        },
+      ],
+    });
+  }
 
   const unstaged = changes.filter(isUnstaged);
   const staged = changes.filter(isStaged);
@@ -123,6 +150,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
           if (node) itemRefs.current.set(entry.key, node);
           else itemRefs.current.delete(entry.key);
         }}
+        onContextMenu={(event) => openFileContextMenu(event, entry.file.path)}
       >
         {!isCommitView ? (
           <input
@@ -223,6 +251,15 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
           </section>
         </>
       )}
+
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={closeContextMenu}
+        />
+      ) : null}
     </aside>
   );
 });

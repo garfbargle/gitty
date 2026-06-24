@@ -1,6 +1,7 @@
 import { ChevronDown, GitBranch, History, Link2, RefreshCw } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
+import { RepoPicker } from "./RepoPicker";
 import { WorkingTreePicker } from "./WorkingTreePicker";
 
 type TopBarProps = {
@@ -55,20 +56,7 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-left">
-        <div className="select-wrap">
-          <select
-            className="top-select repo-select"
-            value={selectedPath}
-            onChange={(event) => onRepoChange(event.currentTarget.value)}
-          >
-            {repos.map((repo) => (
-              <option key={repo.id} value={repo.path}>
-                {repo.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} className="select-chevron" />
-        </div>
+        <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
 
         <span className="breadcrumb-sep">›</span>
 

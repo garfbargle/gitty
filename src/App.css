@@ -198,6 +198,121 @@ button:focus-visible {
   flex-shrink: 0;
 }
 
+.repo-icon-img,
+.repo-icon-fallback {
+  border-radius: 5px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.repo-icon-fallback {
+  align-items: center;
+  color: #fff;
+  display: inline-flex;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.repo-icon-fallback.loading {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.repo-picker {
+  position: relative;
+}
+
+.repo-picker-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 8px;
+  max-width: min(260px, 28vw);
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 6px;
+  transition: background 0.15s ease;
+}
+
+.repo-picker-trigger:hover,
+.repo-picker.open .repo-picker-trigger {
+  background: var(--bg-hover);
+}
+
+.repo-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-picker-menu {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  left: 0;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  position: absolute;
+  top: calc(100% + 4px);
+  width: min(320px, calc(100vw - 32px));
+  z-index: 50;
+}
+
+.repo-picker-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.repo-picker-item:hover {
+  background: var(--bg-hover);
+}
+
+.repo-picker-item.active {
+  background: var(--bg-active);
+}
+
+.repo-picker-text {
+  min-width: 0;
+}
+
+.repo-picker-item-name {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-picker-item small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-picker.open .picker-chevron {
+  transform: rotate(180deg);
+}
+
 .repo-text {
   min-width: 0;
 }
@@ -1042,6 +1157,37 @@ button:focus-visible {
 
 .push-btn-menu-item.danger:hover:not(:disabled) {
   background: var(--danger-soft);
+}
+
+.context-menu {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 2px;
+  min-width: 180px;
+  padding: 4px;
+  position: fixed;
+  z-index: 100;
+}
+
+.context-menu-item {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 32px;
+  padding: 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
 }
 
 .spin {

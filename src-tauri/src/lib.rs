@@ -1,4 +1,5 @@
 mod discovery;
+mod repo_icon;
 mod settings;
 mod summarize;
 
@@ -391,6 +392,12 @@ fn remote_list(repo_path: &Path) -> Vec<RemoteEntry> {
             Some(RemoteEntry { name, url, kind })
         })
         .collect()
+}
+
+#[tauri::command]
+fn resolve_repo_icon(path: String) -> Result<Option<String>, String> {
+    let repo = normalize_repo(&path)?;
+    Ok(repo_icon::resolve_repo_icon_data_url(Path::new(&repo.path)))
 }
 
 #[tauri::command]
@@ -1032,6 +1039,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             init_repo,
             list_repos,
+            resolve_repo_icon,
             add_repo,
             remove_repo,
             start_repo_discovery,

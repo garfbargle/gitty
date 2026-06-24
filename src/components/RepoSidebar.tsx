@@ -1,6 +1,10 @@
 import { BookmarkMinus, BookmarkPlus, FolderGit2, Plus, Radar, Settings } from "lucide-react";
+import { useCallback, useState } from "react";
 import type { DiscoveredRepoEntry, RepoEntry } from "../types";
 import { shortenPath } from "../lib/git";
+import { revealInFinder } from "../lib/finder";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { RepoIcon } from "./RepoIcon";
 
 type RepoSidebarProps = {
   repos: RepoEntry[];
@@ -25,6 +29,28 @@ export function RepoSidebar({
   onAddExisting,
   onOpenSettings,
 }: RepoSidebarProps) {
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  function openRepoContextMenu(event: React.MouseEvent, path: string) {
+    event.preventDefault();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: "Open in Finder",
+          onClick: () => void revealInFinder(path),
+        },
+      ],
+    });
+  }
+
   return (
     <aside className="repo-sidebar">
       <header className="sidebar-header">
@@ -40,13 +66,14 @@ export function RepoSidebar({
             className={`repo-item saved ${repo.path === selectedPath ? "active" : ""}`}
             key={repo.id}
             title={repo.path}
+            onContextMenu={(event) => openRepoContextMenu(event, repo.path)}
           >
             <button
               className="repo-item-main"
               type="button"
               onClick={() => onSelect(repo.path)}
             >
-              <FolderGit2 size={16} className="repo-icon" />
+              <RepoIcon path={repo.path} name={repo.name} size={18} className="repo-icon" />
               <div className="repo-text">
                 <span className="repo-name">{repo.name}</span>
                 <small>{shortenPath(repo.path)}</small>
@@ -80,6 +107,7 @@ export function RepoSidebar({
                 className={`repo-item discovered ${repo.path === selectedPath ? "active" : ""}`}
                 key={repo.id}
                 title={repo.path}
+                onContextMenu={(event) => openRepoContextMenu(event, repo.path)}
               >
                 <button
                   className="repo-item-main"
@@ -119,6 +147,15 @@ export function RepoSidebar({
           <Settings size={16} />
         </button>
       </footer>
+
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={closeContextMenu}
+        />
+      ) : null}
     </aside>
   );
 }
