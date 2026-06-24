@@ -13,7 +13,7 @@ import { SplitPane, type SplitOrientation } from "./components/SplitPane";
 import { SettingsDrawer } from "./components/MainToolbar";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
-import type { PushButtonHandle } from "./components/PushButton";
+import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
   ChangeSection,
@@ -57,6 +57,14 @@ function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
   return (event.target as HTMLElement).tagName === "BUTTON";
 }
 
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function App() {
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [discoveredRepos, setDiscoveredRepos] = useState<DiscoveredRepoEntry[]>([]);
@@ -78,6 +86,7 @@ function App() {
   const [historySplit, setHistorySplit] = useState(0.55);
   const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [loading, setLoading] = useState(false);
+  const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
@@ -107,7 +116,7 @@ function App() {
   focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
   const pushLockRef = useRef(false);
-  const pushButtonRef = useRef<PushButtonHandle>(null);
+  const pushDoneTimerRef = useRef<number | null>(null);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
     [snapshot?.commits],
@@ -458,24 +467,39 @@ function App() {
   }
 
   async function push(force: boolean): Promise<boolean> {
-    if (!selectedPath || pushLockRef.current) return false;
+    if (!selectedPath || pushLockRef.current || pushPhase !== "idle") return false;
     if (force && !window.confirm("Force push with --force-with-lease?")) return false;
 
     pushLockRef.current = true;
+    setPushPhase("pushing");
+    await waitForPaint();
+
     try {
       const result = await run(() =>
         invoke<ActionResult>("push_repo", { path: selectedPath, force }),
       );
       if (result) {
         setMessage([result.message, result.output].filter(Boolean).join("\n"));
+        setPushPhase("done");
+        if (pushDoneTimerRef.current !== null) {
+          window.clearTimeout(pushDoneTimerRef.current);
+        }
+        pushDoneTimerRef.current = window.setTimeout(() => {
+          setPushPhase("idle");
+          pushDoneTimerRef.current = null;
+        }, 1600);
         await refreshRepo();
         return true;
       }
+      setPushPhase("idle");
       return false;
     } finally {
       pushLockRef.current = false;
     }
   }
+
+  const pushRef = useRef(push);
+  pushRef.current = push;
 
   const stageAllRef = useRef(async () => {});
   stageAllRef.current = async () => {
@@ -572,18 +596,26 @@ function App() {
   const canPush = hasRemotes && (snapshot?.ahead ?? 0) > 0;
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || !canPush) return;
+    if (viewMode !== "working" || !workingTreeActive || !canPush || pushPhase !== "idle") return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
       if (event.key !== "Enter") return;
       event.preventDefault();
-      pushButtonRef.current?.triggerPush();
+      void pushRef.current(false);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, canPush]);
+  }, [viewMode, workingTreeActive, canPush, pushPhase]);
+
+  useEffect(() => {
+    return () => {
+      if (pushDoneTimerRef.current !== null) {
+        window.clearTimeout(pushDoneTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (viewMode !== "working" || !workingTreeActive || loading) return;
@@ -680,7 +712,7 @@ function App() {
               changeCount={snapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
-              pushButtonRef={pushButtonRef}
+              pushPhase={pushPhase}
               ahead={snapshot.ahead}
               behind={snapshot.behind}
               hasRemotes={hasRemotes}

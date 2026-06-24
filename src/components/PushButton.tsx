@@ -1,124 +1,43 @@
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
-import { flushSync } from "react-dom";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
 
-type PushPhase = "idle" | "pushing" | "done";
-
-export type PushButtonHandle = {
-  triggerPush: () => void;
-};
+export type PushPhase = "idle" | "pushing" | "done";
 
 type PushButtonProps = {
   ahead: number;
   behind: number;
   hasRemotes: boolean;
+  pushPhase?: PushPhase;
   loading?: boolean;
   disabled?: boolean;
   onPush: () => Promise<boolean>;
   onForcePush: () => Promise<boolean>;
 };
 
-export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function PushButton(
-  {
-    ahead,
-    behind,
-    hasRemotes,
-    loading,
-    disabled,
-    onPush,
-    onForcePush,
-  },
-  ref,
-) {
+export function PushButton({
+  ahead,
+  behind,
+  hasRemotes,
+  pushPhase = "idle",
+  loading,
+  disabled,
+  onPush,
+  onForcePush,
+}: PushButtonProps) {
   const [open, setOpen] = useState(false);
-  const [phase, setPhase] = useState<PushPhase>("idle");
   const rootRef = useRef<HTMLDivElement>(null);
-  const doneTimerRef = useRef<number | null>(null);
   const badgeAheadRef = useRef(ahead);
-  const inFlightRef = useRef(false);
-  const onPushRef = useRef(onPush);
-  const onForcePushRef = useRef(onForcePush);
 
-  onPushRef.current = onPush;
-  onForcePushRef.current = onForcePush;
-
-  const visible = hasRemotes && (ahead > 0 || phase !== "idle");
+  const visible = hasRemotes && (ahead > 0 || pushPhase !== "idle");
   const suggestsForcePush = behind > 0;
-  const isLocked = phase !== "idle" || !!disabled || !!loading;
-
-  const startPushing = useCallback(() => {
-    flushSync(() => {
-      badgeAheadRef.current = ahead;
-      if (doneTimerRef.current !== null) {
-        window.clearTimeout(doneTimerRef.current);
-        doneTimerRef.current = null;
-      }
-      setPhase("pushing");
-    });
-  }, [ahead]);
-
-  const finishPush = useCallback((success: boolean) => {
-    if (success) {
-      setPhase("done");
-      if (doneTimerRef.current !== null) {
-        window.clearTimeout(doneTimerRef.current);
-      }
-      doneTimerRef.current = window.setTimeout(() => {
-        setPhase("idle");
-        doneTimerRef.current = null;
-      }, 1600);
-    } else {
-      setPhase("idle");
-    }
-  }, []);
-
-  const runPush = useCallback(
-    async (action: () => Promise<boolean>) => {
-      if (inFlightRef.current || disabled || loading) return;
-
-      inFlightRef.current = true;
-      startPushing();
-
-      try {
-        const success = await action();
-        finishPush(success);
-      } finally {
-        inFlightRef.current = false;
-      }
-    },
-    [disabled, finishPush, loading, startPushing],
-  );
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      triggerPush: () => {
-        void runPush(onPushRef.current);
-      },
-    }),
-    [runPush],
-  );
+  const isBusy = pushPhase !== "idle";
+  const isLocked = isBusy || !!disabled || !!loading;
 
   useEffect(() => {
-    if (phase === "idle") {
+    if (pushPhase === "idle") {
       badgeAheadRef.current = ahead;
     }
-  }, [ahead, phase]);
-
-  useEffect(() => {
-    return () => {
-      if (doneTimerRef.current !== null) {
-        window.clearTimeout(doneTimerRef.current);
-      }
-    };
-  }, []);
+  }, [ahead, pushPhase]);
 
   useEffect(() => {
     if (!open) return;
@@ -142,18 +61,18 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
   }, [open]);
 
   useEffect(() => {
-    if (phase !== "idle") setOpen(false);
-  }, [phase]);
+    if (isBusy) setOpen(false);
+  }, [isBusy]);
 
   if (!visible) {
     return null;
   }
 
-  const badgeCount = phase === "idle" ? ahead : badgeAheadRef.current;
+  const badgeCount = pushPhase === "idle" ? ahead : badgeAheadRef.current;
 
   return (
     <div
-      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${phase !== "idle" ? ` ${phase}` : ""}`}
+      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${pushPhase !== "idle" ? ` ${pushPhase}` : ""}`}
       ref={rootRef}
       aria-live="polite"
     >
@@ -164,24 +83,24 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
         type="button"
         className="push-btn-main"
         title={
-          phase === "pushing"
+          pushPhase === "pushing"
             ? "Push in progress…"
-            : phase === "done"
+            : pushPhase === "done"
               ? "Push completed"
               : suggestsForcePush
                 ? `${ahead} commit${ahead === 1 ? "" : "s"} to push — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`
                 : `Push ${ahead} commit${ahead === 1 ? "" : "s"}`
         }
         disabled={isLocked}
-        aria-busy={phase === "pushing"}
-        onClick={() => void runPush(onPush)}
+        aria-busy={pushPhase === "pushing"}
+        onClick={() => void onPush()}
       >
-        {phase === "pushing" ? (
+        {pushPhase === "pushing" ? (
           <>
             <Loader2 size={15} className="spin" />
             Pushing…
           </>
-        ) : phase === "done" ? (
+        ) : pushPhase === "done" ? (
           <>
             <Check size={15} />
             Pushed
@@ -217,7 +136,7 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
                 disabled={isLocked}
                 onClick={() => {
                   setOpen(false);
-                  void runPush(onPush);
+                  void onPush();
                 }}
               >
                 <Upload size={14} />
@@ -230,7 +149,7 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
                 disabled={isLocked}
                 onClick={() => {
                   setOpen(false);
-                  void runPush(onForcePush);
+                  void onForcePush();
                 }}
               >
                 <AlertTriangle size={14} />
@@ -243,4 +162,4 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
       ) : null}
     </div>
   );
-});
+};
