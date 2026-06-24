@@ -477,9 +477,6 @@ function App() {
     }
   }
 
-  const pushRef = useRef(push);
-  pushRef.current = push;
-
   const stageAllRef = useRef(async () => {});
   stageAllRef.current = async () => {
     const snap = await refreshRepo();
@@ -575,25 +572,18 @@ function App() {
   const canPush = hasRemotes && (snapshot?.ahead ?? 0) > 0;
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || !canPush || loading || pushLockRef.current) {
-      return;
-    }
+    if (viewMode !== "working" || !workingTreeActive || !canPush) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
       if (event.key !== "Enter") return;
       event.preventDefault();
-      void (async () => {
-        if (pushLockRef.current) return;
-        pushButtonRef.current?.begin();
-        const ok = await pushRef.current(false);
-        pushButtonRef.current?.complete(ok);
-      })();
+      pushButtonRef.current?.triggerPush();
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, canPush, loading]);
+  }, [viewMode, workingTreeActive, canPush]);
 
   useEffect(() => {
     if (viewMode !== "working" || !workingTreeActive || loading) return;

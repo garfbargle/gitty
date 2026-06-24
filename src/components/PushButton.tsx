@@ -1,17 +1,18 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
 
 type PushPhase = "idle" | "pushing" | "done";
 
 export type PushButtonHandle = {
-  begin: () => void;
-  complete: (success: boolean) => void;
+  triggerPush: () => void;
 };
 
 type PushButtonProps = {
@@ -41,38 +42,68 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
   const rootRef = useRef<HTMLDivElement>(null);
   const doneTimerRef = useRef<number | null>(null);
   const badgeAheadRef = useRef(ahead);
+  const inFlightRef = useRef(false);
+  const onPushRef = useRef(onPush);
+  const onForcePushRef = useRef(onForcePush);
+
+  onPushRef.current = onPush;
+  onForcePushRef.current = onForcePush;
 
   const visible = hasRemotes && (ahead > 0 || phase !== "idle");
   const suggestsForcePush = behind > 0;
   const isLocked = phase !== "idle" || !!disabled || !!loading;
 
+  const startPushing = useCallback(() => {
+    flushSync(() => {
+      badgeAheadRef.current = ahead;
+      if (doneTimerRef.current !== null) {
+        window.clearTimeout(doneTimerRef.current);
+        doneTimerRef.current = null;
+      }
+      setPhase("pushing");
+    });
+  }, [ahead]);
+
+  const finishPush = useCallback((success: boolean) => {
+    if (success) {
+      setPhase("done");
+      if (doneTimerRef.current !== null) {
+        window.clearTimeout(doneTimerRef.current);
+      }
+      doneTimerRef.current = window.setTimeout(() => {
+        setPhase("idle");
+        doneTimerRef.current = null;
+      }, 1600);
+    } else {
+      setPhase("idle");
+    }
+  }, []);
+
+  const runPush = useCallback(
+    async (action: () => Promise<boolean>) => {
+      if (inFlightRef.current || disabled || loading) return;
+
+      inFlightRef.current = true;
+      startPushing();
+
+      try {
+        const success = await action();
+        finishPush(success);
+      } finally {
+        inFlightRef.current = false;
+      }
+    },
+    [disabled, finishPush, loading, startPushing],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
-      begin: () => {
-        badgeAheadRef.current = ahead;
-        if (doneTimerRef.current !== null) {
-          window.clearTimeout(doneTimerRef.current);
-          doneTimerRef.current = null;
-        }
-        setPhase("pushing");
-      },
-      complete: (success: boolean) => {
-        if (success) {
-          setPhase("done");
-          if (doneTimerRef.current !== null) {
-            window.clearTimeout(doneTimerRef.current);
-          }
-          doneTimerRef.current = window.setTimeout(() => {
-            setPhase("idle");
-            doneTimerRef.current = null;
-          }, 1600);
-        } else {
-          setPhase("idle");
-        }
+      triggerPush: () => {
+        void runPush(onPushRef.current);
       },
     }),
-    [ahead],
+    [runPush],
   );
 
   useEffect(() => {
@@ -116,25 +147,6 @@ export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function
 
   if (!visible) {
     return null;
-  }
-
-  async function runPush(action: () => Promise<boolean>) {
-    if (phase !== "idle" || disabled || loading) return;
-    badgeAheadRef.current = ahead;
-    setPhase("pushing");
-    const success = await action();
-    if (success) {
-      setPhase("done");
-      if (doneTimerRef.current !== null) {
-        window.clearTimeout(doneTimerRef.current);
-      }
-      doneTimerRef.current = window.setTimeout(() => {
-        setPhase("idle");
-        doneTimerRef.current = null;
-      }, 1600);
-    } else {
-      setPhase("idle");
-    }
   }
 
   const badgeCount = phase === "idle" ? ahead : badgeAheadRef.current;
