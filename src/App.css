@@ -2361,6 +2361,75 @@ button:focus-visible {
   color: var(--danger);
 }
 
+.gitty-empty-state {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 0;
+  padding: 48px 32px;
+}
+
+.gitty-empty-content {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 420px;
+  text-align: center;
+}
+
+.gitty-mascot {
+  border-radius: 20px;
+  display: block;
+  height: auto;
+  image-rendering: pixelated;
+  width: 120px;
+}
+
+.gitty-speech-bubble {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.5;
+  padding: 16px 20px;
+  position: relative;
+}
+
+.gitty-speech-bubble::before {
+  border-color: transparent transparent var(--border) transparent;
+  border-style: solid;
+  border-width: 0 10px 12px;
+  content: "";
+  left: 50%;
+  position: absolute;
+  top: -12px;
+  transform: translateX(-50%);
+}
+
+.gitty-speech-bubble::after {
+  border-color: transparent transparent var(--bg-panel) transparent;
+  border-style: solid;
+  border-width: 0 9px 11px;
+  content: "";
+  left: 50%;
+  position: absolute;
+  top: -10px;
+  transform: translateX(-50%);
+}
+
+.gitty-speech-bubble p {
+  margin: 0;
+}
+
+.gitty-speech-bubble strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .empty-state {
   align-items: center;
   color: var(--text-muted);

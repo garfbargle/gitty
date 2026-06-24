@@ -13,6 +13,7 @@ import { SplitPane, type SplitOrientation } from "./components/SplitPane";
 import { SettingsDrawer } from "./components/MainToolbar";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
+import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
@@ -958,6 +959,7 @@ function App() {
   const showCommitSection = workingTreeActive;
   const showResetSection = !!viewingCommit;
   const showSetupRemote = workingTreeActive && !hasRemotes;
+  const showGittyEmptyState = workingTreeActive && changeCount === 0;
 
   useEffect(() => {
     if (viewMode !== "working" || !workingTreeActive) return;
@@ -1133,84 +1135,88 @@ function App() {
                   onSelectWorkingTree={() => void selectWorkingTree()}
                 />
 
-                <div className="workspace-grid">
-                  <ChangesList
-                    ref={changesListRef}
-                    changes={viewingCommit ? commitFiles : snapshot.changes}
-                    variant={viewingCommit ? "commit" : "working"}
-                    selectedKey={selectedFileKey}
-                    onFocusZone={() => setNavZone("files")}
-                    onExitToTimeline={
-                      viewingCommit ? () => setNavZone("timeline") : undefined
-                    }
-                    onSelect={(file, section) => {
-                      if (section === "commit" && viewingCommit) {
-                        void inspectCommitFile(file, viewingCommit);
-                      } else {
-                        void inspectFile(file, section);
+                {showGittyEmptyState ? (
+                  <GittyEmptyState projectName={snapshot.repo.name} />
+                ) : (
+                  <div className="workspace-grid">
+                    <ChangesList
+                      ref={changesListRef}
+                      changes={viewingCommit ? commitFiles : snapshot.changes}
+                      variant={viewingCommit ? "commit" : "working"}
+                      selectedKey={selectedFileKey}
+                      onFocusZone={() => setNavZone("files")}
+                      onExitToTimeline={
+                        viewingCommit ? () => setNavZone("timeline") : undefined
                       }
-                    }}
-                    onStage={(files, anchor) => void stageFiles(files, anchor)}
-                    onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
-                    onResetAll={
-                      workingTreeActive && snapshot.changes.length > 0
-                        ? () => setResetAllOpen(true)
-                        : undefined
-                    }
-                    disabled={loading}
-                  />
+                      onSelect={(file, section) => {
+                        if (section === "commit" && viewingCommit) {
+                          void inspectCommitFile(file, viewingCommit);
+                        } else {
+                          void inspectFile(file, section);
+                        }
+                      }}
+                      onStage={(files, anchor) => void stageFiles(files, anchor)}
+                      onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
+                      onResetAll={
+                        workingTreeActive && snapshot.changes.length > 0
+                          ? () => setResetAllOpen(true)
+                          : undefined
+                      }
+                      disabled={loading}
+                    />
 
-                  <DiffViewer
-                    raw={diff}
-                    file={selectedFile}
-                    repoPath={selectedPath}
-                    section={focus?.kind === "file" ? focus.section : undefined}
-                    commit={focus?.kind === "commit" ? focus.commit.hash : viewingCommit?.hash}
-                    showWorkingTreeBadges={!viewingCommit}
-                    emptyMessage={emptyDiff}
-                    onUnstage={(path) => void unstageFiles([path])}
-                  />
+                    <DiffViewer
+                      raw={diff}
+                      file={selectedFile}
+                      repoPath={selectedPath}
+                      section={focus?.kind === "file" ? focus.section : undefined}
+                      commit={focus?.kind === "commit" ? focus.commit.hash : viewingCommit?.hash}
+                      showWorkingTreeBadges={!viewingCommit}
+                      emptyMessage={emptyDiff}
+                      onUnstage={(path) => void unstageFiles([path])}
+                    />
 
-                  <CommitPanel
-                    message={commitMessage}
-                    messageInputRef={commitMessageRef}
-                    branch={snapshot.branch}
-                    branches={snapshot.branches ?? []}
-                    amend={amend}
-                    resetMode={resetMode}
-                    selectedCommit={selectedCommit}
-                    stagedCount={stagedCount}
-                    unstagedCount={unstagedCount}
-                    changeCount={changeCount}
-                    showCommitSection={showCommitSection}
-                    showResetSection={showResetSection}
-                    showSetupRemote={showSetupRemote}
-                    nvidiaApiKey={nvidiaApiKey}
-                    nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
-                    changeSummary={changeSummary}
-                    changeSummaryLoading={changeSummaryLoading}
-                    changeSummaryError={changeSummaryError}
-                    changeSummaryVisible={changeSummaryVisible}
-                    changeSummaryScope={changeSummaryScope}
-                    showResummarizeStaged={showResummarizeStaged}
-                    showAllChangesSummary={canShowAllChangesSummary}
-                    onMessageChange={setCommitMessage}
-                    onMessageFocus={handleCommitMessageFocus}
-                    onUseSummary={useChangeSummary}
-                    onUseSummaryAndCommit={useChangeSummaryAndCommit}
-                    onDismissSummary={dismissChangeSummary}
-                    onResummarizeStaged={() => void resummarizeStagedChanges()}
-                    onShowAllChangesSummary={restoreAllChangesSummary}
-                    onNvidiaApiKeyChange={setNvidiaApiKey}
-                    onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}
-                    onAmendChange={(checked) => void handleAmendChange(checked)}
-                    onResetModeChange={setResetMode}
-                    onCommit={() => void commit()}
-                    onReset={() => void reset()}
-                    onSetupRemote={() => setSettingsOpen(true)}
-                    disabled={loading}
-                  />
-                </div>
+                    <CommitPanel
+                      message={commitMessage}
+                      messageInputRef={commitMessageRef}
+                      branch={snapshot.branch}
+                      branches={snapshot.branches ?? []}
+                      amend={amend}
+                      resetMode={resetMode}
+                      selectedCommit={selectedCommit}
+                      stagedCount={stagedCount}
+                      unstagedCount={unstagedCount}
+                      changeCount={changeCount}
+                      showCommitSection={showCommitSection}
+                      showResetSection={showResetSection}
+                      showSetupRemote={showSetupRemote}
+                      nvidiaApiKey={nvidiaApiKey}
+                      nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
+                      changeSummary={changeSummary}
+                      changeSummaryLoading={changeSummaryLoading}
+                      changeSummaryError={changeSummaryError}
+                      changeSummaryVisible={changeSummaryVisible}
+                      changeSummaryScope={changeSummaryScope}
+                      showResummarizeStaged={showResummarizeStaged}
+                      showAllChangesSummary={canShowAllChangesSummary}
+                      onMessageChange={setCommitMessage}
+                      onMessageFocus={handleCommitMessageFocus}
+                      onUseSummary={useChangeSummary}
+                      onUseSummaryAndCommit={useChangeSummaryAndCommit}
+                      onDismissSummary={dismissChangeSummary}
+                      onResummarizeStaged={() => void resummarizeStagedChanges()}
+                      onShowAllChangesSummary={restoreAllChangesSummary}
+                      onNvidiaApiKeyChange={setNvidiaApiKey}
+                      onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}
+                      onAmendChange={(checked) => void handleAmendChange(checked)}
+                      onResetModeChange={setResetMode}
+                      onCommit={() => void commit()}
+                      onReset={() => void reset()}
+                      onSetupRemote={() => setSettingsOpen(true)}
+                      disabled={loading}
+                    />
+                  </div>
+                )}
               </>
             ) : (
               <div className="history-full">
