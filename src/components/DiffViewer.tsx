@@ -125,7 +125,7 @@ export function DiffViewer({
         <div className="diff-nav">
           <button
             type="button"
-            className="icon-btn sm"
+            className="ghost-btn sm"
             disabled={hunkIndex <= 0}
             onClick={() => setHunkIndex((i) => Math.max(0, i - 1))}
           >
@@ -134,7 +134,7 @@ export function DiffViewer({
           </button>
           <button
             type="button"
-            className="icon-btn sm"
+            className="ghost-btn sm"
             disabled={hunkIndex >= hunks.length - 1}
             onClick={() => setHunkIndex((i) => Math.min(hunks.length - 1, i + 1))}
           >

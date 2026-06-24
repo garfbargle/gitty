@@ -151,6 +151,7 @@ function App() {
   const pushDoneTimerRef = useRef<number | null>(null);
   const summaryCacheRef = useRef<SummaryCache>(emptySummaryCache());
   const summarizeRequestRef = useRef(0);
+  const summaryHiddenUntilNewRef = useRef(false);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
     [snapshot?.commits],
@@ -340,6 +341,7 @@ function App() {
   }
 
   function dismissChangeSummary() {
+    summaryHiddenUntilNewRef.current = true;
     setChangeSummaryVisible(false);
   }
 
@@ -616,6 +618,7 @@ function App() {
     setChangeSummary(null);
     setChangeSummaryError(null);
     setChangeSummaryScope("all");
+    summaryHiddenUntilNewRef.current = false;
   }
 
   async function summarizeChanges(scope: SummaryScope, force = false) {
@@ -650,9 +653,14 @@ function App() {
       setChangeSummary(cachedEntry.summary.summary);
       setChangeSummaryScope(scope);
       setChangeSummaryError(null);
+      if (!summaryHiddenUntilNewRef.current) {
+        setChangeSummaryVisible(true);
+      }
       return;
     }
 
+    summaryHiddenUntilNewRef.current = false;
+    setChangeSummaryVisible(true);
     const requestId = ++summarizeRequestRef.current;
     setChangeSummaryLoading(true);
     setChangeSummaryError(null);
@@ -689,7 +697,7 @@ function App() {
   }
 
   async function resummarizeStagedChanges() {
-    setChangeSummaryVisible(true);
+    summaryHiddenUntilNewRef.current = false;
     await summarizeChanges("staged", true);
   }
 
@@ -707,17 +715,17 @@ function App() {
   function handleCommitMessageFocus() {
     if (!snapshot || snapshot.changes.length === 0) return;
     if (autoSummarizeEnabled && nvidiaApiKeyConfigured) {
-      setChangeSummaryVisible(true);
       void summarizeChangesForCommit();
       return;
     }
-    if (!nvidiaApiKeyConfigured) {
+    if (!nvidiaApiKeyConfigured && !summaryHiddenUntilNewRef.current) {
       setChangeSummaryVisible(true);
     }
   }
 
   function useChangeSummary() {
     if (!changeSummary) return;
+    summaryHiddenUntilNewRef.current = true;
     setCommitMessage(changeSummary);
     setChangeSummaryVisible(false);
     commitMessageRef.current?.focus();
@@ -862,6 +870,7 @@ function App() {
     }
 
     if (cache.staged && cache.staged.pathsKey !== stagedKey) {
+      summaryHiddenUntilNewRef.current = false;
       summaryCacheRef.current = {
         ...cache,
         staged: null,
