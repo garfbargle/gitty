@@ -597,8 +597,8 @@ function App() {
     }
   }
 
-  async function commit() {
-    const message = commitMessage.trim();
+  async function commit(messageOverride?: string) {
+    const message = (messageOverride ?? commitMessage).trim();
     if (!message) return;
     const result = await run(() =>
       invoke<ActionResult>("commit_repo", { path: selectedPath, message, amend }),
@@ -729,6 +729,13 @@ function App() {
     setCommitMessage(changeSummary);
     setChangeSummaryVisible(false);
     commitMessageRef.current?.focus();
+  }
+
+  function useChangeSummaryAndCommit() {
+    if (!changeSummary?.trim()) return;
+    summaryHiddenUntilNewRef.current = true;
+    setChangeSummaryVisible(false);
+    void commit(changeSummary);
   }
 
   async function fetchRepo() {
@@ -1117,6 +1124,7 @@ function App() {
                     onMessageChange={setCommitMessage}
                     onMessageFocus={handleCommitMessageFocus}
                     onUseSummary={useChangeSummary}
+                    onUseSummaryAndCommit={useChangeSummaryAndCommit}
                     onDismissSummary={dismissChangeSummary}
                     onResummarizeStaged={() => void resummarizeStagedChanges()}
                     onShowAllChangesSummary={restoreAllChangesSummary}

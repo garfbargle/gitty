@@ -1570,6 +1570,14 @@ button:focus-visible {
   margin: 0;
 }
 
+.change-summary-hint kbd {
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  padding: 1px 4px;
+}
+
 .change-summary-resummarize {
   background: transparent;
   border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border));

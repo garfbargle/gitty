@@ -858,17 +858,19 @@ fn test_nvidia_api_key(app: AppHandle, api_key: Option<String>) -> Result<Action
 }
 
 #[tauri::command]
-fn summarize_changes(
+async fn summarize_changes(
     app: AppHandle,
     path: String,
     scope: Option<String>,
 ) -> Result<summarize::ChangeSummary, String> {
     let repo = normalize_repo(&path)?;
-    summarize::summarize_changes(
-        &app,
-        Path::new(&repo.path),
-        summarize::parse_summarize_scope(scope.as_deref()),
-    )
+    let repo_path = repo.path;
+    let parsed_scope = summarize::parse_summarize_scope(scope.as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        summarize::summarize_changes(&app, Path::new(&repo_path), parsed_scope)
+    })
+    .await
+    .map_err(|err| format!("Summarize task failed: {err}"))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -38,6 +38,7 @@ type CommitPanelProps = {
   onMessageChange: (value: string) => void;
   onMessageFocus: () => void;
   onUseSummary: () => void;
+  onUseSummaryAndCommit: () => void;
   onDismissSummary: () => void;
   onResummarizeStaged: () => void;
   onShowAllChangesSummary: () => void;
@@ -77,6 +78,7 @@ export function CommitPanel({
   onMessageChange,
   onMessageFocus,
   onUseSummary,
+  onUseSummaryAndCommit,
   onDismissSummary,
   onResummarizeStaged,
   onShowAllChangesSummary,
@@ -91,6 +93,12 @@ export function CommitPanel({
 }: CommitPanelProps) {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const canCommit = (stagedCount > 0 || amend) && message.trim().length > 0;
+  const canUseSummaryAndCommit =
+    !message.trim() &&
+    !!changeSummary?.trim() &&
+    nvidiaApiKeyConfigured &&
+    (stagedCount > 0 || amend) &&
+    !changeSummaryLoading;
   const localBranches = branches.filter((b) => !b.isRemote);
   const resetLabel = resetMode === "soft" ? "Soft Reset" : "Hard Reset";
   const showSummaryPanel =
@@ -106,14 +114,26 @@ export function CommitPanel({
     if (!showCommitSection) return;
 
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canCommit && !disabled) {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter" || disabled) return;
+
+      if (canCommit) {
         event.preventDefault();
         onCommit();
+      } else if (canUseSummaryAndCommit) {
+        event.preventDefault();
+        onUseSummaryAndCommit();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canCommit, disabled, onCommit, showCommitSection]);
+  }, [
+    canCommit,
+    canUseSummaryAndCommit,
+    disabled,
+    onCommit,
+    onUseSummaryAndCommit,
+    showCommitSection,
+  ]);
 
   async function openNvidiaLink(event: React.MouseEvent) {
     event.preventDefault();
@@ -257,9 +277,7 @@ export function CommitPanel({
                         {changeSummary}
                       </button>
                       <p className="change-summary-hint muted">
-                        {changeSummaryScope === "staged"
-                          ? "Staged changes only · click to use as commit message"
-                          : "All changes · click to use as commit message"}
+                        <kbd>⌘↵</kbd> to commit
                       </p>
                       {showResummarizeStaged ? (
                         <button
