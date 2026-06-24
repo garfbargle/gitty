@@ -353,6 +353,34 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
+.repo-discovered-rescan {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+}
+
+.repo-discovered-rescan:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.repo-discovered-rescan:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.repo-discovered-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+  padding: 4px 10px 8px;
+}
+
 .discovering-dot {
   animation: discover-pulse 1.4s ease-in-out infinite;
   background: var(--accent);
@@ -2332,21 +2360,274 @@ button:focus-visible {
   z-index: 100;
 }
 
-.settings-drawer {
+.settings-modal {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   left: 50%;
-  max-height: 80vh;
-  max-width: 480px;
-  overflow: auto;
-  padding: 20px;
+  max-height: min(80vh, 560px);
+  max-width: 420px;
+  overflow: hidden;
   position: fixed;
   top: 50%;
   transform: translate(-50%, -50%);
   width: calc(100% - 40px);
   z-index: 101;
+}
+
+.settings-modal-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.settings-modal-header h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.settings-modal-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
+.settings-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.settings-modal-footer {
+  align-items: center;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 12px 18px;
+}
+
+.settings-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-row {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.settings-row-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-row-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-row-copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.settings-switch {
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  height: 16px;
+  width: 16px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-field-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.settings-field-head label,
+.settings-field > label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  min-height: 36px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.settings-input-compact {
+  font-size: 12px;
+  min-height: 30px;
+  width: 88px;
+}
+
+.settings-input:disabled,
+.settings-input-compact:disabled {
+  opacity: 0.65;
+}
+
+.settings-field-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-field-note.success {
+  color: var(--success);
+}
+
+.settings-field-note.error {
+  color: var(--danger);
+}
+
+.settings-inline-link {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  padding: 0;
+  text-decoration: none;
+}
+
+.settings-inline-link:hover:not(:disabled) {
+  color: var(--accent-hover);
+}
+
+.settings-inline-link:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-btn {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.settings-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.settings-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.settings-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.settings-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.settings-btn.danger-text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+  padding-inline: 0;
+}
+
+.settings-btn.danger-text:hover:not(:disabled) {
+  background: transparent;
+  color: #dc2626;
+}
+
+.settings-remote-list {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-remote-item {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.settings-remote-item-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.settings-remote-remove {
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.settings-remote-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-remote-remove:hover:not(:disabled) {
+  color: var(--danger);
 }
 
 .confirm-overlay {
@@ -2494,126 +2775,6 @@ button:focus-visible {
 .reset-all-confirm-field input:focus {
   border-color: var(--accent);
   outline: none;
-}
-
-.settings-header {
-  align-items: flex-start;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.settings-header-title {
-  align-items: flex-start;
-  display: flex;
-  gap: 10px;
-}
-
-.settings-header-title h2 {
-  margin: 0;
-}
-
-.settings-repo-name {
-  font-size: 12px;
-  margin: 2px 0 0;
-}
-
-.settings-section h3 {
-  align-items: center;
-  display: flex;
-  font-size: 13px;
-  gap: 6px;
-  margin: 0 0 10px;
-}
-
-.settings-toggle {
-  align-items: center;
-  color: var(--text);
-  display: flex;
-  font-size: 12px;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.settings-key-preview {
-  font-size: 12px;
-  margin: 0;
-}
-
-.settings-key-preview code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-test-result {
-  font-size: 12px;
-  margin: 0;
-}
-
-.settings-test-result.success {
-  color: var(--success);
-}
-
-.settings-test-result.error {
-  color: var(--danger);
-}
-
-.settings-hint {
-  font-size: 12px;
-  margin: 0 0 8px;
-}
-
-.remote-form {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.remote-chip {
-  align-items: center;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  padding: 8px 10px;
-}
-
-.remote-chip.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
-.remote-chip-main {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  display: grid;
-  flex: 1;
-  gap: 2px;
-  min-width: 0;
-  padding: 0;
-  text-align: left;
-}
-
-.remote-chip-main:disabled {
-  cursor: default;
-}
-
-.remote-chip-main span {
-  color: var(--text-muted);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .link-btn {

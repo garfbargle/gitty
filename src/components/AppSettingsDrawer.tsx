@@ -1,5 +1,6 @@
-import { Loader2, Sparkles, X } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { SettingsModal } from "./SettingsModal";
 
 const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 
@@ -38,9 +39,7 @@ export function AppSettingsDrawer({
   onTestNvidiaApiKey,
   disabled,
 }: AppSettingsDrawerProps) {
-  if (!open) {
-    return null;
-  }
+  const hasDraftKey = settingsNvidiaKey.trim().length > 0;
 
   async function openNvidiaLink(event: React.MouseEvent) {
     event.preventDefault();
@@ -48,101 +47,83 @@ export function AppSettingsDrawer({
   }
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-drawer" onClick={(event) => event.stopPropagation()}>
-        <header className="settings-header">
-          <h2>Settings</h2>
-          <button type="button" className="icon-btn" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </header>
+    <SettingsModal open={open} title="Settings" onClose={onClose}>
+      <label className="settings-row">
+        <span className="settings-row-copy">
+          <strong>Auto summarize</strong>
+          <span>Suggest commit messages from staged changes</span>
+        </span>
+        <input
+          type="checkbox"
+          className="settings-switch"
+          checked={autoSummarizeEnabled}
+          onChange={(event) => onAutoSummarizeEnabledChange(event.currentTarget.checked)}
+          disabled={disabled}
+        />
+      </label>
 
-        <section className="settings-section">
-          <h3>
-            <Sparkles size={14} />
-            Auto Summarize
-          </h3>
-          <p className="muted settings-hint">
-            Summarize staged changes when you focus the commit message. Get a free key from{" "}
-            <a
-              href={NVIDIA_MODELS_URL}
-              className="change-summary-link"
-              onClick={(event) => void openNvidiaLink(event)}
-            >
-              NVIDIA
-            </a>{" "}
-            (sign in, pick a model, accept terms, then generate a key).
-          </p>
-
-          <label className="settings-toggle">
-            <input
-              type="checkbox"
-              checked={autoSummarizeEnabled}
-              onChange={(event) => onAutoSummarizeEnabledChange(event.currentTarget.checked)}
-              disabled={disabled}
-            />
-            Enable AI auto summarize
-          </label>
-
-          {nvidiaApiKeyConfigured && nvidiaApiKeyPreview ? (
-            <p className="settings-key-preview">
-              Saved key: <code>{nvidiaApiKeyPreview}</code>
-            </p>
-          ) : null}
-
-          <form
-            className="remote-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onSaveNvidiaApiKey();
-            }}
+      <div className="settings-field">
+        <div className="settings-field-head">
+          <label htmlFor="nvidia-api-key">NVIDIA API key</label>
+          <a
+            href={NVIDIA_MODELS_URL}
+            className="settings-inline-link"
+            onClick={(event) => void openNvidiaLink(event)}
           >
-            <input
-              type="password"
-              value={settingsNvidiaKey}
-              onChange={(event) => onSettingsNvidiaKeyChange(event.currentTarget.value)}
-              placeholder={nvidiaApiKeyConfigured ? "Paste a new key to replace…" : "Paste NVIDIA API key (nvapi-…)"}
-              aria-label="NVIDIA API key"
-              autoComplete="off"
+            Get a key
+            <ExternalLink size={12} />
+          </a>
+        </div>
+        <input
+          id="nvidia-api-key"
+          type="password"
+          className="settings-input"
+          value={settingsNvidiaKey}
+          onChange={(event) => onSettingsNvidiaKeyChange(event.currentTarget.value)}
+          placeholder={nvidiaApiKeyConfigured ? "Paste a new key to replace…" : "nvapi-…"}
+          autoComplete="off"
+          disabled={disabled}
+        />
+        {nvidiaApiKeyConfigured && nvidiaApiKeyPreview && !hasDraftKey ? (
+          <p className="settings-field-note success">Saved · {nvidiaApiKeyPreview}</p>
+        ) : (
+          <p className="settings-field-note">Required for auto summarize</p>
+        )}
+        {nvidiaKeyTestMessage ? (
+          <p className={`settings-field-note ${nvidiaKeyTestError ? "error" : "success"}`}>
+            {nvidiaKeyTestMessage}
+          </p>
+        ) : null}
+        <div className="settings-inline-actions">
+          <button
+            type="button"
+            className="settings-btn primary"
+            disabled={disabled || !hasDraftKey}
+            onClick={() => onSaveNvidiaApiKey()}
+          >
+            Save key
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={disabled || nvidiaKeyTesting || (!hasDraftKey && !nvidiaApiKeyConfigured)}
+            onClick={() => onTestNvidiaApiKey()}
+          >
+            {nvidiaKeyTesting ? <Loader2 size={14} className="spin" /> : null}
+            Test
+          </button>
+          {nvidiaApiKeyConfigured ? (
+            <button
+              type="button"
+              className="settings-btn danger-text"
               disabled={disabled}
-            />
-            <div className="settings-actions">
-              <button
-                type="submit"
-                className="action-btn"
-                disabled={disabled || !settingsNvidiaKey.trim()}
-              >
-                Save key
-              </button>
-              <button
-                type="button"
-                className="action-btn"
-                disabled={disabled || nvidiaKeyTesting || (!settingsNvidiaKey.trim() && !nvidiaApiKeyConfigured)}
-                onClick={() => onTestNvidiaApiKey()}
-              >
-                {nvidiaKeyTesting ? <Loader2 size={14} className="spin" /> : null}
-                Test key
-              </button>
-              {nvidiaApiKeyConfigured ? (
-                <button
-                  type="button"
-                  className="action-btn danger"
-                  disabled={disabled}
-                  onClick={() => onDeleteNvidiaApiKey()}
-                >
-                  Delete key
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          {nvidiaKeyTestMessage ? (
-            <p className={`settings-test-result ${nvidiaKeyTestError ? "error" : "success"}`}>
-              {nvidiaKeyTestMessage}
-            </p>
+              onClick={() => onDeleteNvidiaApiKey()}
+            >
+              Remove
+            </button>
           ) : null}
-        </section>
+        </div>
       </div>
-    </div>
+    </SettingsModal>
   );
 }

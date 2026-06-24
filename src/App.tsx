@@ -19,7 +19,6 @@ import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
-  RemoteEntry,
   AppSettingsView,
   ChangeSection,
   ChangeSummary,
@@ -139,9 +138,6 @@ function App() {
   const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
-  const [remoteName, setRemoteName] = useState("origin");
-  const [remoteUrl, setRemoteUrl] = useState("");
-  const [editingRemote, setEditingRemote] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [resetAllOpen, setResetAllOpen] = useState(false);
@@ -211,31 +207,57 @@ function App() {
     void loadAppSettings();
   }, []);
 
+  const rescanDiscovery = useCallback(() => {
+    startDiscovery(savedPaths);
+  }, [savedPaths, startDiscovery]);
+
   useEffect(() => {
+    if (!reposLoaded) return;
+
     let active = true;
-    const unlistenFound = listen<DiscoveredRepoEntry>("repo-discovery-found", (event) => {
-      if (!active) return;
-      setDiscoveredRepos((current) => upsertDiscoveredRepo(current, event.payload));
-    });
-    const unlistenStarted = listen("repo-discovery-started", () => {
-      if (active) setDiscovering(true);
-    });
-    const unlistenFinished = listen("repo-discovery-finished", () => {
-      if (active) setDiscovering(false);
-    });
+    const unlisteners: Array<() => void> = [];
+
+    void (async () => {
+      const onFound = await listen<DiscoveredRepoEntry>("repo-discovery-found", (event) => {
+        if (!active) return;
+        setDiscoveredRepos((current) => upsertDiscoveredRepo(current, event.payload));
+      });
+      if (!active) {
+        onFound();
+        return;
+      }
+      unlisteners.push(onFound);
+
+      const onStarted = await listen("repo-discovery-started", () => {
+        if (!active) return;
+        setDiscovering(true);
+        setDiscoveredRepos([]);
+      });
+      if (!active) {
+        onStarted();
+        return;
+      }
+      unlisteners.push(onStarted);
+
+      const onFinished = await listen("repo-discovery-finished", () => {
+        if (active) setDiscovering(false);
+      });
+      if (!active) {
+        onFinished();
+        return;
+      }
+      unlisteners.push(onFinished);
+
+      if (!discoveryStarted.current) {
+        discoveryStarted.current = true;
+        startDiscovery(savedPaths);
+      }
+    })();
 
     return () => {
       active = false;
-      void unlistenFound.then((unlisten) => unlisten());
-      void unlistenStarted.then((unlisten) => unlisten());
-      void unlistenFinished.then((unlisten) => unlisten());
+      for (const unlisten of unlisteners) unlisten();
     };
-  }, []);
-
-  useEffect(() => {
-    if (!reposLoaded || discoveryStarted.current) return;
-    discoveryStarted.current = true;
-    startDiscovery(savedPaths);
   }, [reposLoaded, savedPaths, startDiscovery]);
 
   useEffect(() => {
@@ -286,21 +308,8 @@ function App() {
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
   }
 
-  function resetRemoteForm() {
-    setRemoteName("origin");
-    setRemoteUrl("");
-    setEditingRemote(null);
-  }
-
   function openRepoSettings() {
-    resetRemoteForm();
     setRepoSettingsOpen(true);
-  }
-
-  function editRemote(remote: RemoteEntry) {
-    setRemoteName(remote.name);
-    setRemoteUrl(remote.url);
-    setEditingRemote(remote.name);
   }
 
   useEffect(() => {
@@ -425,7 +434,6 @@ function App() {
     setViewMode("working");
     setNavZone("files");
     setRepoSettingsOpen(false);
-    resetRemoteForm();
     await refreshRepo(path);
   }
 
@@ -897,29 +905,28 @@ function App() {
     await refreshRepo();
   }
 
-  async function saveRemote() {
+  async function saveRemote(name: string, url: string): Promise<boolean> {
     const result = await run(() =>
-      invoke<ActionResult>("set_remote", { path: selectedPath, name: remoteName, url: remoteUrl }),
+      invoke<ActionResult>("set_remote", { path: selectedPath, name, url }),
     );
     if (result) {
       setMessage(result.message);
-      resetRemoteForm();
       await refreshRepo();
+      return true;
     }
+    return false;
   }
 
-  async function removeRemote(name: string) {
-    if (!window.confirm(`Remove remote "${name}"?`)) return;
+  async function removeRemote(name: string): Promise<boolean> {
     const result = await run(() =>
       invoke<ActionResult>("remove_remote", { path: selectedPath, name }),
     );
     if (result) {
       setMessage(result.message);
-      if (name === editingRemote) {
-        resetRemoteForm();
-      }
       await refreshRepo();
+      return true;
     }
+    return false;
   }
 
   async function removeRepo(path: string) {
@@ -1123,6 +1130,7 @@ function App() {
             openRepoSettings();
           }
         }}
+        onRescanDiscovery={rescanDiscovery}
       />
 
       <section className="main-area">
@@ -1321,19 +1329,9 @@ function App() {
             open={repoSettingsOpen}
             repoName={snapshot.repo.name}
             remotes={snapshot.remotes}
-            remoteName={remoteName}
-            remoteUrl={remoteUrl}
-            editingRemote={editingRemote}
-            onClose={() => {
-              setRepoSettingsOpen(false);
-              resetRemoteForm();
-            }}
-            onRemoteNameChange={setRemoteName}
-            onRemoteUrlChange={setRemoteUrl}
-            onEditRemote={editRemote}
-            onClearRemoteEdit={resetRemoteForm}
-            onSaveRemote={() => void saveRemote()}
-            onRemoveRemote={(name) => void removeRemote(name)}
+            onClose={() => setRepoSettingsOpen(false)}
+            onSaveRemote={saveRemote}
+            onRemoveRemote={removeRemote}
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             disabled={loading}

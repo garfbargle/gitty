@@ -1,4 +1,4 @@
-import { BookmarkMinus, BookmarkPlus, FolderGit2, Plus, Radar, Settings } from "lucide-react";
+import { BookmarkMinus, BookmarkPlus, FolderGit2, Plus, Radar, RefreshCw, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import type { DiscoveredRepoEntry, RepoEntry } from "../types";
 import { shortenPath } from "../lib/git";
@@ -17,6 +17,7 @@ type RepoSidebarProps = {
   onAddExisting: () => void;
   onOpenSettings: () => void;
   onOpenRepoSettings: (path: string) => void;
+  onRescanDiscovery: () => void;
 };
 
 export function RepoSidebar({
@@ -30,6 +31,7 @@ export function RepoSidebar({
   onAddExisting,
   onOpenSettings,
   onOpenRepoSettings,
+  onRescanDiscovery,
 }: RepoSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -103,48 +105,65 @@ export function RepoSidebar({
           </div>
         ))}
 
-        {discoveredRepos.length > 0 || discovering ? (
-          <div className="repo-discovered-section">
-            <div className="repo-discovered-label">
-              <Radar size={12} className={discovering ? "discovering-pulse" : ""} />
-              <span>Discovered</span>
-              {discovering ? <span className="discovering-dot" aria-hidden="true" /> : null}
-            </div>
-
-            {discoveredRepos.map((repo) => (
-              <div
-                className={`repo-item discovered ${repo.path === selectedPath ? "active" : ""}`}
-                key={repo.id}
-                title={repo.path}
-                onContextMenu={(event) => openRepoContextMenu(event, repo.path, false)}
-              >
-                <button
-                  className="repo-item-main"
-                  type="button"
-                  onClick={() => onSelect(repo.path)}
-                >
-                  <FolderGit2 size={16} className="repo-icon" />
-                  <div className="repo-text">
-                    <span className="repo-name">{repo.name}</span>
-                    <small>{shortenPath(repo.path)}</small>
-                  </div>
-                </button>
-                <button
-                  className="repo-save-btn"
-                  type="button"
-                  title="Save repository"
-                  aria-label={`Save ${repo.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSaveDiscovered(repo.path);
-                  }}
-                >
-                  <BookmarkPlus size={15} />
-                </button>
-              </div>
-            ))}
+        <div className="repo-discovered-section">
+          <div className="repo-discovered-label">
+            <Radar size={12} className={discovering ? "discovering-pulse" : ""} />
+            <span>Discovered</span>
+            {discovering ? <span className="discovering-dot" aria-hidden="true" /> : null}
+            <button
+              type="button"
+              className="repo-discovered-rescan"
+              title="Scan again"
+              disabled={discovering}
+              onClick={onRescanDiscovery}
+            >
+              <RefreshCw size={12} className={discovering ? "spin" : ""} />
+            </button>
           </div>
-        ) : null}
+
+          {discovering && discoveredRepos.length === 0 ? (
+            <p className="repo-discovered-empty">Scanning nearby folders…</p>
+          ) : null}
+
+          {discoveredRepos.map((repo) => (
+            <div
+              className={`repo-item discovered ${repo.path === selectedPath ? "active" : ""}`}
+              key={repo.id}
+              title={repo.path}
+              onContextMenu={(event) => openRepoContextMenu(event, repo.path, false)}
+            >
+              <button
+                className="repo-item-main"
+                type="button"
+                onClick={() => onSelect(repo.path)}
+              >
+                <FolderGit2 size={16} className="repo-icon" />
+                <div className="repo-text">
+                  <span className="repo-name">{repo.name}</span>
+                  <small>{shortenPath(repo.path)}</small>
+                </div>
+              </button>
+              <button
+                className="repo-save-btn"
+                type="button"
+                title="Save repository"
+                aria-label={`Save ${repo.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSaveDiscovered(repo.path);
+                }}
+              >
+                <BookmarkPlus size={15} />
+              </button>
+            </div>
+          ))}
+
+          {!discovering && discoveredRepos.length === 0 ? (
+            <p className="repo-discovered-empty">
+              No other git repos found in ~/Developer, ~/Projects, and similar folders.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <footer className="sidebar-footer">
