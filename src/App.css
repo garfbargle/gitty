@@ -837,7 +837,32 @@ button:focus-visible {
 .push-btn-group.pushing .push-btn-chevron {
   animation: push-active-pulse 1.2s ease-in-out infinite;
   cursor: wait;
+  filter: none;
   opacity: 1;
+  position: relative;
+}
+
+.push-btn-group.pushing .push-btn-main {
+  background-image: linear-gradient(
+    110deg,
+    var(--success) 0%,
+    color-mix(in srgb, var(--success) 72%, #fff) 45%,
+    var(--success) 55%,
+    color-mix(in srgb, var(--success) 72%, #fff) 100%
+  );
+  background-size: 200% 100%;
+  animation: push-active-pulse 1.2s ease-in-out infinite, push-shimmer 1.4s linear infinite;
+  min-width: 112px;
+}
+
+.push-btn-group.pushing.diverged .push-btn-main {
+  background-image: linear-gradient(
+    110deg,
+    var(--warning) 0%,
+    color-mix(in srgb, var(--warning) 72%, #fff) 45%,
+    var(--warning) 55%,
+    color-mix(in srgb, var(--warning) 72%, #fff) 100%
+  );
 }
 
 .push-btn-group.pushing .push-btn-badge {
@@ -847,11 +872,14 @@ button:focus-visible {
 .push-btn-group.done .push-btn-main,
 .push-btn-group.done .push-btn-chevron {
   animation: push-done-pop 0.35s ease-out;
+  cursor: default;
+  filter: none;
   opacity: 1;
 }
 
 .push-btn-group.done .push-btn-main {
   background: color-mix(in srgb, var(--success) 88%, #fff);
+  min-width: 112px;
 }
 
 .push-btn-group.done.diverged .push-btn-main,
@@ -859,6 +887,16 @@ button:focus-visible {
   background: color-mix(in srgb, var(--success) 88%, #fff);
   border-color: color-mix(in srgb, var(--success) 70%, #000);
   color: #052e1a;
+}
+
+@keyframes push-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
 }
 
 @keyframes push-active-pulse {

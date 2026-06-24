@@ -1,35 +1,93 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
 
-type PushState = "idle" | "pushing" | "done";
+type PushPhase = "idle" | "pushing" | "done";
+
+export type PushButtonHandle = {
+  begin: () => void;
+  complete: (success: boolean) => void;
+};
 
 type PushButtonProps = {
   ahead: number;
   behind: number;
   hasRemotes: boolean;
   loading?: boolean;
-  pushState?: PushState;
   disabled?: boolean;
-  onPush: () => void;
-  onForcePush: () => void;
+  onPush: () => Promise<boolean>;
+  onForcePush: () => Promise<boolean>;
 };
 
-export function PushButton({
-  ahead,
-  behind,
-  hasRemotes,
-  loading,
-  pushState = "idle",
-  disabled,
-  onPush,
-  onForcePush,
-}: PushButtonProps) {
+export const PushButton = forwardRef<PushButtonHandle, PushButtonProps>(function PushButton(
+  {
+    ahead,
+    behind,
+    hasRemotes,
+    loading,
+    disabled,
+    onPush,
+    onForcePush,
+  },
+  ref,
+) {
   const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<PushPhase>("idle");
   const rootRef = useRef<HTMLDivElement>(null);
-  const canPush = hasRemotes && ahead > 0;
+  const doneTimerRef = useRef<number | null>(null);
+  const badgeAheadRef = useRef(ahead);
+
+  const visible = hasRemotes && (ahead > 0 || phase !== "idle");
   const suggestsForcePush = behind > 0;
-  const isBusy = pushState !== "idle";
-  const isDisabled = disabled || loading || isBusy;
+  const isLocked = phase !== "idle" || !!disabled || !!loading;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      begin: () => {
+        badgeAheadRef.current = ahead;
+        if (doneTimerRef.current !== null) {
+          window.clearTimeout(doneTimerRef.current);
+          doneTimerRef.current = null;
+        }
+        setPhase("pushing");
+      },
+      complete: (success: boolean) => {
+        if (success) {
+          setPhase("done");
+          if (doneTimerRef.current !== null) {
+            window.clearTimeout(doneTimerRef.current);
+          }
+          doneTimerRef.current = window.setTimeout(() => {
+            setPhase("idle");
+            doneTimerRef.current = null;
+          }, 1600);
+        } else {
+          setPhase("idle");
+        }
+      },
+    }),
+    [ahead],
+  );
+
+  useEffect(() => {
+    if (phase === "idle") {
+      badgeAheadRef.current = ahead;
+    }
+  }, [ahead, phase]);
+
+  useEffect(() => {
+    return () => {
+      if (doneTimerRef.current !== null) {
+        window.clearTimeout(doneTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -53,48 +111,65 @@ export function PushButton({
   }, [open]);
 
   useEffect(() => {
-    if (isBusy) setOpen(false);
-  }, [isBusy]);
+    if (phase !== "idle") setOpen(false);
+  }, [phase]);
 
-  if (!canPush) {
+  if (!visible) {
     return null;
   }
 
-  const statusLabel =
-    pushState === "pushing" ? "Pushing commits to remote…" : pushState === "done" ? "Push complete" : undefined;
+  async function runPush(action: () => Promise<boolean>) {
+    if (phase !== "idle" || disabled || loading) return;
+    badgeAheadRef.current = ahead;
+    setPhase("pushing");
+    const success = await action();
+    if (success) {
+      setPhase("done");
+      if (doneTimerRef.current !== null) {
+        window.clearTimeout(doneTimerRef.current);
+      }
+      doneTimerRef.current = window.setTimeout(() => {
+        setPhase("idle");
+        doneTimerRef.current = null;
+      }, 1600);
+    } else {
+      setPhase("idle");
+    }
+  }
+
+  const badgeCount = phase === "idle" ? ahead : badgeAheadRef.current;
 
   return (
     <div
-      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${pushState !== "idle" ? ` ${pushState}` : ""}`}
+      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${phase !== "idle" ? ` ${phase}` : ""}`}
       ref={rootRef}
       aria-live="polite"
     >
       <span className="push-btn-badge" aria-hidden="true">
-        {ahead}
+        {badgeCount}
       </span>
       <button
         type="button"
         className="push-btn-main"
         title={
-          pushState === "pushing"
+          phase === "pushing"
             ? "Push in progress…"
-            : pushState === "done"
+            : phase === "done"
               ? "Push completed"
               : suggestsForcePush
                 ? `${ahead} commit${ahead === 1 ? "" : "s"} to push — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`
                 : `Push ${ahead} commit${ahead === 1 ? "" : "s"}`
         }
-        disabled={isDisabled}
-        aria-busy={pushState === "pushing"}
-        aria-label={statusLabel}
-        onClick={onPush}
+        disabled={isLocked}
+        aria-busy={phase === "pushing"}
+        onClick={() => void runPush(onPush)}
       >
-        {pushState === "pushing" ? (
+        {phase === "pushing" ? (
           <>
             <Loader2 size={15} className="spin" />
             Pushing…
           </>
-        ) : pushState === "done" ? (
+        ) : phase === "done" ? (
           <>
             <Check size={15} />
             Pushed
@@ -114,7 +189,7 @@ export function PushButton({
             type="button"
             className="push-btn-chevron"
             title="Push options"
-            disabled={isDisabled}
+            disabled={isLocked}
             aria-expanded={open}
             aria-haspopup="menu"
             onClick={() => setOpen((current) => !current)}
@@ -127,10 +202,10 @@ export function PushButton({
                 type="button"
                 role="menuitem"
                 className="push-btn-menu-item"
-                disabled={isDisabled}
+                disabled={isLocked}
                 onClick={() => {
                   setOpen(false);
-                  onPush();
+                  void runPush(onPush);
                 }}
               >
                 <Upload size={14} />
@@ -140,10 +215,10 @@ export function PushButton({
                 type="button"
                 role="menuitem"
                 className="push-btn-menu-item danger"
-                disabled={isDisabled}
+                disabled={isLocked}
                 onClick={() => {
                   setOpen(false);
-                  onForcePush();
+                  void runPush(onForcePush);
                 }}
               >
                 <AlertTriangle size={14} />
@@ -156,4 +231,4 @@ export function PushButton({
       ) : null}
     </div>
   );
-}
+});

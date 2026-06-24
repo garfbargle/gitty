@@ -1,6 +1,7 @@
 import { ChevronDown, GitBranch, History, Link2, RefreshCw } from "lucide-react";
+import { type Ref } from "react";
 import type { CommitEntry, RepoEntry } from "../types";
-import { PushButton } from "./PushButton";
+import { PushButton, type PushButtonHandle } from "./PushButton";
 import { WorkingTreePicker } from "./WorkingTreePicker";
 
 type TopBarProps = {
@@ -13,18 +14,18 @@ type TopBarProps = {
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
-  pushState?: "idle" | "pushing" | "done";
   ahead?: number;
   behind?: number;
   hasRemotes?: boolean;
+  pushButtonRef?: Ref<PushButtonHandle>;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
   onSelectCommit: (commit: CommitEntry) => void;
   onRefresh: () => void;
-  onPush?: () => void;
-  onForcePush?: () => void;
+  onPush?: () => Promise<boolean>;
+  onForcePush?: () => Promise<boolean>;
   onSetupRemote?: () => void;
 };
 
@@ -38,10 +39,10 @@ export function TopBar({
   viewMode,
   viewingCommit,
   loading,
-  pushState = "idle",
   ahead = 0,
   behind = 0,
   hasRemotes = false,
+  pushButtonRef,
   onRepoChange,
   onBranchChange,
   onToggleView,
@@ -125,11 +126,11 @@ export function TopBar({
         {viewMode === "working" && !viewingCommit ? (
           onPush && onForcePush ? (
             <PushButton
+              ref={pushButtonRef}
               ahead={ahead}
               behind={behind}
               hasRemotes={hasRemotes}
               loading={loading}
-              pushState={pushState}
               disabled={loading}
               onPush={onPush}
               onForcePush={onForcePush}
