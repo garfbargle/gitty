@@ -1,5 +1,5 @@
 import { ChevronDown, GitBranch, History, RefreshCw } from "lucide-react";
-import type { RepoEntry } from "../types";
+import type { CommitEntry, RepoEntry } from "../types";
 
 type TopBarProps = {
   repos: RepoEntry[];
@@ -8,10 +8,12 @@ type TopBarProps = {
   branches: string[];
   changeCount: number;
   viewMode: "working" | "history";
+  viewingCommit?: CommitEntry | null;
   loading?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onToggleView: () => void;
+  onReturnToWorkingTree: () => void;
   onRefresh: () => void;
 };
 
@@ -22,10 +24,12 @@ export function TopBar({
   branches,
   changeCount,
   viewMode,
+  viewingCommit,
   loading,
   onRepoChange,
   onBranchChange,
   onToggleView,
+  onReturnToWorkingTree,
   onRefresh,
 }: TopBarProps) {
   return (
@@ -67,16 +71,35 @@ export function TopBar({
         {viewMode === "working" ? (
           <>
             <span className="breadcrumb-sep">›</span>
-            <span className="working-badge">
-              <span className="working-dot" />
-              Working Tree
-              {changeCount > 0 ? <em>{changeCount}</em> : null}
-            </span>
+            {viewingCommit ? (
+              <span className="commit-crumb" title={viewingCommit.subject}>
+                <code>{viewingCommit.shortHash}</code>
+                <span>{viewingCommit.subject}</span>
+              </span>
+            ) : (
+              <span className="working-badge">
+                <span className="working-dot" />
+                Working Tree
+                {changeCount > 0 ? <em>{changeCount}</em> : null}
+              </span>
+            )}
           </>
         ) : null}
       </div>
 
       <div className="top-bar-right">
+        {viewMode === "working" && viewingCommit ? (
+          <button
+            type="button"
+            className="return-to-changes-btn"
+            title="Return to current changes"
+            onClick={onReturnToWorkingTree}
+          >
+            <span className="working-dot" />
+            Current Changes
+            {changeCount > 0 ? <em>{changeCount}</em> : null}
+          </button>
+        ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading} onClick={onRefresh}>
           <RefreshCw size={15} className={loading ? "spin" : ""} />
         </button>

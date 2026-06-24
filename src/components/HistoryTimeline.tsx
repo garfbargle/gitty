@@ -10,6 +10,7 @@ type HistoryTimelineProps = {
   selectedHash?: string;
   onSelect: (commit: CommitEntry) => void;
   onSelectWorkingTree: () => void;
+  onInteract?: () => void;
   workingTreeActive?: boolean;
 };
 
@@ -19,10 +20,12 @@ export function HistoryTimeline({
   selectedHash,
   onSelect,
   onSelectWorkingTree,
+  onInteract,
   workingTreeActive,
 }: HistoryTimelineProps) {
-  const visible = [...commits].reverse().slice(-8);
+  const visible = [...commits].reverse();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
   const headHash = commits[0]?.hash ?? "";
 
@@ -37,6 +40,21 @@ export function HistoryTimeline({
     const container = scrollRef.current;
     if (!container) return;
     container.scrollLeft = container.scrollWidth - container.clientWidth;
+  }, []);
+
+  const scrollNodeIntoView = useCallback((node: HTMLButtonElement | undefined) => {
+    const container = scrollRef.current;
+    if (!container || !node) return;
+    pinnedToEndRef.current = false;
+    const nodeLeft = node.offsetLeft;
+    const nodeRight = nodeLeft + node.offsetWidth;
+    const viewLeft = container.scrollLeft;
+    const viewRight = viewLeft + container.clientWidth;
+    if (nodeLeft < viewLeft) {
+      container.scrollLeft = nodeLeft - 16;
+    } else if (nodeRight > viewRight) {
+      container.scrollLeft = nodeRight - container.clientWidth + 16;
+    }
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -66,6 +84,26 @@ export function HistoryTimeline({
     return () => observer.disconnect();
   }, [scrollToEnd]);
 
+  useLayoutEffect(() => {
+    if (workingTreeActive) {
+      scrollNodeIntoView(nodeRefs.current.get("working-tree"));
+      return;
+    }
+    if (selectedHash) {
+      scrollNodeIntoView(nodeRefs.current.get(selectedHash));
+    }
+  }, [selectedHash, workingTreeActive, scrollNodeIntoView, visible.length]);
+
+  function selectCommit(commit: CommitEntry) {
+    onInteract?.();
+    onSelect(commit);
+  }
+
+  function selectWorkingTree() {
+    onInteract?.();
+    onSelectWorkingTree();
+  }
+
   return (
     <div className="history-timeline" onScroll={handleScroll} ref={scrollRef}>
       <div className="timeline-track">
@@ -77,7 +115,11 @@ export function HistoryTimeline({
               className={`timeline-node ${active ? "active" : ""}`}
               key={commit.hash}
               type="button"
-              onClick={() => onSelect(commit)}
+              ref={(node) => {
+                if (node) nodeRefs.current.set(commit.hash, node);
+                else nodeRefs.current.delete(commit.hash);
+              }}
+              onClick={() => selectCommit(commit)}
               title={`${commit.shortHash} · ${commit.subject}`}
             >
               <span className="node-dot" style={{ background: color, boxShadow: `0 0 12px ${color}55` }} />
@@ -93,7 +135,11 @@ export function HistoryTimeline({
         <button
           className={`timeline-node working-tree ${workingTreeActive ? "active" : ""}`}
           type="button"
-          onClick={onSelectWorkingTree}
+          ref={(node) => {
+            if (node) nodeRefs.current.set("working-tree", node);
+            else nodeRefs.current.delete("working-tree");
+          }}
+          onClick={selectWorkingTree}
         >
           <span className="node-dot working" />
           <span className="node-hash">Working Tree</span>

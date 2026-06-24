@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import type { ChangeSection, FileChange, SelectionAnchor } from "../types";
+import { buildChangeEntries, moveChangeSelection, type ChangeEntry } from "../lib/changeEntries";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 
-type ChangeEntry = {
-  file: FileChange;
-  section: ChangeSection;
-  key: string;
+export type ChangesListHandle = {
+  focus: () => void;
 };
 
 type ChangesListProps = {
@@ -15,6 +14,7 @@ type ChangesListProps = {
   onSelect: (file: FileChange, section: ChangeSection) => void;
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
+  onFocusZone?: () => void;
   disabled?: boolean;
 };
 
@@ -23,40 +23,19 @@ function statusClass(status: string) {
   return code === "?" ? "untracked" : code;
 }
 
-function buildWorkingEntries(changes: FileChange[]): ChangeEntry[] {
-  const unstaged = changes.filter(isUnstaged);
-  const staged = changes.filter(isStaged);
-  return [
-    ...unstaged.map((file) => ({
-      file,
-      section: "unstaged" as const,
-      key: `unstaged:${file.path}`,
-    })),
-    ...staged.map((file) => ({
-      file,
-      section: "staged" as const,
-      key: `staged:${file.path}`,
-    })),
-  ];
-}
-
-function buildCommitEntries(changes: FileChange[]): ChangeEntry[] {
-  return changes.map((file) => ({
-    file,
-    section: "commit" as const,
-    key: `commit:${file.path}`,
-  }));
-}
-
-export function ChangesList({
+export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(function ChangesList(
+  {
   changes,
   selectedKey,
   variant = "working",
   onSelect,
   onStage,
   onUnstage,
+  onFocusZone,
   disabled,
-}: ChangesListProps) {
+  },
+  ref,
+) {
   const listRef = useRef<HTMLElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isCommitView = variant === "commit";
@@ -64,9 +43,13 @@ export function ChangesList({
   const unstaged = changes.filter(isUnstaged);
   const staged = changes.filter(isStaged);
   const entries = useMemo(
-    () => (isCommitView ? buildCommitEntries(changes) : buildWorkingEntries(changes)),
+    () => buildChangeEntries(changes, isCommitView ? "commit" : "working"),
     [changes, isCommitView],
   );
+
+  useImperativeHandle(ref, () => ({
+    focus: () => listRef.current?.focus(),
+  }));
 
   const activeIndex = selectedKey ? entries.findIndex((entry) => entry.key === selectedKey) : -1;
 
@@ -77,15 +60,14 @@ export function ChangesList({
   }, [activeIndex, entries]);
 
   function selectEntry(entry: ChangeEntry) {
+    onFocusZone?.();
     onSelect(entry.file, entry.section);
     listRef.current?.focus();
   }
 
   function moveSelection(delta: number) {
-    if (entries.length === 0) return;
-    const start = activeIndex >= 0 ? activeIndex : delta > 0 ? -1 : entries.length;
-    const next = Math.max(0, Math.min(entries.length - 1, start + delta));
-    selectEntry(entries[next]);
+    const next = moveChangeSelection(entries, activeIndex, delta);
+    if (next) selectEntry(next);
   }
 
   function indexInSection(entry: ChangeEntry) {
@@ -222,4 +204,4 @@ export function ChangesList({
       )}
     </aside>
   );
-}
+});

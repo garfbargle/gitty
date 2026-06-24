@@ -491,6 +491,67 @@ button:focus-visible {
   padding: 1px 6px;
 }
 
+.commit-crumb {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  max-width: min(320px, 30vw);
+  min-width: 0;
+}
+
+.commit-crumb code {
+  background: var(--bg-hover);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.commit-crumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.return-to-changes-btn {
+  align-items: center;
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--success);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.return-to-changes-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.return-to-changes-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.return-to-changes-btn em {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 6px;
+}
+
 .spin {
   animation: spin 0.8s linear infinite;
 }

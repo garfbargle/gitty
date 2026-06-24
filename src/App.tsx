@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch } from "lucide-react";
-import { ChangesList } from "./components/ChangesList";
+import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
 import { HistoryTable } from "./components/HistoryTable";
@@ -24,12 +24,36 @@ import type {
   SelectionAnchor,
 } from "./types";
 import { isStaged, isUnstaged, parseRefs, primaryRef } from "./lib/git";
+import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
+import {
+  buildTimelineItems,
+  moveTimelineSelection,
+  timelineSelectionIndex,
+} from "./lib/timelineNavigation";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
 const MAX_DISCOVERED = 48;
 
 type ViewMode = "working" | "history";
+type NavZone = "timeline" | "files";
+
+function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement;
+  const tag = target.tagName;
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") {
+    const input = target as HTMLInputElement;
+    if (input.type !== "checkbox") return true;
+  }
+  if (target.isContentEditable) return true;
+  return false;
+}
+
+function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
+  if (shouldIgnoreKeyboardNavigation(event)) return true;
+  return (event.target as HTMLElement).tagName === "BUTTON";
+}
 
 function App() {
   const [repos, setRepos] = useState<RepoEntry[]>([]);
@@ -54,6 +78,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [navZone, setNavZone] = useState<NavZone>("files");
 
   const selectedCommit = viewingCommit ?? (focus?.kind === "commit" ? focus.commit : null);
   const selectedFile = focus?.kind === "file" ? focus.file : null;
@@ -71,6 +96,11 @@ function App() {
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const discoveryStarted = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
+  const changesListRef = useRef<ChangesListHandle>(null);
+  const timelineItems = useMemo(
+    () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
+    [snapshot?.commits],
+  );
 
   const startDiscovery = useCallback((paths: string[]) => {
     void invoke("start_repo_discovery", { savedPaths: paths }).catch(() => {
@@ -164,6 +194,7 @@ function App() {
     setCommitMessage("");
     setAmend(false);
     setViewMode("working");
+    setNavZone("files");
     await refreshRepo(path);
   }
 
@@ -265,14 +296,14 @@ function App() {
   async function selectWorkingTree() {
     setViewingCommit(null);
     setCommitFiles([]);
-    if (!snapshot) return;
-    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
+    setFocus(null);
+    setDiff(emptyDiff);
+    const snap = await refreshRepo();
+    if (!snap) return;
+    const first = snap.changes.find(isUnstaged) ?? snap.changes.find(isStaged);
     if (first) {
       const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
       await inspectFile(first, section);
-    } else {
-      setFocus(null);
-      setDiff(emptyDiff);
     }
   }
 
@@ -450,10 +481,7 @@ function App() {
       if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
         return;
       }
-      const target = event.target as HTMLElement;
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
-      if (target.isContentEditable) return;
+      if (shouldIgnoreEnterShortcut(event)) return;
       event.preventDefault();
       commitMessageRef.current?.focus();
     }
@@ -461,6 +489,61 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== "working" || !snapshot) return;
+    const currentSnapshot = snapshot;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+      if (navZone !== "timeline") return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const delta = event.key === "ArrowLeft" ? -1 : 1;
+        const currentIndex = timelineSelectionIndex(
+          timelineItems,
+          selectedCommit?.hash,
+          workingTreeActive,
+        );
+        const item = moveTimelineSelection(timelineItems, currentIndex, delta);
+        if (!item) return;
+        if (item.kind === "working-tree") void selectWorkingTree();
+        else void inspectCommit(item.commit);
+        return;
+      }
+
+      setNavZone("files");
+      const changes = viewingCommit ? commitFiles : currentSnapshot.changes;
+      const variant = viewingCommit ? "commit" : "working";
+      const entries = buildChangeEntries(changes, variant);
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const entry = moveChangeSelection(entries, -1, delta);
+      if (entry) {
+        if (variant === "commit" && viewingCommit) {
+          void inspectCommitFile(entry.file, viewingCommit);
+        } else {
+          void inspectFile(entry.file, entry.section);
+        }
+      }
+      changesListRef.current?.focus();
+    }
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [
+    viewMode,
+    snapshot,
+    navZone,
+    timelineItems,
+    selectedCommit?.hash,
+    workingTreeActive,
+    viewingCommit,
+    commitFiles,
+  ]);
 
   return (
     <main className="app-shell">
@@ -488,6 +571,7 @@ function App() {
               loading={loading}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
+              viewingCommit={viewingCommit}
               onToggleView={() => {
                 if (viewMode === "history") {
                   setFocus(null);
@@ -499,6 +583,7 @@ function App() {
                 }
                 setViewMode((mode) => (mode === "working" ? "history" : "working"));
               }}
+              onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
             />
 
@@ -510,15 +595,18 @@ function App() {
                   changeCount={snapshot.changes.length}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
+                  onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
                 />
 
                 <div className="workspace-grid">
                   <ChangesList
+                    ref={changesListRef}
                     changes={viewingCommit ? commitFiles : snapshot.changes}
                     variant={viewingCommit ? "commit" : "working"}
                     selectedKey={selectedFileKey}
+                    onFocusZone={() => setNavZone("files")}
                     onSelect={(file, section) => {
                       if (section === "commit" && viewingCommit) {
                         void inspectCommitFile(file, viewingCommit);
