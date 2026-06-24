@@ -38,9 +38,6 @@ export function HistoryTable({
 
   return (
     <div className="history-table-wrap">
-      <div className="history-hint">
-        Hint: Double-click a commit or branch label to check it out.
-      </div>
       <div className="history-table">
         <div className="history-header">
           <span className="col-graph">Graph</span>

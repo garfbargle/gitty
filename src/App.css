@@ -2378,14 +2378,6 @@ button:focus-visible {
   overflow: hidden;
 }
 
-.history-hint {
-  background: var(--accent-soft);
-  border-bottom: 1px solid var(--border);
-  color: var(--accent);
-  font-size: 12px;
-  padding: 8px 16px;
-}
-
 .history-table {
   display: flex;
   flex: 1;
