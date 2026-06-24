@@ -1,10 +1,8 @@
 import { useEffect, type RefObject } from "react";
 import {
-  AlertTriangle,
   GitCommitHorizontal,
   Link2,
   RotateCcw,
-  Send,
 } from "lucide-react";
 import type { BranchEntry, CommitEntry } from "../types";
 
@@ -20,14 +18,11 @@ type CommitPanelProps = {
   unstagedCount: number;
   showCommitSection?: boolean;
   showResetSection?: boolean;
-  showPushActions?: boolean;
   showSetupRemote?: boolean;
   onMessageChange: (value: string) => void;
   onAmendChange: (value: boolean) => void;
   onResetModeChange: (mode: "soft" | "hard") => void;
   onCommit: () => void;
-  onPush: () => void;
-  onForcePush: () => void;
   onReset: () => void;
   onSetupRemote: () => void;
   disabled?: boolean;
@@ -45,14 +40,11 @@ export function CommitPanel({
   unstagedCount,
   showCommitSection = true,
   showResetSection = false,
-  showPushActions = false,
   showSetupRemote = false,
   onMessageChange,
   onAmendChange,
   onResetModeChange,
   onCommit,
-  onPush,
-  onForcePush,
   onReset,
   onSetupRemote,
   disabled,
@@ -128,36 +120,16 @@ export function CommitPanel({
         </section>
       ) : null}
 
-      {showPushActions || showSetupRemote ? (
+      {showSetupRemote ? (
         <section className="panel-block">
           <header className="panel-title">
-            <Send size={14} />
+            <Link2 size={14} />
             <span>Remote</span>
           </header>
-          {showPushActions ? (
-            <>
-              <button type="button" className="action-row" disabled={disabled} onClick={onPush}>
-                <Send size={15} />
-                <span>Push</span>
-                <kbd>⌘⇧P</kbd>
-              </button>
-              <button
-                type="button"
-                className="action-row danger"
-                disabled={disabled}
-                onClick={onForcePush}
-              >
-                <AlertTriangle size={15} />
-                <span>Force Push</span>
-                <kbd>⌥⇧P</kbd>
-              </button>
-            </>
-          ) : (
-            <button type="button" className="action-row" disabled={disabled} onClick={onSetupRemote}>
-              <Link2 size={15} />
-              <span>Set Up Remote</span>
-            </button>
-          )}
+          <button type="button" className="action-row" disabled={disabled} onClick={onSetupRemote}>
+            <Link2 size={15} />
+            <span>Set Up Remote</span>
+          </button>
         </section>
       ) : null}
 

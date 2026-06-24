@@ -186,17 +186,17 @@ fn upstream(repo_path: &Path) -> Option<String> {
     .filter(|name| !name.is_empty())
 }
 
-fn ahead_behind(repo_path: &Path, has_upstream: bool) -> (u32, u32) {
-    if !has_upstream {
-        return (0, 0);
-    }
+fn default_remote_name(repo_path: &Path) -> Option<String> {
+    let output = git(repo_path, &["remote"]).ok()?;
+    output
+        .lines()
+        .find(|name| *name == "origin")
+        .or_else(|| output.lines().next())
+        .map(str::to_string)
+        .filter(|name| !name.is_empty())
+}
 
-    let Ok(output) = git(
-        repo_path,
-        &["rev-list", "--left-right", "--count", "HEAD...@{u}"],
-    ) else {
-        return (0, 0);
-    };
+fn parse_ahead_behind(output: &str) -> (u32, u32) {
     let mut parts = output.split_whitespace();
     let ahead = parts
         .next()
@@ -207,6 +207,54 @@ fn ahead_behind(repo_path: &Path, has_upstream: bool) -> (u32, u32) {
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
     (ahead, behind)
+}
+
+fn unpushed_without_tracking(repo_path: &Path) -> (u32, u32) {
+    let ahead = git(
+        repo_path,
+        &["rev-list", "--count", "HEAD", "--not", "--remotes"],
+    )
+    .ok()
+    .and_then(|value| value.parse().ok())
+    .unwrap_or(0);
+    (ahead, 0)
+}
+
+fn ahead_behind(repo_path: &Path, branch: &str, upstream: &Option<String>) -> (u32, u32) {
+    if upstream.is_some() {
+        let Ok(output) = git(
+            repo_path,
+            &["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+        ) else {
+            return unpushed_without_tracking(repo_path);
+        };
+        return parse_ahead_behind(&output);
+    }
+
+    let is_detached = branch.contains("detached") || branch == "no commits";
+    if !is_detached {
+        if let Some(remote) = default_remote_name(repo_path) {
+            let remote_ref = format!("{remote}/{branch}");
+            if git(repo_path, &["rev-parse", "--verify", &remote_ref])
+                .is_ok()
+            {
+                let Ok(output) = git(
+                    repo_path,
+                    &[
+                        "rev-list",
+                        "--left-right",
+                        "--count",
+                        &format!("HEAD...{remote_ref}"),
+                    ],
+                ) else {
+                    return unpushed_without_tracking(repo_path);
+                };
+                return parse_ahead_behind(&output);
+            }
+        }
+    }
+
+    unpushed_without_tracking(repo_path)
 }
 
 fn changed_files(repo_path: &Path) -> Vec<FileChange> {
@@ -373,13 +421,14 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
 fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
+    let branch = current_branch(&repo_path);
     let upstream = upstream(&repo_path);
-    let (ahead, behind) = ahead_behind(&repo_path, upstream.is_some());
+    let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
     let changes = changed_files(&repo_path);
 
     Ok(RepoSnapshot {
         repo,
-        branch: current_branch(&repo_path),
+        branch,
         upstream,
         ahead,
         behind,
@@ -676,12 +725,25 @@ fn remove_remote(path: String, name: String) -> Result<ActionResult, String> {
 #[tauri::command]
 fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
-    let args = if force {
-        vec!["push", "--force-with-lease"]
-    } else {
-        vec!["push"]
-    };
-    let output = git(Path::new(&repo.path), &args)?;
+    let repo_path = Path::new(&repo.path);
+    let branch = current_branch(repo_path);
+    let mut args = vec!["push".to_string()];
+    if force {
+        args.push("--force-with-lease".to_string());
+    }
+
+    if upstream(repo_path).is_none() {
+        let is_detached = branch.contains("detached") || branch == "no commits";
+        if !is_detached {
+            if let Some(remote) = default_remote_name(repo_path) {
+                args.push("-u".to_string());
+                args.push(remote);
+                args.push(branch);
+            }
+        }
+    }
+
+    let output = git_owned(repo_path, args)?;
 
     Ok(ActionResult {
         message: if force {

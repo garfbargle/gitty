@@ -715,6 +715,157 @@ button:focus-visible {
   padding: 1px 6px;
 }
 
+.setup-remote-btn {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.setup-remote-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.push-btn-group {
+  display: inline-flex;
+  position: relative;
+}
+
+.push-btn-main,
+.push-btn-chevron {
+  align-items: center;
+  background: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 70%, #000);
+  color: #052e1a;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 32px;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .push-btn-main,
+  .push-btn-chevron {
+    color: #022c1a;
+  }
+}
+
+.push-btn-main {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  padding: 0 12px;
+}
+
+.push-btn-chevron {
+  border-left: 1px solid color-mix(in srgb, var(--success) 55%, #000);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+}
+
+.push-btn-group:not(.diverged) .push-btn-main {
+  border-radius: var(--radius-sm);
+}
+
+.push-btn-main:hover:not(:disabled),
+.push-btn-chevron:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.push-btn-main:active:not(:disabled),
+.push-btn-chevron:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.push-btn-main:disabled,
+.push-btn-chevron:disabled {
+  filter: grayscale(0.2);
+  opacity: 0.65;
+}
+
+.push-btn-main em {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  min-width: 18px;
+  padding: 1px 6px;
+  text-align: center;
+}
+
+.push-btn-group.diverged .push-btn-main,
+.push-btn-group.diverged .push-btn-chevron {
+  background: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 70%, #000);
+  color: #3b2500;
+}
+
+.push-btn-group.diverged .push-btn-chevron {
+  border-left-color: color-mix(in srgb, var(--warning) 55%, #000);
+}
+
+.push-btn-menu {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+}
+
+.push-btn-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.push-btn-menu-item small {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.push-btn-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.push-btn-menu-item.danger {
+  color: var(--danger);
+}
+
+.push-btn-menu-item.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
 .spin {
   animation: spin 0.8s linear infinite;
 }

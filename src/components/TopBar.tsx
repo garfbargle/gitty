@@ -1,5 +1,6 @@
-import { ChevronDown, GitBranch, History, RefreshCw } from "lucide-react";
+import { ChevronDown, GitBranch, History, Link2, RefreshCw } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
+import { PushButton } from "./PushButton";
 import { WorkingTreePicker } from "./WorkingTreePicker";
 
 type TopBarProps = {
@@ -12,12 +13,18 @@ type TopBarProps = {
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
+  ahead?: number;
+  behind?: number;
+  hasRemotes?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
   onSelectCommit: (commit: CommitEntry) => void;
   onRefresh: () => void;
+  onPush?: () => void;
+  onForcePush?: () => void;
+  onSetupRemote?: () => void;
 };
 
 export function TopBar({
@@ -30,12 +37,18 @@ export function TopBar({
   viewMode,
   viewingCommit,
   loading,
+  ahead = 0,
+  behind = 0,
+  hasRemotes = false,
   onRepoChange,
   onBranchChange,
   onToggleView,
   onReturnToWorkingTree,
   onSelectCommit,
   onRefresh,
+  onPush,
+  onForcePush,
+  onSetupRemote,
 }: TopBarProps) {
   return (
     <header className="top-bar">
@@ -107,6 +120,31 @@ export function TopBar({
           <History size={15} />
           {viewMode === "working" ? "Back to History" : "Working Tree"}
         </button>
+        {viewMode === "working" && !viewingCommit ? (
+          onPush && onForcePush ? (
+            <PushButton
+              ahead={ahead}
+              behind={behind}
+              hasRemotes={hasRemotes}
+              loading={loading}
+              disabled={loading}
+              onPush={onPush}
+              onForcePush={onForcePush}
+            />
+          ) : null
+        ) : null}
+        {viewMode === "working" && !viewingCommit && !hasRemotes && onSetupRemote ? (
+          <button
+            type="button"
+            className="setup-remote-btn"
+            title="Add a remote to push commits"
+            disabled={loading}
+            onClick={onSetupRemote}
+          >
+            <Link2 size={14} />
+            Add remote
+          </button>
+        ) : null}
       </div>
     </header>
   );

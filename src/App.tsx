@@ -531,7 +531,6 @@ function App() {
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
   const showCommitSection = workingTreeActive;
   const showResetSection = !!viewingCommit;
-  const showPushActions = workingTreeActive && hasRemotes && (snapshot?.ahead ?? 0) > 0;
   const showSetupRemote = workingTreeActive && !hasRemotes;
 
   useEffect(() => {
@@ -630,6 +629,9 @@ function App() {
               changeCount={snapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
+              ahead={snapshot.ahead}
+              behind={snapshot.behind}
+              hasRemotes={hasRemotes}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
@@ -647,6 +649,9 @@ function App() {
               }}
               onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
+              onPush={() => void push(false)}
+              onForcePush={() => void push(true)}
+              onSetupRemote={() => setSettingsOpen(true)}
             />
 
             {viewMode === "working" ? (
@@ -704,14 +709,11 @@ function App() {
                     unstagedCount={unstagedCount}
                     showCommitSection={showCommitSection}
                     showResetSection={showResetSection}
-                    showPushActions={showPushActions}
                     showSetupRemote={showSetupRemote}
                     onMessageChange={setCommitMessage}
                     onAmendChange={(checked) => void handleAmendChange(checked)}
                     onResetModeChange={setResetMode}
                     onCommit={() => void commit()}
-                    onPush={() => void push(false)}
-                    onForcePush={() => void push(true)}
                     onReset={() => void reset()}
                     onSetupRemote={() => setSettingsOpen(true)}
                     disabled={loading}
