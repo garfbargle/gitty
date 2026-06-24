@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the macOS squircle mask (superellipse n=5) to a square app icon."""
+"""Prepare a macOS app icon: inset artwork and apply a squircle mask."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 
-def superellipse_polygon(size: int, n: float = 5.0, points: int = 720) -> list[tuple[float, float]]:
+def superellipse_polygon(size: int, n: float, points: int = 720) -> list[tuple[float, float]]:
     cx = cy = size / 2
     radius = size / 2
     polygon: list[tuple[float, float]] = []
@@ -23,19 +23,34 @@ def superellipse_polygon(size: int, n: float = 5.0, points: int = 720) -> list[t
     return polygon
 
 
-def apply_macos_squircle(src: Path, dst: Path, size: int = 1024) -> None:
-    image = Image.open(src).convert("RGBA")
-    image = image.resize((size, size), Image.LANCZOS)
-
+def squircle_mask(size: int, n: float) -> Image.Image:
     scale = 4
     big = size * scale
     mask = Image.new("L", (big, big), 0)
     draw = ImageDraw.Draw(mask)
-    draw.polygon(superellipse_polygon(big), fill=255)
-    mask = mask.resize((size, size), Image.LANCZOS)
+    draw.polygon(superellipse_polygon(big, n), fill=255)
+    return mask.resize((size, size), Image.LANCZOS)
 
+
+def apply_macos_squircle(
+    src: Path,
+    dst: Path,
+    size: int = 1024,
+    art_scale: float = 0.68,
+    squircle_n: float = 3.8,
+    background: tuple[int, int, int, int] = (0, 0, 0, 255),
+) -> None:
+    source = Image.open(src).convert("RGBA")
+    art_size = max(1, round(size * art_scale))
+    art = source.resize((art_size, art_size), Image.LANCZOS)
+
+    canvas = Image.new("RGBA", (size, size), background)
+    offset = (size - art_size) // 2
+    canvas.paste(art, (offset, offset), art)
+
+    mask = squircle_mask(size, squircle_n)
     output = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    output.paste(image, (0, 0), mask)
+    output.paste(canvas, (0, 0), mask)
     output.save(dst, "PNG")
 
 
@@ -50,10 +65,24 @@ def main() -> None:
         help="Output PNG path (default: app-icon.png)",
     )
     parser.add_argument("--size", type=int, default=1024, help="Output size in pixels")
+    parser.add_argument(
+        "--art-scale",
+        type=float,
+        default=0.68,
+        help="Artwork scale relative to canvas (default: 0.68)",
+    )
+    parser.add_argument(
+        "--squircle-n",
+        type=float,
+        default=3.8,
+        help="Superellipse exponent; lower = rounder corners (default: 3.8)",
+    )
     args = parser.parse_args()
-    apply_macos_squircle(args.input, args.output, args.size)
+    apply_macos_squircle(
+        args.input,
+        args.output,
+        size=args.size,
+        art_scale=args.art_scale,
+        squircle_n=args.squircle_n,
+    )
     print(f"Wrote {args.output}")
-
-
-if __name__ == "__main__":
-    main()
