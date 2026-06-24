@@ -626,12 +626,14 @@ function App() {
               selectedPath={selectedPath}
               branch={snapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [snapshot.branch]}
+              commits={snapshot.commits}
               changeCount={snapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
+              onSelectCommit={(commit) => void inspectCommit(commit)}
               onToggleView={() => {
                 if (viewMode === "history") {
                   setFocus(null);

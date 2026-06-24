@@ -491,6 +491,169 @@ button:focus-visible {
   padding: 1px 6px;
 }
 
+.working-tree-picker {
+  position: relative;
+}
+
+.working-tree-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  max-width: min(320px, 30vw);
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 6px;
+  transition: background 0.15s ease;
+}
+
+.working-tree-trigger:hover,
+.working-tree-picker.open .working-tree-trigger {
+  background: var(--bg-hover);
+}
+
+.working-tree-trigger.active {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.working-tree-trigger code {
+  background: var(--bg-hover);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.working-tree-trigger .trigger-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-tree-trigger em {
+  background: var(--success-soft);
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  padding: 1px 6px;
+}
+
+.picker-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.working-tree-picker.open .picker-chevron {
+  transform: rotate(180deg);
+}
+
+.working-tree-menu {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  left: 0;
+  max-height: min(420px, 60vh);
+  overflow: hidden;
+  position: absolute;
+  top: calc(100% + 4px);
+  width: min(300px, calc(100vw - 32px));
+  z-index: 50;
+}
+
+.working-tree-commit-list {
+  max-height: min(360px, 52vh);
+  overflow: auto;
+}
+
+.working-tree-menu-divider {
+  background: var(--border);
+  height: 1px;
+  margin: 4px 0;
+}
+
+.working-tree-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.working-tree-option:hover {
+  background: var(--bg-hover);
+}
+
+.working-tree-option.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text-primary);
+}
+
+.working-tree-option .option-leading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.working-tree-option.commit {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.working-tree-option .option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.working-tree-option .option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-tree-option code {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding-top: 1px;
+}
+
+.working-tree-option .option-meta {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
 .commit-crumb {
   align-items: center;
   color: var(--text-secondary);

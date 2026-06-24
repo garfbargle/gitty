@@ -1,11 +1,13 @@
 import { ChevronDown, GitBranch, History, RefreshCw } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
+import { WorkingTreePicker } from "./WorkingTreePicker";
 
 type TopBarProps = {
   repos: RepoEntry[];
   selectedPath: string;
   branch: string;
   branches: string[];
+  commits: CommitEntry[];
   changeCount: number;
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
@@ -14,6 +16,7 @@ type TopBarProps = {
   onBranchChange: (branch: string) => void;
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
+  onSelectCommit: (commit: CommitEntry) => void;
   onRefresh: () => void;
 };
 
@@ -22,6 +25,7 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
+  commits,
   changeCount,
   viewMode,
   viewingCommit,
@@ -30,6 +34,7 @@ export function TopBar({
   onBranchChange,
   onToggleView,
   onReturnToWorkingTree,
+  onSelectCommit,
   onRefresh,
 }: TopBarProps) {
   return (
@@ -71,18 +76,13 @@ export function TopBar({
         {viewMode === "working" ? (
           <>
             <span className="breadcrumb-sep">›</span>
-            {viewingCommit ? (
-              <span className="commit-crumb" title={viewingCommit.subject}>
-                <code>{viewingCommit.shortHash}</code>
-                <span>{viewingCommit.subject}</span>
-              </span>
-            ) : (
-              <span className="working-badge">
-                <span className="working-dot" />
-                Working Tree
-                {changeCount > 0 ? <em>{changeCount}</em> : null}
-              </span>
-            )}
+            <WorkingTreePicker
+              commits={commits}
+              viewingCommit={viewingCommit}
+              changeCount={changeCount}
+              onSelectWorkingTree={onReturnToWorkingTree}
+              onSelectCommit={onSelectCommit}
+            />
           </>
         ) : null}
       </div>
