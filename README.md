@@ -4,6 +4,8 @@ A lightweight desktop Git client for macOS, built with [Tauri](https://tauri.app
 
 Gitty shells out to your system `git` executable. It does not embed a Git library or poll repositories in the background; status refreshes when you select a repo, hit refresh, or complete an action.
 
+![Gitty working tree view showing repository sidebar, commit timeline, diff viewer, and commit panel](docs/screenshot.png)
+
 ## Features
 
 ### Repository management
