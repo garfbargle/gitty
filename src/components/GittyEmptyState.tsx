@@ -8,7 +8,7 @@ export function GittyEmptyState({ projectName }: GittyEmptyStateProps) {
       <div className="gitty-empty-content">
         <img
           className="gitty-mascot"
-          src="/gitty-sad.png"
+          src="/gitty-crying.png"
           alt=""
           width={120}
           height={120}
@@ -16,8 +16,7 @@ export function GittyEmptyState({ projectName }: GittyEmptyStateProps) {
         />
         <div className="gitty-speech-bubble">
           <p>
-            Gitty is sad, there&apos;s no changes for{" "}
-            <strong>{projectName}</strong>.
+            There&apos;s no changes in <strong>{projectName}</strong>.
           </p>
         </div>
       </div>
