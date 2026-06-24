@@ -205,8 +205,6 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
               )}
             </div>
           </section>
-
-          <div className="stage-dropzone">Drag files here to stage</div>
         </>
       )}
     </aside>
