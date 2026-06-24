@@ -218,8 +218,8 @@ fn changed_files(repo_path: &Path) -> Vec<FileChange> {
                 return None;
             }
 
-            let status = line[0..2].trim().to_string();
-            let raw_path = line[3..].to_string();
+            let status = line.get(0..2)?.to_string();
+            let raw_path = line.get(3..)?.trim().to_string();
             let (path, old_path) = raw_path
                 .split_once(" -> ")
                 .map(|(old_path, path)| (path.to_string(), Some(old_path.to_string())))

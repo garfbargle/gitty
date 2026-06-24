@@ -1,4 +1,4 @@
-import { FolderGit2, FolderPlus, Plus, Settings } from "lucide-react";
+import { FolderGit2, Plus, Settings } from "lucide-react";
 import type { RepoEntry } from "../types";
 import { shortenPath } from "../lib/git";
 
@@ -7,7 +7,6 @@ type RepoSidebarProps = {
   selectedPath: string;
   onSelect: (path: string) => void;
   onAddExisting: () => void;
-  onInitRepo: () => void;
   onOpenSettings: () => void;
 };
 
@@ -16,23 +15,16 @@ export function RepoSidebar({
   selectedPath,
   onSelect,
   onAddExisting,
-  onInitRepo,
   onOpenSettings,
 }: RepoSidebarProps) {
   return (
     <aside className="repo-sidebar">
-      <div className="sidebar-actions">
-        <button type="button" className="sidebar-btn" onClick={onInitRepo}>
-          <Plus size={15} />
-          Init Repo
+      <header className="sidebar-header">
+        <span>Repositories</span>
+        <button type="button" className="icon-btn sm" title="Add repository" onClick={onAddExisting}>
+          <Plus size={16} />
         </button>
-        <button type="button" className="sidebar-btn primary" onClick={onAddExisting}>
-          <FolderPlus size={15} />
-          Add Existing Repo
-        </button>
-      </div>
-
-      <div className="sidebar-section-label">Repositories</div>
+      </header>
 
       <div className="repo-list">
         {repos.map((repo) => (
@@ -52,10 +44,15 @@ export function RepoSidebar({
         ))}
       </div>
 
-      <button type="button" className="settings-btn" onClick={onOpenSettings}>
-        <Settings size={16} />
-        Settings
-      </button>
+      <footer className="sidebar-footer">
+        <button type="button" className="add-repo-btn" onClick={onAddExisting}>
+          <Plus size={15} />
+          Add Repository
+        </button>
+        <button type="button" className="icon-btn sm" title="Settings" onClick={onOpenSettings}>
+          <Settings size={16} />
+        </button>
+      </footer>
     </aside>
   );
 }

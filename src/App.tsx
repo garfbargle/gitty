@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch } from "lucide-react";
-import { ActionsPanel } from "./components/ActionsPanel";
+import { ChangesList } from "./components/ChangesList";
+import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
 import { HistoryTable } from "./components/HistoryTable";
-import { MainToolbar, SettingsDrawer } from "./components/MainToolbar";
+import { HistoryTimeline } from "./components/HistoryTimeline";
+import { SettingsDrawer } from "./components/MainToolbar";
 import { RepoSidebar } from "./components/RepoSidebar";
-import { StagingArea } from "./components/StagingArea";
+import { TopBar } from "./components/TopBar";
 import type {
   ActionResult,
   CommitEntry,
@@ -16,22 +18,24 @@ import type {
   RepoEntry,
   RepoSnapshot,
 } from "./types";
-import { parseRefs, primaryRef } from "./lib/git";
+import { isStaged, isUnstaged, parseRefs, primaryRef } from "./lib/git";
 import "./App.css";
 
-const emptyDiff = "Select a commit or changed file to view its diff.";
+const emptyDiff = "Select a file or commit to view its diff.";
+
+type ViewMode = "working" | "history";
 
 function App() {
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState("");
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("working");
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
-  const [commitSearch, setCommitSearch] = useState("");
-  const [checkoutBranch, setCheckoutBranch] = useState("");
-  const [mergeTarget, setMergeTarget] = useState("");
-  const [commitMessage, setCommitMessage] = useState("");
+  const [summary, setSummary] = useState("");
+  const [description, setDescription] = useState("");
   const [amend, setAmend] = useState(false);
+  const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [remoteName, setRemoteName] = useState("origin");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -41,11 +45,12 @@ function App() {
 
   const selectedCommit = focus?.kind === "commit" ? focus.commit : null;
   const selectedFile = focus?.kind === "file" ? focus.file : null;
-  const showDiff = focus !== null;
 
-  const primaryRemote = useMemo(() => {
-    const names = snapshot?.remotes.map((remote) => remote.name) ?? [];
-    return names.includes("origin") ? "origin" : names[0] ?? "origin";
+  const branchNames = useMemo(() => {
+    const branches = snapshot?.branches ?? [];
+    const local = branches.filter((b) => !b.isRemote).map((b) => b.name);
+    const remote = branches.filter((b) => b.isRemote).map((b) => b.name);
+    return [...local, ...remote];
   }, [snapshot]);
 
   useEffect(() => {
@@ -53,10 +58,10 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (snapshot?.branch) {
-      setCheckoutBranch(snapshot.branch);
-    }
-  }, [snapshot?.branch]);
+    if (!snapshot || viewMode !== "working") return;
+    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes[0];
+    if (first) void inspectFile(first, snapshot.repo.path);
+  }, [snapshot?.repo.path]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
     setLoading(true);
@@ -64,9 +69,7 @@ function App() {
     setMessage("");
     try {
       const result = await task();
-      if (successMessage) {
-        setMessage(successMessage);
-      }
+      if (successMessage) setMessage(successMessage);
       return result;
     } catch (err) {
       setError(String(err));
@@ -90,9 +93,10 @@ function App() {
     setSelectedPath(path);
     setFocus(null);
     setDiff(emptyDiff);
-    setCommitMessage("");
+    setSummary("");
+    setDescription("");
     setAmend(false);
-    setCommitSearch("");
+    setViewMode("working");
     await refreshRepo(path);
   }
 
@@ -122,48 +126,26 @@ function App() {
       multiple: false,
       title: "Choose a Git repository",
     });
-    if (typeof folder === "string") {
-      await addRepo(folder);
-    }
+    if (typeof folder === "string") await addRepo(folder);
   }
 
-  async function initRepo() {
-    const folder = await open({
-      directory: true,
-      multiple: false,
-      title: "Choose folder for new repository",
-    });
-    if (typeof folder === "string") {
-      const result = await run(() => invoke<RepoEntry[]>("init_repo", { path: folder }));
-      if (result) {
-        setRepos(result);
-        const repo = result.find((item) => item.path === folder) ?? result[result.length - 1];
-        if (repo) await selectRepo(repo.path);
-      }
-    }
-  }
-
-  async function inspectCommit(commit: CommitEntry) {
+  async function inspectCommit(commit: CommitEntry, path = selectedPath) {
     setFocus({ kind: "commit", commit });
     const result = await run(() =>
-      invoke<string>("commit_diff", { path: selectedPath, commit: commit.hash }),
+      invoke<string>("commit_diff", { path, commit: commit.hash }),
     );
-    if (result !== null) {
-      setDiff(result || "This commit has no patch output.");
-    }
+    if (result !== null) setDiff(result || "This commit has no patch output.");
   }
 
-  async function inspectFile(file: FileChange) {
+  async function inspectFile(file: FileChange, path = selectedPath) {
     setFocus({ kind: "file", file });
     const result = await run(() =>
-      invoke<string>("file_diff", { path: selectedPath, filePath: file.path }),
+      invoke<string>("file_diff", { path, filePath: file.path }),
     );
-    if (result !== null) {
-      setDiff(result || "This file has no tracked diff.");
-    }
+    if (result !== null) setDiff(result || "This file has no tracked diff.");
   }
 
-  async function checkoutBranchAction(branch = checkoutBranch) {
+  async function checkoutBranch(branch: string) {
     if (!selectedPath || !branch || branch === snapshot?.branch) return;
     const result = await run(() =>
       invoke<ActionResult>("checkout_branch", { path: selectedPath, branch }),
@@ -177,65 +159,45 @@ function App() {
   async function checkoutFromCommit(commit: CommitEntry) {
     const ref = primaryRef(commit.refs) || parseRefs(commit.refs)[0];
     if (ref && !ref.startsWith("tag:")) {
-      await checkoutBranchAction(ref.replace(/^origin\//, "") || ref);
+      await checkoutBranch(ref.replace(/^origin\//, "") || ref);
       return;
     }
     if (!window.confirm(`Check out detached commit ${commit.shortHash}?`)) return;
     const result = await run(() =>
-      invoke<ActionResult>("checkout_branch", {
-        path: selectedPath,
-        branch: commit.hash,
-      }),
+      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: commit.hash }),
     );
     if (result) {
       setMessage(result.message);
-      await refreshRepo();
-    }
-  }
-
-  async function mergeBranch() {
-    if (!selectedPath || !mergeTarget) return;
-    const result = await run(() =>
-      invoke<ActionResult>("merge_branch", { path: selectedPath, branch: mergeTarget }),
-    );
-    if (result) {
-      setMessage(result.message);
-      setMergeTarget("");
       await refreshRepo();
     }
   }
 
   async function stageFiles(files: string[]) {
-    await run(() =>
+    const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: true }),
     );
-    await refreshRepo();
+    if (result) await refreshRepo();
   }
 
   async function unstageFiles(files: string[]) {
-    await run(() =>
+    const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: false }),
     );
-    await refreshRepo();
-  }
-
-  async function unstageAll() {
-    await run(() => invoke<ActionResult>("stage_all", { path: selectedPath, stage: false }));
-    await refreshRepo();
+    if (result) await refreshRepo();
   }
 
   async function commit() {
-    if (!commitMessage.trim()) return;
+    if (!summary.trim()) return;
+    const message = description.trim()
+      ? `${summary.trim()}\n\n${description.trim()}`
+      : summary.trim();
     const result = await run(() =>
-      invoke<ActionResult>("commit_repo", {
-        path: selectedPath,
-        message: commitMessage.trim(),
-        amend,
-      }),
+      invoke<ActionResult>("commit_repo", { path: selectedPath, message, amend }),
     );
     if (result) {
       setMessage(result.message);
-      setCommitMessage("");
+      setSummary("");
+      setDescription("");
       setAmend(false);
       await refreshRepo();
     }
@@ -261,16 +223,16 @@ function App() {
     }
   }
 
-  async function reset(mode: "soft" | "hard") {
+  async function reset() {
     if (!selectedCommit || !selectedPath) return;
-    if (mode === "hard" && !window.confirm(`Hard reset to ${selectedCommit.shortHash}?`)) {
+    if (resetMode === "hard" && !window.confirm(`Hard reset to ${selectedCommit.shortHash}?`)) {
       return;
     }
     const result = await run(() =>
       invoke<ActionResult>("reset_to_commit", {
         path: selectedPath,
         commit: selectedCommit.hash,
-        mode,
+        mode: resetMode,
       }),
     );
     if (result) {
@@ -281,11 +243,7 @@ function App() {
 
   async function saveRemote() {
     const result = await run(() =>
-      invoke<ActionResult>("set_remote", {
-        path: selectedPath,
-        name: remoteName,
-        url: remoteUrl,
-      }),
+      invoke<ActionResult>("set_remote", { path: selectedPath, name: remoteName, url: remoteUrl }),
     );
     if (result) {
       setMessage(result.message);
@@ -315,9 +273,8 @@ function App() {
       setRepos(result);
       setSettingsOpen(false);
       const next = result[0];
-      if (next) {
-        await selectRepo(next.path);
-      } else {
+      if (next) await selectRepo(next.path);
+      else {
         setSelectedPath("");
         setSnapshot(null);
         setFocus(null);
@@ -326,6 +283,9 @@ function App() {
     }
   }
 
+  const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
+  const unstagedCount = snapshot?.changes.filter(isUnstaged).length ?? 0;
+
   return (
     <main className="app-shell">
       <RepoSidebar
@@ -333,69 +293,113 @@ function App() {
         selectedPath={selectedPath}
         onSelect={(path) => void selectRepo(path)}
         onAddExisting={() => void chooseRepoFolder()}
-        onInitRepo={() => void initRepo()}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <section className="main-center">
+      <section className="main-area">
         {snapshot ? (
           <>
-            <MainToolbar
-              repoName={snapshot.repo.name}
+            <TopBar
+              repos={repos}
+              selectedPath={selectedPath}
               branch={snapshot.branch}
-              search={commitSearch}
+              branches={branchNames.length > 0 ? branchNames : [snapshot.branch]}
+              changeCount={snapshot.changes.length}
+              viewMode={viewMode}
               loading={loading}
-              onSearchChange={setCommitSearch}
+              onRepoChange={(path) => void selectRepo(path)}
+              onBranchChange={(branch) => void checkoutBranch(branch)}
+              onToggleView={() => {
+                setViewMode((mode) => (mode === "working" ? "history" : "working"));
+                if (viewMode === "history") {
+                  setFocus(null);
+                  setDiff(emptyDiff);
+                }
+              }}
               onRefresh={() => void refreshRepo()}
+              onPush={() => void push(false)}
+              onForcePush={() => void push(true)}
             />
 
-            <div className="center-stack">
-              <div className={`history-section ${showDiff ? "with-diff" : ""}`}>
+            {viewMode === "working" ? (
+              <>
+                <HistoryTimeline
+                  commits={snapshot.commits}
+                  changeCount={snapshot.changes.length}
+                  selectedHash={selectedCommit?.hash}
+                  workingTreeActive={focus?.kind === "file" || (!selectedCommit && !!selectedFile)}
+                  onSelect={(commit) => void inspectCommit(commit)}
+                  onSelectWorkingTree={() => {
+                    setViewMode("working");
+                    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes[0];
+                    if (first) void inspectFile(first);
+                  }}
+                />
+
+                <div className="workspace-grid">
+                  <ChangesList
+                    changes={snapshot.changes}
+                    selectedPath={selectedFile?.path}
+                    onSelect={(file) => void inspectFile(file)}
+                    onStage={(files) => void stageFiles(files)}
+                    onUnstage={(files) => void unstageFiles(files)}
+                    disabled={loading}
+                  />
+
+                  <DiffViewer
+                    raw={diff}
+                    file={selectedFile}
+                    emptyMessage={emptyDiff}
+                    onUnstage={(path) => void unstageFiles([path])}
+                  />
+
+                  <CommitPanel
+                    summary={summary}
+                    description={description}
+                    branch={snapshot.branch}
+                    branches={snapshot.branches ?? []}
+                    amend={amend}
+                    resetMode={resetMode}
+                    selectedCommit={selectedCommit}
+                    stagedCount={stagedCount}
+                    unstagedCount={unstagedCount}
+                    onSummaryChange={setSummary}
+                    onDescriptionChange={setDescription}
+                    onAmendChange={setAmend}
+                    onResetModeChange={setResetMode}
+                    onCommit={() => void commit()}
+                    onPush={() => void push(false)}
+                    onForcePush={() => void push(true)}
+                    onReset={() => void reset()}
+                    disabled={loading}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="history-full">
                 <HistoryTable
                   commits={snapshot.commits}
                   selectedHash={selectedCommit?.hash}
-                  search={commitSearch}
+                  search=""
                   onSelect={(commit) => void inspectCommit(commit)}
                   onDoubleClick={(commit) => void checkoutFromCommit(commit)}
                 />
-
-                {showDiff ? (
-                  <div className="diff-drawer">
-                    <header className="diff-drawer-header">
-                      <span>{diffTitle(focus)}</span>
-                      <button type="button" className="link-btn" onClick={() => { setFocus(null); setDiff(emptyDiff); }}>
-                        Close
-                      </button>
-                    </header>
+                {selectedCommit ? (
+                  <div className="history-diff">
                     <DiffViewer raw={diff} emptyMessage={emptyDiff} />
                   </div>
                 ) : null}
               </div>
-
-              <StagingArea
-                changes={snapshot.changes}
-                selectedPath={selectedFile?.path}
-                commitMessage={commitMessage}
-                amend={amend}
-                onCommitMessageChange={setCommitMessage}
-                onAmendChange={setAmend}
-                onSelect={(file) => void inspectFile(file)}
-                onStage={(files) => void stageFiles(files)}
-                onUnstage={(files) => void unstageFiles(files)}
-                onUnstageAll={() => void unstageAll()}
-                onCommit={() => void commit()}
-                disabled={loading}
-              />
-            </div>
+            )}
           </>
         ) : (
           <div className="empty-state">
-            <GitBranch size={32} />
+            <GitBranch size={36} />
             <h2>Add a repository to start</h2>
-            <p>Track all your repos in one window — browse history, stage changes, and push.</p>
-            <button className="sidebar-btn primary" type="button" onClick={chooseRepoFolder}>
+            <p>Browse history, stage changes, review diffs, and commit — all in one window.</p>
+            <button type="button" className="commit-primary" onClick={chooseRepoFolder}>
               <FolderPlus size={16} />
-              Add Existing Repo
+              Add Repository
             </button>
           </div>
         )}
@@ -406,29 +410,6 @@ function App() {
           </footer>
         )}
       </section>
-
-      {snapshot ? (
-        <ActionsPanel
-          branches={snapshot.branches ?? []}
-          currentBranch={snapshot.branch}
-          upstream={snapshot.upstream}
-          ahead={snapshot.ahead}
-          behind={snapshot.behind}
-          checkoutBranch={checkoutBranch}
-          mergeTarget={mergeTarget}
-          primaryRemote={primaryRemote}
-          onCheckoutBranchChange={setCheckoutBranch}
-          onMergeTargetChange={setMergeTarget}
-          onCheckout={() => void checkoutBranchAction()}
-          onMerge={() => void mergeBranch()}
-          onResetSoft={() => void reset("soft")}
-          onResetHard={() => void reset("hard")}
-          onPush={() => void push(false)}
-          onForcePush={() => void push(true)}
-          hasSelectedCommit={!!selectedCommit}
-          disabled={loading}
-        />
-      ) : null}
 
       {snapshot ? (
         <SettingsDrawer
@@ -448,12 +429,6 @@ function App() {
       ) : null}
     </main>
   );
-}
-
-function diffTitle(focus: DiffFocus) {
-  if (!focus) return "Diff";
-  if (focus.kind === "file") return focus.file.path;
-  return `${focus.commit.shortHash} · ${focus.commit.subject}`;
 }
 
 export default App;
