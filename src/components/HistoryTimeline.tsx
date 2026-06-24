@@ -28,7 +28,8 @@ export function HistoryTimeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
-  const suppressScrollbarRef = useRef(false);
+  const programmaticScrollDepthRef = useRef(0);
+  const scrollFrameRef = useRef<number | null>(null);
   const scrollbarTimeoutRef = useRef<number | null>(null);
   const headHash = commits[0]?.hash ?? "";
 
@@ -45,6 +46,16 @@ export function HistoryTimeline({
     }, SCROLLBAR_HIDE_DELAY_MS);
   }, []);
 
+  const withProgrammaticScroll = useCallback((update: () => void) => {
+    programmaticScrollDepthRef.current += 1;
+    update();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        programmaticScrollDepthRef.current -= 1;
+      });
+    });
+  }, []);
+
   const isScrolledToEnd = useCallback((): boolean => {
     const container = scrollRef.current;
     if (!container) return true;
@@ -52,21 +63,9 @@ export function HistoryTimeline({
     return remaining <= SCROLL_END_THRESHOLD;
   }, []);
 
-  const scrollToEnd = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    suppressScrollbarRef.current = true;
-    container.scrollLeft = container.scrollWidth - container.clientWidth;
-    requestAnimationFrame(() => {
-      suppressScrollbarRef.current = false;
-    });
-  }, []);
-
   const scrollNodeIntoView = useCallback((node: HTMLButtonElement | undefined) => {
     const container = scrollRef.current;
     if (!container || !node) return;
-    pinnedToEndRef.current = false;
-    suppressScrollbarRef.current = true;
 
     const padding = 16;
     const containerRect = container.getBoundingClientRect();
@@ -77,18 +76,40 @@ export function HistoryTimeline({
     } else if (nodeRect.right > containerRect.right - padding) {
       container.scrollLeft += nodeRect.right - (containerRect.right - padding);
     }
+  }, []);
 
-    revealScrollbar();
-    requestAnimationFrame(() => {
-      suppressScrollbarRef.current = false;
+  const applyScrollPosition = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    withProgrammaticScroll(() => {
+      if (workingTreeActive || pinnedToEndRef.current) {
+        pinnedToEndRef.current = true;
+        container.scrollLeft = container.scrollWidth - container.clientWidth;
+        return;
+      }
+
+      if (!selectedHash) return;
+
+      pinnedToEndRef.current = false;
+      scrollNodeIntoView(nodeRefs.current.get(selectedHash));
     });
-  }, [revealScrollbar]);
+  }, [selectedHash, scrollNodeIntoView, withProgrammaticScroll, workingTreeActive]);
+
+  const scheduleApplyScrollPosition = useCallback(() => {
+    if (scrollFrameRef.current !== null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      applyScrollPosition();
+    });
+  }, [applyScrollPosition]);
 
   const handleScroll = useCallback(() => {
     pinnedToEndRef.current = isScrolledToEnd();
-    if (!suppressScrollbarRef.current) {
-      revealScrollbar();
-    }
+    if (programmaticScrollDepthRef.current > 0) return;
+    revealScrollbar();
   }, [isScrolledToEnd, revealScrollbar]);
 
   useEffect(() => {
@@ -96,9 +117,13 @@ export function HistoryTimeline({
     if (!container) return;
 
     const onWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+        revealScrollbar();
+        return;
+      }
       event.preventDefault();
       container.scrollLeft += event.deltaY;
+      revealScrollbar();
     };
 
     container.addEventListener("wheel", onWheel, { passive: false });
@@ -107,14 +132,15 @@ export function HistoryTimeline({
       if (scrollbarTimeoutRef.current !== null) {
         window.clearTimeout(scrollbarTimeoutRef.current);
       }
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
     };
-  }, []);
+  }, [revealScrollbar]);
 
   useLayoutEffect(() => {
-    if (pinnedToEndRef.current) {
-      scrollToEnd();
-    }
-  }, [headHash, scrollToEnd]);
+    scheduleApplyScrollPosition();
+  }, [headHash, selectedHash, workingTreeActive, visible.length, scheduleApplyScrollPosition]);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
@@ -122,29 +148,14 @@ export function HistoryTimeline({
     if (!container) return;
 
     const observer = new ResizeObserver(() => {
-      if (pinnedToEndRef.current) {
-        scrollToEnd();
-      }
+      scheduleApplyScrollPosition();
     });
 
     observer.observe(container);
     if (track) observer.observe(track);
 
     return () => observer.disconnect();
-  }, [scrollToEnd]);
-
-  useLayoutEffect(() => {
-    const nodeKey = workingTreeActive ? "working-tree" : selectedHash;
-    if (!nodeKey) return;
-
-    const scrollToSelected = () => {
-      scrollNodeIntoView(nodeRefs.current.get(nodeKey));
-    };
-
-    scrollToSelected();
-    const frame = requestAnimationFrame(scrollToSelected);
-    return () => cancelAnimationFrame(frame);
-  }, [selectedHash, workingTreeActive, scrollNodeIntoView, visible.length]);
+  }, [scheduleApplyScrollPosition]);
 
   function selectCommit(commit: CommitEntry) {
     onInteract?.();
