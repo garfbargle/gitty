@@ -724,8 +724,7 @@ fn remove_remote(path: String, name: String) -> Result<ActionResult, String> {
     })
 }
 
-#[tauri::command]
-fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
+fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let branch = current_branch(repo_path);
@@ -755,6 +754,13 @@ fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
         },
         output,
     })
+}
+
+#[tauri::command]
+async fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(path, force))
+        .await
+        .map_err(|err| format!("Push task failed: {err}"))?
 }
 
 #[tauri::command]

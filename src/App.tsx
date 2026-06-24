@@ -384,6 +384,19 @@ function App() {
     return null;
   }
 
+  async function refreshRepoQuiet(path = selectedPath): Promise<RepoSnapshot | null> {
+    if (!path) return null;
+    try {
+      const result = await invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 });
+      setSnapshot(result);
+      setSelectedPath(result.repo.path);
+      return result;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  }
+
   async function refreshWorkingTree() {
     const snap = await refreshRepo();
     if (!snap) return;
@@ -752,25 +765,25 @@ function App() {
 
     pushLockRef.current = true;
     setPushPhase("pushing");
+    setError("");
+    setMessage("");
     await waitForPaint();
 
     try {
-      const result = await run(() =>
-        invoke<ActionResult>("push_repo", { path: selectedPath, force }),
-      );
-      if (result) {
-        setMessage([result.message, result.output].filter(Boolean).join("\n"));
-        setPushPhase("done");
-        if (pushDoneTimerRef.current !== null) {
-          window.clearTimeout(pushDoneTimerRef.current);
-        }
-        pushDoneTimerRef.current = window.setTimeout(() => {
-          setPushPhase("idle");
-          pushDoneTimerRef.current = null;
-        }, 1600);
-        await refreshRepo();
-        return true;
+      const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force });
+      setMessage([result.message, result.output].filter(Boolean).join("\n"));
+      setPushPhase("done");
+      if (pushDoneTimerRef.current !== null) {
+        window.clearTimeout(pushDoneTimerRef.current);
       }
+      pushDoneTimerRef.current = window.setTimeout(() => {
+        setPushPhase("idle");
+        pushDoneTimerRef.current = null;
+      }, 1600);
+      await refreshRepoQuiet(selectedPath);
+      return true;
+    } catch (err) {
+      setError(String(err));
       setPushPhase("idle");
       return false;
     } finally {

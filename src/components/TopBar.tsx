@@ -130,7 +130,6 @@ export function TopBar({
               hasRemotes={hasRemotes}
               pushPhase={pushPhase}
               loading={loading}
-              disabled={loading && pushPhase === "idle"}
               onPush={onPush}
               onForcePush={onForcePush}
             />
