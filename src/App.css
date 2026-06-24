@@ -594,6 +594,30 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
+.view-mode-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.view-mode-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.view-mode-toggle.working,
+.view-mode-toggle.history {
+  color: var(--accent);
+}
+
 /* ── Top bar ── */
 .top-bar {
   align-items: center;

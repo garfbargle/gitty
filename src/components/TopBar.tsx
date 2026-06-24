@@ -1,4 +1,12 @@
-import { ChevronDown, GitBranch, History, Link2, RefreshCw, Settings } from "lucide-react";
+import {
+  ChevronDown,
+  GitBranch,
+  GitCompareArrows,
+  History,
+  Link2,
+  RefreshCw,
+  Settings,
+} from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
@@ -66,6 +74,16 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-left">
+        <button
+          type="button"
+          className={`view-mode-toggle ${viewMode}`}
+          title={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
+          aria-label={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
+          onClick={onToggleView}
+        >
+          {viewMode === "working" ? <GitCompareArrows size={15} /> : <History size={15} />}
+        </button>
+
         <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
 
         <span className="breadcrumb-sep">›</span>
@@ -132,10 +150,6 @@ export function TopBar({
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading} onClick={onRefresh}>
           <RefreshCw size={15} className={loading ? "spin" : ""} />
-        </button>
-        <button type="button" className="ghost-btn" onClick={onToggleView}>
-          <History size={15} />
-          {viewMode === "working" ? "Back to History" : "Working Tree"}
         </button>
         {viewMode === "working" && !viewingCommit ? (
           onPush && onForcePush ? (
