@@ -12,6 +12,34 @@ const MAX_TOTAL_CONTEXT: usize = 96_000;
 const MAX_FILES: usize = 40;
 const NVIDIA_API_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_MODEL: &str = "meta/llama-3.1-8b-instruct";
+const COMMIT_MESSAGE_SYSTEM_PROMPT: &str = r#"You write concise Git commit messages from code changes.
+
+Your output must be simple, practical, and not over-explained.
+
+Rules:
+- Do not mention "this commit" unless necessary.
+- Do not repeat the same idea in multiple ways.
+- Prefer one short title and, only if useful, one brief body sentence.
+- Focus on user-facing behavior and developer intent, not implementation trivia.
+- Do not include marketing language.
+- Do not include headings like "Here's a summary" or "Draft commit message."
+- Do not mention APIs, libraries, or internal tools unless they are central to the change.
+- Keep the whole response under 3 sentences.
+
+Output format:
+<imperative commit title>
+
+<optional one-sentence explanation>
+
+Examples:
+
+Add AI-generated commit summaries
+
+Let users generate a concise summary of staged changes and use it as the commit message.
+
+Improve commit message suggestions
+
+Generates a shorter, more useful commit message from the current code changes."#;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -308,33 +336,54 @@ fn looks_like_tabular_data(diff: &str) -> bool {
 
 fn call_nvidia_api(api_key: &str, context: &str, files_skipped: usize) -> Result<String, String> {
     let skipped_note = if files_skipped > 0 {
-        format!(" {files_skipped} file(s) were omitted from the diff context.")
+        format!("\n\nNote: {files_skipped} file(s) were omitted from the diff (binaries, lockfiles, or large data).")
     } else {
         String::new()
     };
 
-    let prompt = format!(
-        "You are helping a developer understand their git changes before writing a commit message.\n\
-         Summarize the diff below in 2-4 short sentences. Focus on intent, behavior, and user-facing impact.\n\
-         Write plain prose suitable as a commit message draft (imperative mood is fine).\n\
-         Do not use markdown, bullet points, or file-by-file inventories.{skipped_note}\n\n\
-         {context}"
+    let user_prompt = format!(
+        "Write a commit message for these changes:{skipped_note}\n\n{context}"
     );
 
-    chat_completion(api_key, &prompt, 220, 0.2)
+    chat_completion(
+        api_key,
+        vec![
+            ChatMessage {
+                role: "system",
+                content: COMMIT_MESSAGE_SYSTEM_PROMPT.to_string(),
+            },
+            ChatMessage {
+                role: "user",
+                content: user_prompt,
+            },
+        ],
+        96,
+        0.15,
+    )
 }
 
 pub fn verify_nvidia_api_key(api_key: &str) -> Result<(), String> {
-    chat_completion(api_key, "Reply with OK.", 8, 0.2).map(|_| ())
+    chat_completion(
+        api_key,
+        vec![ChatMessage {
+            role: "user",
+            content: "Reply with OK.".to_string(),
+        }],
+        8,
+        0.2,
+    )
+    .map(|_| ())
 }
 
-fn chat_completion(api_key: &str, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
+fn chat_completion(
+    api_key: &str,
+    messages: Vec<ChatMessage<'_>>,
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<String, String> {
     let request = ChatRequest {
         model: NVIDIA_MODEL,
-        messages: vec![ChatMessage {
-            role: "user",
-            content: prompt.to_string(),
-        }],
+        messages,
         max_tokens,
         temperature,
         top_p: 0.95,
