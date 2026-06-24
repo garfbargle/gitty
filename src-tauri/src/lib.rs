@@ -886,6 +886,28 @@ async fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
 }
 
 #[tauri::command]
+fn reset_working_tree(path: String, include_untracked: bool) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let mut outputs = Vec::new();
+
+    outputs.push(git(repo_path, &["reset", "--hard", "HEAD"])?);
+
+    if include_untracked {
+        outputs.push(git(repo_path, &["clean", "-fd"])?);
+    }
+
+    Ok(ActionResult {
+        message: if include_untracked {
+            "All working tree changes discarded and untracked files removed.".to_string()
+        } else {
+            "All tracked changes discarded.".to_string()
+        },
+        output: outputs.join("\n\n"),
+    })
+}
+
+#[tauri::command]
 fn reset_to_commit(path: String, commit: String, mode: String) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let reset_flag = match mode.as_str() {
@@ -1027,6 +1049,7 @@ pub fn run() {
             fetch_repo,
             remove_remote,
             push_repo,
+            reset_working_tree,
             reset_to_commit,
             set_remote,
             get_app_settings,

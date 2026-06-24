@@ -13,6 +13,7 @@ import { SplitPane, type SplitOrientation } from "./components/SplitPane";
 import { SettingsDrawer } from "./components/MainToolbar";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
+import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
@@ -115,6 +116,7 @@ function App() {
   const [remoteName, setRemoteName] = useState("origin");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resetAllOpen, setResetAllOpen] = useState(false);
   const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
   const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
   const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
@@ -830,6 +832,24 @@ function App() {
     }
   }
 
+  async function resetAllWorkingTree(includeUntracked: boolean) {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("reset_working_tree", {
+        path: selectedPath,
+        includeUntracked,
+      }),
+    );
+    if (!result) return;
+    setResetAllOpen(false);
+    setFocus(null);
+    setDiff(emptyDiff);
+    setChangeSummaryVisible(false);
+    resetSummaryCache();
+    setMessage([result.message, result.output].filter(Boolean).join("\n"));
+    await refreshRepo();
+  }
+
   async function saveRemote() {
     const result = await run(() =>
       invoke<ActionResult>("set_remote", { path: selectedPath, name: remoteName, url: remoteUrl }),
@@ -1109,6 +1129,11 @@ function App() {
                     }}
                     onStage={(files, anchor) => void stageFiles(files, anchor)}
                     onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
+                    onResetAll={
+                      workingTreeActive && snapshot.changes.length > 0
+                        ? () => setResetAllOpen(true)
+                        : undefined
+                    }
                     disabled={loading}
                   />
 
@@ -1212,7 +1237,16 @@ function App() {
       </section>
 
       {snapshot ? (
-        <SettingsDrawer
+        <>
+          <ResetAllConfirmDialog
+            open={resetAllOpen}
+            repoName={snapshot.repo.name}
+            changes={snapshot.changes}
+            loading={loading}
+            onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
+            onCancel={() => setResetAllOpen(false)}
+          />
+          <SettingsDrawer
           open={settingsOpen}
           remotes={snapshot.remotes}
           remoteName={remoteName}
@@ -1238,6 +1272,7 @@ function App() {
           onRemoveRepo={() => void removeSelectedRepo()}
           disabled={loading}
         />
+        </>
       ) : null}
     </main>
   );

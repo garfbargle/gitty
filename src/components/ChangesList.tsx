@@ -14,6 +14,7 @@ type ChangesListProps = {
   onSelect: (file: FileChange, section: ChangeSection) => void;
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
+  onResetAll?: () => void;
   onFocusZone?: () => void;
   onExitToTimeline?: () => void;
   disabled?: boolean;
@@ -32,6 +33,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   onSelect,
   onStage,
   onUnstage,
+  onResetAll,
   onFocusZone,
   onExitToTimeline,
   disabled,
@@ -154,8 +156,21 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
       aria-label={isCommitView ? "Commit files" : "Changed files"}
     >
       <header className="panel-title">
-        <span>Changes</span>
-        <em>{changes.length}</em>
+        <span>
+          Changes
+          <em>{changes.length}</em>
+        </span>
+        {!isCommitView && changes.length > 0 && onResetAll ? (
+          <button
+            type="button"
+            className="badge reset-all"
+            disabled={disabled}
+            onClick={onResetAll}
+            title="Discard all uncommitted changes"
+          >
+            Reset all
+          </button>
+        ) : null}
       </header>
 
       {isCommitView ? (

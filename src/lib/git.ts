@@ -10,6 +10,12 @@ export function isUnstaged(change: FileChange) {
   return worktree !== " ";
 }
 
+export function isUntracked(change: FileChange) {
+  const index = change.status[0] ?? " ";
+  const worktree = change.status[1] ?? " ";
+  return index === "?" && worktree === "?";
+}
+
 export function changePathsKey(changes: FileChange[]): string {
   return [...new Set(changes.map((change) => change.path))].sort().join("|");
 }
