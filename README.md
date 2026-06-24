@@ -25,13 +25,13 @@ Navigate the timeline and file list with arrow keys. Switch repos, branches, and
 | Shortcut | Action |
 | --- | --- |
 | `Enter` | Focus the commit message field |
-| `⌘ Enter` | Commit staged changes, or apply AI summary and commit |
-| `⌘ ⇧ Enter` | Push |
-| `⌘ A` | Stage all changes |
+| `Mod Enter` | Commit staged changes, or apply AI summary and commit |
+| `Mod Shift Enter` | Push |
+| `Mod A` | Stage all changes |
 | `↑` / `↓` | Move selection in the timeline or file list |
 | `←` / `→` | Move between commits on the timeline |
 
-Shortcuts use `⌘` on macOS and `Ctrl` on other platforms.
+`Mod` is `⌘` on macOS and `Ctrl` on Windows and Linux.
 
 ## Free commit summarization
 
@@ -40,7 +40,7 @@ Gitty can draft commit messages from your staged changes using [NVIDIA NIM](http
 1. Get a free key at [build.nvidia.com/models](https://build.nvidia.com/models)
 2. Open **Settings** (sidebar gear icon) and paste it in
 3. Toggle **Auto summarize** to get suggestions as you stage, or trigger them manually from the commit panel
-4. Hit `⌘ Enter` to accept a suggestion and commit in one step
+4. Hit `Mod Enter` to accept a suggestion and commit in one step
 
 No Gitty subscription. No usage fees from us. Your key is stored locally in the app config directory.
 
@@ -70,9 +70,9 @@ Summaries are generated from staged diff content sent to NVIDIA's API — only e
 
 ## Requirements
 
-- **macOS 11+** (primary target; Tauri can build for other platforms)
+- **macOS 11+**, **Windows 10+**, or a recent **Linux** desktop
 - **Git** on `PATH`
-- For development: [Node.js](https://nodejs.org/) 18+, [Rust](https://www.rust-lang.org/tools/install), Xcode Command Line Tools
+- For development: [Node.js](https://nodejs.org/) 18+ and [Rust](https://www.rust-lang.org/tools/install) (stable)
 
 ## Development
 
@@ -104,20 +104,15 @@ cd src-tauri && cargo check
 
 ## Release build
 
-Unsigned local build:
+Build for your current platform:
 
 ```bash
 npm run tauri build
 ```
 
-Output:
+Tauri writes bundles under `src-tauri/target/release/bundle/` — for example `.app` / `.dmg` on macOS, `.msi` / `.exe` on Windows, and `.deb` / `.AppImage` on Linux (exact formats depend on your OS and Tauri config).
 
-```text
-src-tauri/target/release/bundle/macos/Gitty.app
-src-tauri/target/release/bundle/dmg/Gitty_0.1.0_aarch64.dmg
-```
-
-## Signed + notarized macOS release
+### Signed + notarized macOS release
 
 For distribution outside the App Store, use a **Developer ID Application** certificate (not the App Store "Apple Distribution" cert).
 
