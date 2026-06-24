@@ -13,6 +13,7 @@ type TopBarProps = {
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
+  pushState?: "idle" | "pushing" | "done";
   ahead?: number;
   behind?: number;
   hasRemotes?: boolean;
@@ -37,6 +38,7 @@ export function TopBar({
   viewMode,
   viewingCommit,
   loading,
+  pushState = "idle",
   ahead = 0,
   behind = 0,
   hasRemotes = false,
@@ -127,6 +129,7 @@ export function TopBar({
               behind={behind}
               hasRemotes={hasRemotes}
               loading={loading}
+              pushState={pushState}
               disabled={loading}
               onPush={onPush}
               onForcePush={onForcePush}

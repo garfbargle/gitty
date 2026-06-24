@@ -77,6 +77,7 @@ function App() {
   const [historySplit, setHistorySplit] = useState(0.55);
   const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [loading, setLoading] = useState(false);
+  const [pushState, setPushState] = useState<"idle" | "pushing" | "done">("idle");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
@@ -105,6 +106,8 @@ function App() {
   });
   focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
+  const pushLockRef = useRef(false);
+  const pushDoneTimerRef = useRef<number | null>(null);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
     [snapshot?.commits],
@@ -455,14 +458,32 @@ function App() {
   }
 
   async function push(force: boolean) {
-    if (!selectedPath) return;
+    if (!selectedPath || pushLockRef.current || pushState !== "idle") return;
     if (force && !window.confirm("Force push with --force-with-lease?")) return;
-    const result = await run(() =>
-      invoke<ActionResult>("push_repo", { path: selectedPath, force }),
-    );
-    if (result) {
-      setMessage([result.message, result.output].filter(Boolean).join("\n"));
-      await refreshRepo();
+
+    pushLockRef.current = true;
+    setPushState("pushing");
+
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("push_repo", { path: selectedPath, force }),
+      );
+      if (result) {
+        setMessage([result.message, result.output].filter(Boolean).join("\n"));
+        setPushState("done");
+        if (pushDoneTimerRef.current !== null) {
+          window.clearTimeout(pushDoneTimerRef.current);
+        }
+        pushDoneTimerRef.current = window.setTimeout(() => {
+          setPushState("idle");
+          pushDoneTimerRef.current = null;
+        }, 1400);
+        await refreshRepo();
+      } else {
+        setPushState("idle");
+      }
+    } finally {
+      pushLockRef.current = false;
     }
   }
 
@@ -564,7 +585,9 @@ function App() {
   const canPush = hasRemotes && (snapshot?.ahead ?? 0) > 0;
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || !canPush || loading) return;
+    if (viewMode !== "working" || !workingTreeActive || !canPush || loading || pushState !== "idle") {
+      return;
+    }
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
@@ -575,7 +598,15 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, canPush, loading]);
+  }, [viewMode, workingTreeActive, canPush, loading, pushState]);
+
+  useEffect(() => {
+    return () => {
+      if (pushDoneTimerRef.current !== null) {
+        window.clearTimeout(pushDoneTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (viewMode !== "working" || !workingTreeActive || loading) return;
@@ -672,6 +703,7 @@ function App() {
               changeCount={snapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
+              pushState={pushState}
               ahead={snapshot.ahead}
               behind={snapshot.behind}
               hasRemotes={hasRemotes}

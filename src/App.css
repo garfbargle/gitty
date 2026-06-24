@@ -828,8 +828,73 @@ button:focus-visible {
 
 .push-btn-main:disabled,
 .push-btn-chevron:disabled {
+  cursor: not-allowed;
   filter: grayscale(0.2);
   opacity: 0.65;
+}
+
+.push-btn-group.pushing .push-btn-main,
+.push-btn-group.pushing .push-btn-chevron {
+  animation: push-active-pulse 1.2s ease-in-out infinite;
+  cursor: wait;
+  opacity: 1;
+}
+
+.push-btn-group.pushing .push-btn-badge {
+  animation: push-badge-pulse 1.2s ease-in-out infinite;
+}
+
+.push-btn-group.done .push-btn-main,
+.push-btn-group.done .push-btn-chevron {
+  animation: push-done-pop 0.35s ease-out;
+  opacity: 1;
+}
+
+.push-btn-group.done .push-btn-main {
+  background: color-mix(in srgb, var(--success) 88%, #fff);
+}
+
+.push-btn-group.done.diverged .push-btn-main,
+.push-btn-group.done.diverged .push-btn-chevron {
+  background: color-mix(in srgb, var(--success) 88%, #fff);
+  border-color: color-mix(in srgb, var(--success) 70%, #000);
+  color: #052e1a;
+}
+
+@keyframes push-active-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 35%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+  }
+}
+
+@keyframes push-badge-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes push-done-pop {
+  0% {
+    transform: scale(0.97);
+  }
+
+  60% {
+    transform: scale(1.02);
+  }
+
+  100% {
+    transform: scale(1);
+  }
 }
 
 .push-btn-main kbd {

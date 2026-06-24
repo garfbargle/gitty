@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, Upload } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
+
+type PushState = "idle" | "pushing" | "done";
 
 type PushButtonProps = {
   ahead: number;
   behind: number;
   hasRemotes: boolean;
   loading?: boolean;
+  pushState?: PushState;
   disabled?: boolean;
   onPush: () => void;
   onForcePush: () => void;
@@ -16,6 +19,7 @@ export function PushButton({
   behind,
   hasRemotes,
   loading,
+  pushState = "idle",
   disabled,
   onPush,
   onForcePush,
@@ -24,6 +28,8 @@ export function PushButton({
   const rootRef = useRef<HTMLDivElement>(null);
   const canPush = hasRemotes && ahead > 0;
   const suggestsForcePush = behind > 0;
+  const isBusy = pushState !== "idle";
+  const isDisabled = disabled || loading || isBusy;
 
   useEffect(() => {
     if (!open) return;
@@ -46,16 +52,22 @@ export function PushButton({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (isBusy) setOpen(false);
+  }, [isBusy]);
+
   if (!canPush) {
     return null;
   }
 
-  const isDisabled = disabled || loading;
+  const statusLabel =
+    pushState === "pushing" ? "Pushing commits to remote…" : pushState === "done" ? "Push complete" : undefined;
 
   return (
     <div
-      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}`}
+      className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${pushState !== "idle" ? ` ${pushState}` : ""}`}
       ref={rootRef}
+      aria-live="polite"
     >
       <span className="push-btn-badge" aria-hidden="true">
         {ahead}
@@ -64,16 +76,36 @@ export function PushButton({
         type="button"
         className="push-btn-main"
         title={
-          suggestsForcePush
-            ? `${ahead} commit${ahead === 1 ? "" : "s"} to push — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`
-            : `Push ${ahead} commit${ahead === 1 ? "" : "s"}`
+          pushState === "pushing"
+            ? "Push in progress…"
+            : pushState === "done"
+              ? "Push completed"
+              : suggestsForcePush
+                ? `${ahead} commit${ahead === 1 ? "" : "s"} to push — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`
+                : `Push ${ahead} commit${ahead === 1 ? "" : "s"}`
         }
         disabled={isDisabled}
+        aria-busy={pushState === "pushing"}
+        aria-label={statusLabel}
         onClick={onPush}
       >
-        <Upload size={15} />
-        Push
-        <kbd>⌘⇧↵</kbd>
+        {pushState === "pushing" ? (
+          <>
+            <Loader2 size={15} className="spin" />
+            Pushing…
+          </>
+        ) : pushState === "done" ? (
+          <>
+            <Check size={15} />
+            Pushed
+          </>
+        ) : (
+          <>
+            <Upload size={15} />
+            Push
+            <kbd>⌘⇧↵</kbd>
+          </>
+        )}
       </button>
 
       {suggestsForcePush ? (
