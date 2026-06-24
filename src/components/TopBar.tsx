@@ -81,7 +81,7 @@ export function TopBar({
           aria-label={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
           onClick={onToggleView}
         >
-          {viewMode === "working" ? <GitCompareArrows size={15} /> : <History size={15} />}
+          {viewMode === "working" ? <History size={15} /> : <GitCompareArrows size={15} />}
         </button>
 
         <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />

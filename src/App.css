@@ -1982,6 +1982,14 @@ button:focus-visible {
   padding: 10px;
 }
 
+.change-summary-panel-clickable {
+  cursor: pointer;
+}
+
+.change-summary-panel-clickable:hover .change-summary-use {
+  color: var(--accent);
+}
+
 .change-summary-header {
   align-items: center;
   color: var(--text-muted);
@@ -2104,17 +2112,10 @@ button:focus-visible {
 }
 
 .change-summary-use {
-  background: transparent;
-  border: 0;
   color: var(--text);
-  cursor: pointer;
   padding: 0;
   text-align: left;
   width: 100%;
-}
-
-.change-summary-use:hover:not(:disabled) {
-  color: var(--accent);
 }
 
 .settings-hint {

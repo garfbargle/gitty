@@ -105,6 +105,11 @@ export function CommitPanel({
   const resetLabel = resetMode === "soft" ? "Soft Reset" : "Hard Reset";
   const showSummaryPanel =
     showCommitSection && changeCount > 0 && (changeSummaryVisible || changeSummaryLoading);
+  const summaryClickable =
+    nvidiaApiKeyConfigured &&
+    !!changeSummary?.trim() &&
+    !changeSummaryLoading &&
+    !disabled;
 
   useEffect(() => {
     if (nvidiaApiKeyConfigured) {
@@ -175,12 +180,20 @@ export function CommitPanel({
           />
 
           {showSummaryPanel ? (
-            <div className="change-summary-panel">
+            <div
+              className={`change-summary-panel${summaryClickable ? " change-summary-panel-clickable" : ""}`}
+              onClick={summaryClickable ? onUseSummary : undefined}
+              role={summaryClickable ? "button" : undefined}
+              title={summaryClickable ? "Use as commit message" : undefined}
+            >
               <div className="change-summary-header">
                 <button
                   type="button"
                   className="change-summary-icon-btn"
-                  onClick={toggleKeyInput}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleKeyInput();
+                  }}
                   title={
                     nvidiaApiKeyConfigured
                       ? "AI summary"
@@ -201,7 +214,10 @@ export function CommitPanel({
                 <button
                   type="button"
                   className="change-summary-dismiss"
-                  onClick={onDismissSummary}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDismissSummary();
+                  }}
                   title="Hide"
                   aria-label={nvidiaApiKeyConfigured ? "Hide summary" : "Hide AI setup"}
                 >
@@ -269,15 +285,7 @@ export function CommitPanel({
 
                   {changeSummary ? (
                     <>
-                      <button
-                        type="button"
-                        className="change-summary-body change-summary-use"
-                        onClick={onUseSummary}
-                        disabled={disabled}
-                        title="Use as commit message"
-                      >
-                        {changeSummary}
-                      </button>
+                      <p className="change-summary-body change-summary-use">{changeSummary}</p>
                       <p className="change-summary-hint muted">
                         <kbd>⌘↵</kbd> to commit
                       </p>
@@ -286,7 +294,10 @@ export function CommitPanel({
                           type="button"
                           className="change-summary-resummarize"
                           disabled={disabled || changeSummaryLoading}
-                          onClick={onResummarizeStaged}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onResummarizeStaged();
+                          }}
                         >
                           Summarize staged only ({stagedCount} file{stagedCount === 1 ? "" : "s"})
                         </button>
@@ -296,7 +307,10 @@ export function CommitPanel({
                           type="button"
                           className="change-summary-resummarize"
                           disabled={disabled || changeSummaryLoading}
-                          onClick={onShowAllChangesSummary}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onShowAllChangesSummary();
+                          }}
                         >
                           Show all changes summary
                         </button>
