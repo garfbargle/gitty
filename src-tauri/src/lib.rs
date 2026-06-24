@@ -1572,6 +1572,14 @@ fn set_auto_summarize_enabled(app: AppHandle, enabled: bool) -> Result<settings:
 }
 
 #[tauri::command]
+fn set_push_on_commit(app: AppHandle, enabled: bool) -> Result<settings::AppSettingsView, String> {
+    let mut current = settings::load_settings(&app)?;
+    current.push_on_commit = enabled;
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
 fn set_nvidia_api_key(app: AppHandle, api_key: String) -> Result<settings::AppSettingsView, String> {
     let mut current = settings::load_settings(&app)?;
     let normalized = settings::normalize_nvidia_api_key(&api_key);
@@ -1663,6 +1671,7 @@ pub fn run() {
             set_remote,
             get_app_settings,
             set_auto_summarize_enabled,
+            set_push_on_commit,
             set_nvidia_api_key,
             delete_nvidia_api_key,
             test_nvidia_api_key,

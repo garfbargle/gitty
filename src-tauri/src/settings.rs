@@ -9,6 +9,8 @@ const SETTINGS_FILE: &str = "settings.json";
 pub struct AppSettings {
     #[serde(default = "default_auto_summarize_enabled")]
     pub auto_summarize_enabled: bool,
+    #[serde(default)]
+    pub push_on_commit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nvidia_api_key: Option<String>,
 }
@@ -17,6 +19,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             auto_summarize_enabled: default_auto_summarize_enabled(),
+            push_on_commit: false,
             nvidia_api_key: None,
         }
     }
@@ -30,6 +33,7 @@ fn default_auto_summarize_enabled() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct AppSettingsView {
     pub auto_summarize_enabled: bool,
+    pub push_on_commit: bool,
     pub nvidia_api_key_configured: bool,
     pub nvidia_api_key_preview: Option<String>,
 }
@@ -71,6 +75,7 @@ pub fn settings_view(app: &AppHandle) -> Result<AppSettingsView, String> {
 
     Ok(AppSettingsView {
         auto_summarize_enabled: settings.auto_summarize_enabled,
+        push_on_commit: settings.push_on_commit,
         nvidia_api_key_configured,
         nvidia_api_key_preview: settings
             .nvidia_api_key

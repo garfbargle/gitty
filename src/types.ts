@@ -80,6 +80,7 @@ export type ActionResult = {
 
 export type AppSettingsView = {
   autoSummarizeEnabled: boolean;
+  pushOnCommit: boolean;
   nvidiaApiKeyConfigured: boolean;
   nvidiaApiKeyPreview?: string | null;
 };

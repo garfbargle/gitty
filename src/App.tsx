@@ -354,6 +354,17 @@ function App() {
     setNvidiaApiKeyConfigured(settings.nvidiaApiKeyConfigured);
     setNvidiaApiKeyPreview(settings.nvidiaApiKeyPreview ?? null);
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
+    setPushOnCommit(settings.pushOnCommit);
+  }
+
+  async function handlePushOnCommitChange(enabled: boolean) {
+    setPushOnCommit(enabled);
+    try {
+      const settings = await invoke<AppSettingsView>("set_push_on_commit", { enabled });
+      applyAppSettings(settings);
+    } catch (err) {
+      setError(String(err));
+    }
   }
 
   function openRepoSettings() {
@@ -1712,7 +1723,7 @@ function App() {
                       onNvidiaApiKeyChange={setNvidiaApiKey}
                       onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}
                       onAmendChange={(checked) => void handleAmendChange(checked)}
-                      onPushOnCommitChange={setPushOnCommit}
+                      onPushOnCommitChange={(checked) => void handlePushOnCommitChange(checked)}
                       onResetModeChange={setResetMode}
                       onCommit={() => void commit()}
                       onReset={() => void reset()}
