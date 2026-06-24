@@ -57,6 +57,9 @@ export function PushButton({
       className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}`}
       ref={rootRef}
     >
+      <span className="push-btn-badge" aria-hidden="true">
+        {ahead}
+      </span>
       <button
         type="button"
         className="push-btn-main"
@@ -70,7 +73,6 @@ export function PushButton({
       >
         <Upload size={15} />
         Push
-        <em>{ahead}</em>
         <kbd>⌘⇧↵</kbd>
       </button>
 

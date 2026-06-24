@@ -469,12 +469,13 @@ function App() {
   const pushRef = useRef(push);
   pushRef.current = push;
 
-  const stageAllRef = useRef(() => {});
-  stageAllRef.current = () => {
-    if (!snapshot) return;
-    const paths = snapshot.changes.filter(isUnstaged).map((file) => file.path);
+  const stageAllRef = useRef(async () => {});
+  stageAllRef.current = async () => {
+    const snap = await refreshRepo();
+    if (!snap) return;
+    const paths = snap.changes.filter(isUnstaged).map((file) => file.path);
     if (paths.length === 0) return;
-    void stageFiles(paths);
+    await stageFiles(paths);
   };
 
   async function reset() {
@@ -577,19 +578,19 @@ function App() {
   }, [viewMode, workingTreeActive, canPush, loading]);
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || loading || unstagedCount === 0) return;
+    if (viewMode !== "working" || !workingTreeActive || loading) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== "a") return;
       if (shouldIgnoreKeyboardNavigation(event)) return;
       event.preventDefault();
-      stageAllRef.current();
+      void stageAllRef.current();
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, loading, unstagedCount]);
+  }, [viewMode, workingTreeActive, loading]);
 
   useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;

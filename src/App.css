@@ -740,6 +740,44 @@ button:focus-visible {
   position: relative;
 }
 
+.push-btn-badge {
+  align-items: center;
+  background: #111827;
+  border: 2px solid var(--bg-panel);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  left: -7px;
+  line-height: 1;
+  min-width: 18px;
+  padding: 2px 5px;
+  pointer-events: none;
+  position: absolute;
+  top: -7px;
+  z-index: 2;
+}
+
+.push-btn-group.diverged .push-btn-badge {
+  background: #7c2d12;
+  color: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .push-btn-badge {
+    background: #f9fafb;
+    color: #111827;
+  }
+
+  .push-btn-group.diverged .push-btn-badge {
+    background: #451a03;
+    color: #fef3c7;
+  }
+}
+
 .push-btn-main,
 .push-btn-chevron {
   align-items: center;
@@ -792,17 +830,6 @@ button:focus-visible {
 .push-btn-chevron:disabled {
   filter: grayscale(0.2);
   opacity: 0.65;
-}
-
-.push-btn-main em {
-  background: rgba(0, 0, 0, 0.12);
-  border-radius: 999px;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-  min-width: 18px;
-  padding: 1px 6px;
-  text-align: center;
 }
 
 .push-btn-main kbd {
