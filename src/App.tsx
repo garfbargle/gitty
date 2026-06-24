@@ -528,9 +528,14 @@ function App() {
 
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
   const unstagedCount = snapshot?.changes.filter(isUnstaged).length ?? 0;
+  const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
+  const showCommitSection = workingTreeActive;
+  const showResetSection = !!viewingCommit;
+  const showPushActions = workingTreeActive && hasRemotes && (snapshot?.ahead ?? 0) > 0;
+  const showSetupRemote = workingTreeActive && !hasRemotes;
 
   useEffect(() => {
-    if (viewMode !== "working") return;
+    if (viewMode !== "working" || !workingTreeActive) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
@@ -543,7 +548,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode]);
+  }, [viewMode, workingTreeActive]);
 
   useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;
@@ -695,6 +700,10 @@ function App() {
                     selectedCommit={selectedCommit}
                     stagedCount={stagedCount}
                     unstagedCount={unstagedCount}
+                    showCommitSection={showCommitSection}
+                    showResetSection={showResetSection}
+                    showPushActions={showPushActions}
+                    showSetupRemote={showSetupRemote}
                     onMessageChange={setCommitMessage}
                     onAmendChange={(checked) => void handleAmendChange(checked)}
                     onResetModeChange={setResetMode}
@@ -702,6 +711,7 @@ function App() {
                     onPush={() => void push(false)}
                     onForcePush={() => void push(true)}
                     onReset={() => void reset()}
+                    onSetupRemote={() => setSettingsOpen(true)}
                     disabled={loading}
                   />
                 </div>

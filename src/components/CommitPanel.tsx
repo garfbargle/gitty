@@ -2,6 +2,7 @@ import { useEffect, type RefObject } from "react";
 import {
   AlertTriangle,
   GitCommitHorizontal,
+  Link2,
   RotateCcw,
   Send,
 } from "lucide-react";
@@ -17,6 +18,10 @@ type CommitPanelProps = {
   selectedCommit?: CommitEntry | null;
   stagedCount: number;
   unstagedCount: number;
+  showCommitSection?: boolean;
+  showResetSection?: boolean;
+  showPushActions?: boolean;
+  showSetupRemote?: boolean;
   onMessageChange: (value: string) => void;
   onAmendChange: (value: boolean) => void;
   onResetModeChange: (mode: "soft" | "hard") => void;
@@ -24,6 +29,7 @@ type CommitPanelProps = {
   onPush: () => void;
   onForcePush: () => void;
   onReset: () => void;
+  onSetupRemote: () => void;
   disabled?: boolean;
 };
 
@@ -37,6 +43,10 @@ export function CommitPanel({
   selectedCommit,
   stagedCount,
   unstagedCount,
+  showCommitSection = true,
+  showResetSection = false,
+  showPushActions = false,
+  showSetupRemote = false,
   onMessageChange,
   onAmendChange,
   onResetModeChange,
@@ -44,12 +54,17 @@ export function CommitPanel({
   onPush,
   onForcePush,
   onReset,
+  onSetupRemote,
   disabled,
 }: CommitPanelProps) {
   const canCommit = (stagedCount > 0 || amend) && message.trim().length > 0;
   const localBranches = branches.filter((b) => !b.isRemote);
+  const showActionsSection =
+    showPushActions || showSetupRemote || (showResetSection && !!selectedCommit);
 
   useEffect(() => {
+    if (!showCommitSection) return;
+
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canCommit && !disabled) {
         event.preventDefault();
@@ -58,114 +73,137 @@ export function CommitPanel({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canCommit, disabled, onCommit]);
+  }, [canCommit, disabled, onCommit, showCommitSection]);
 
   return (
     <aside className="commit-panel">
-      <section className="panel-block">
-        <header className="panel-title">
-          <GitCommitHorizontal size={14} />
-          <span>Commit</span>
-        </header>
+      {showCommitSection ? (
+        <section className="panel-block">
+          <header className="panel-title">
+            <GitCommitHorizontal size={14} />
+            <span>Commit</span>
+          </header>
 
-        <label className="field-label" htmlFor="commit-message">
-          Message
-        </label>
-        <textarea
-          id="commit-message"
-          ref={messageInputRef}
-          className="commit-message-input"
-          value={message}
-          onChange={(event) => onMessageChange(event.currentTarget.value)}
-          placeholder="Commit message"
-          rows={4}
-          disabled={disabled}
-        />
-
-        <label className="field-label">Commit to</label>
-        <select className="branch-select" value={branch} disabled>
-          {localBranches.map((b) => (
-            <option key={b.name} value={b.name}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-
-        <label className="amend-check">
-          <input
-            type="checkbox"
-            checked={amend}
-            onChange={(event) => onAmendChange(event.currentTarget.checked)}
+          <label className="field-label" htmlFor="commit-message">
+            Message
+          </label>
+          <textarea
+            id="commit-message"
+            ref={messageInputRef}
+            className="commit-message-input"
+            value={message}
+            onChange={(event) => onMessageChange(event.currentTarget.value)}
+            placeholder="Commit message"
+            rows={4}
             disabled={disabled}
           />
-          Amend last commit
-        </label>
 
-        <button
-          type="button"
-          className="commit-primary"
-          disabled={disabled || !canCommit}
-          onClick={onCommit}
-        >
-          Commit
-          <kbd>⌘↵</kbd>
-        </button>
-      </section>
+          <label className="field-label">Commit to</label>
+          <select className="branch-select" value={branch} disabled>
+            {localBranches.map((b) => (
+              <option key={b.name} value={b.name}>
+                {b.name}
+              </option>
+            ))}
+          </select>
 
-      <section className="panel-block">
-        <header className="panel-title">Actions</header>
-        <button type="button" className="action-row" disabled={disabled} onClick={onPush}>
-          <Send size={15} />
-          <span>Push</span>
-          <kbd>⌘⇧P</kbd>
-        </button>
-        <button type="button" className="action-row danger" disabled={disabled} onClick={onForcePush}>
-          <AlertTriangle size={15} />
-          <span>Force Push</span>
-          <kbd>⌥⇧P</kbd>
-        </button>
-        <button
-          type="button"
-          className="action-row warn"
-          disabled={disabled || !selectedCommit}
-          onClick={onReset}
-        >
-          <RotateCcw size={15} />
-          <span>Reset Current Branch</span>
-        </button>
-      </section>
+          <label className="amend-check">
+            <input
+              type="checkbox"
+              checked={amend}
+              onChange={(event) => onAmendChange(event.currentTarget.checked)}
+              disabled={disabled}
+            />
+            Amend last commit
+          </label>
 
-      <section className="panel-block reset-block">
-        <header className="panel-title">Reset to Commit</header>
-        <div className="reset-toggle">
           <button
             type="button"
-            className={resetMode === "soft" ? "active" : ""}
-            onClick={() => onResetModeChange("soft")}
+            className="commit-primary"
+            disabled={disabled || !canCommit}
+            onClick={onCommit}
           >
-            Soft
+            Commit
+            <kbd>⌘↵</kbd>
           </button>
-          <button
-            type="button"
-            className={`${resetMode === "hard" ? "active hard" : ""}`}
-            onClick={() => onResetModeChange("hard")}
-          >
-            Hard
-          </button>
-        </div>
-        {resetMode === "hard" && (stagedCount > 0 || unstagedCount > 0) ? (
-          <p className="reset-warning">
-            This will discard {stagedCount} staged and {unstagedCount} unstaged changes.
-          </p>
-        ) : null}
-        <select className="branch-select" value={selectedCommit?.hash ?? ""} disabled>
-          <option value="">
-            {selectedCommit
-              ? `${selectedCommit.shortHash} · ${selectedCommit.subject}`
-              : "Select commit from history"}
-          </option>
-        </select>
-      </section>
+        </section>
+      ) : null}
+
+      {showActionsSection ? (
+        <section className="panel-block">
+          <header className="panel-title">Actions</header>
+          {showPushActions ? (
+            <>
+              <button type="button" className="action-row" disabled={disabled} onClick={onPush}>
+                <Send size={15} />
+                <span>Push</span>
+                <kbd>⌘⇧P</kbd>
+              </button>
+              <button
+                type="button"
+                className="action-row danger"
+                disabled={disabled}
+                onClick={onForcePush}
+              >
+                <AlertTriangle size={15} />
+                <span>Force Push</span>
+                <kbd>⌥⇧P</kbd>
+              </button>
+            </>
+          ) : null}
+          {showSetupRemote ? (
+            <button type="button" className="action-row" disabled={disabled} onClick={onSetupRemote}>
+              <Link2 size={15} />
+              <span>Set Up Remote</span>
+            </button>
+          ) : null}
+          {showResetSection && selectedCommit ? (
+            <button
+              type="button"
+              className="action-row warn"
+              disabled={disabled}
+              onClick={onReset}
+            >
+              <RotateCcw size={15} />
+              <span>Reset Current Branch</span>
+            </button>
+          ) : null}
+        </section>
+      ) : null}
+
+      {showResetSection ? (
+        <section className="panel-block reset-block">
+          <header className="panel-title">Reset to Commit</header>
+          <div className="reset-toggle">
+            <button
+              type="button"
+              className={resetMode === "soft" ? "active" : ""}
+              onClick={() => onResetModeChange("soft")}
+            >
+              Soft
+            </button>
+            <button
+              type="button"
+              className={`${resetMode === "hard" ? "active hard" : ""}`}
+              onClick={() => onResetModeChange("hard")}
+            >
+              Hard
+            </button>
+          </div>
+          {resetMode === "hard" && (stagedCount > 0 || unstagedCount > 0) ? (
+            <p className="reset-warning">
+              This will discard {stagedCount} staged and {unstagedCount} unstaged changes.
+            </p>
+          ) : null}
+          <select className="branch-select" value={selectedCommit?.hash ?? ""} disabled>
+            <option value="">
+              {selectedCommit
+                ? `${selectedCommit.shortHash} · ${selectedCommit.subject}`
+                : "Select commit from history"}
+            </option>
+          </select>
+        </section>
+      ) : null}
     </aside>
   );
 }
