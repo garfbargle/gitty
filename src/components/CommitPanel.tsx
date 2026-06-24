@@ -20,6 +20,7 @@ type CommitPanelProps = {
   amend: boolean;
   resetMode: "soft" | "hard";
   selectedCommit?: CommitEntry | null;
+  selectedCommitMessage?: string;
   stagedCount: number;
   unstagedCount: number;
   changeCount: number;
@@ -60,6 +61,7 @@ export function CommitPanel({
   amend,
   resetMode,
   selectedCommit,
+  selectedCommitMessage = "",
   stagedCount,
   unstagedCount,
   changeCount,
@@ -361,9 +363,11 @@ export function CommitPanel({
             Move <strong>{branch}</strong> to this commit:
           </p>
 
-          <div className="reset-target" title={selectedCommit.subject}>
+          <div className="reset-target">
             <code>{selectedCommit.shortHash}</code>
-            <span>{selectedCommit.subject}</span>
+            <div className="reset-target-message">
+              {selectedCommitMessage || selectedCommit.subject}
+            </div>
           </div>
 
           <label className="field-label">Mode</label>

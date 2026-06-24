@@ -1032,6 +1032,16 @@ fn head_commit_message(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn commit_message(path: String, commit: String) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let message = git(
+        Path::new(&repo.path),
+        &["log", "-1", "--format=%B", commit.trim()],
+    )?;
+    Ok(message.trim_end().to_string())
+}
+
+#[tauri::command]
 fn commit_repo(path: String, message: String, amend: Option<bool>) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let message = message.trim().to_string();
@@ -1292,6 +1302,7 @@ pub fn run() {
             stage_all,
             commit_repo,
             head_commit_message,
+            commit_message,
             fetch_repo,
             remove_remote,
             push_repo,

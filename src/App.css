@@ -2210,12 +2210,15 @@ button:focus-visible {
   font-size: 12px;
 }
 
-.reset-target span {
+.reset-target-message {
   color: var(--text-primary);
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  max-height: 140px;
+  min-height: 56px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .reset-mode-hint {

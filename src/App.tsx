@@ -132,6 +132,7 @@ function App() {
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("working");
   const [viewingCommit, setViewingCommit] = useState<CommitEntry | null>(null);
+  const [viewingCommitMessage, setViewingCommitMessage] = useState("");
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
@@ -450,6 +451,7 @@ function App() {
 
   function applyRepoSwitchCleanup() {
     setViewingCommit(null);
+    setViewingCommitMessage("");
     setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
@@ -1086,6 +1088,30 @@ function App() {
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
   const showCommitSection = workingTreeActive;
   const showResetSection = !!viewingCommit;
+
+  useEffect(() => {
+    if (!viewingCommit || !selectedPath) {
+      setViewingCommitMessage("");
+      return;
+    }
+
+    let active = true;
+    void (async () => {
+      try {
+        const text = await invoke<string>("commit_message", {
+          path: selectedPath,
+          commit: viewingCommit.hash,
+        });
+        if (active) setViewingCommitMessage(text);
+      } catch {
+        if (active) setViewingCommitMessage(viewingCommit.subject);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [viewingCommit, selectedPath]);
   const showSetupRemote = workingTreeActive && !hasRemotes;
   const showGittyEmptyState = workingTreeActive && changeCount === 0;
 
@@ -1326,6 +1352,7 @@ function App() {
                       amend={amend}
                       resetMode={resetMode}
                       selectedCommit={selectedCommit}
+                      selectedCommitMessage={viewingCommitMessage}
                       stagedCount={stagedCount}
                       unstagedCount={unstagedCount}
                       changeCount={changeCount}
