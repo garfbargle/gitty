@@ -29,10 +29,11 @@ import type {
   DiscoveredRepoEntry,
   FileChange,
   RepoEntry,
+  RepoChanges,
   RepoSnapshot,
   SelectionAnchor,
 } from "./types";
-import { changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey, tagName } from "./lib/git";
+import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey, tagName } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import {
   buildTimelineItems,
@@ -201,6 +202,12 @@ function App() {
   const changesListRef = useRef<ChangesListHandle>(null);
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
+  const workingTreeRefreshInFlightRef = useRef(false);
+  const focusRefreshTimerRef = useRef<number | null>(null);
+  const lastFocusRefreshAtRef = useRef(0);
+  const snapshotGenerationRef = useRef(0);
+  const FOCUS_REFRESH_DEBOUNCE_MS = 400;
+  const FOCUS_REFRESH_MIN_INTERVAL_MS = 2000;
   const summaryCacheRef = useRef<SummaryCache>(emptySummaryCache());
   const summarizeRequestRef = useRef(0);
   const summaryHiddenUntilNewRef = useRef(false);
@@ -498,9 +505,10 @@ function App() {
   ): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const updateState = options?.updateState !== false;
+    const generation = snapshotGenerationRef.current;
     try {
       const result = await invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 });
-      if (updateState) {
+      if (updateState && generation === snapshotGenerationRef.current) {
         setSnapshot(result);
         setSelectedPath(result.repo.path);
       }
@@ -511,25 +519,59 @@ function App() {
     }
   }
 
-  async function refreshWorkingTree() {
-    const snap = await refreshRepo();
-    if (!snap) return;
+  async function refreshChangesQuiet(path = selectedPath): Promise<FileChange[] | null> {
+    if (!path) return null;
+    try {
+      const result = await invoke<RepoChanges>("repo_changes", { path });
+      setSnapshot((prev) =>
+        prev && prev.repo.path === path
+          ? { ...prev, changes: result.changes, isClean: result.isClean }
+          : prev,
+      );
+      return result.changes;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  }
 
-    const currentFocus = focusRefreshContextRef.current.focus;
-    if (currentFocus?.kind === "file" && currentFocus.section !== "commit") {
-      const list =
-        currentFocus.section === "unstaged"
-          ? snap.changes.filter(isUnstaged)
-          : snap.changes.filter(isStaged);
-      const match = list.find((file) => file.path === currentFocus.file.path);
-      if (match) {
-        await inspectFile(match, currentFocus.section);
-      } else if (list.length > 0) {
-        await inspectFile(list[0], currentFocus.section);
-      } else {
-        setFocus(null);
-        setDiff(emptyDiff);
+  function applyChangesOptimistic(files: string[], stage: boolean) {
+    snapshotGenerationRef.current += 1;
+    setSnapshot((prev) => {
+      if (!prev) return prev;
+      const changes = applyStageToChanges(prev.changes, files, stage);
+      return { ...prev, changes, isClean: changes.length === 0 };
+    });
+  }
+
+  async function refreshWorkingTree() {
+    if (workingTreeRefreshInFlightRef.current) return;
+    const { selectedPath: path } = focusRefreshContextRef.current;
+    if (!path) return;
+
+    workingTreeRefreshInFlightRef.current = true;
+    try {
+      const changes = await refreshChangesQuiet(path);
+      if (!changes) return;
+
+      const currentFocus = focusRefreshContextRef.current.focus;
+      if (currentFocus?.kind === "file" && currentFocus.section !== "commit") {
+        const list =
+          currentFocus.section === "unstaged"
+            ? changes.filter(isUnstaged)
+            : changes.filter(isStaged);
+        const match = list.find((file) => file.path === currentFocus.file.path);
+        if (match) {
+          await inspectFileQuiet(match, currentFocus.section, path);
+        } else if (list.length > 0) {
+          await inspectFileQuiet(list[0], currentFocus.section, path);
+        } else {
+          setFocus(null);
+          setDiff(emptyDiff);
+        }
       }
+    } finally {
+      workingTreeRefreshInFlightRef.current = false;
     }
   }
 
@@ -545,7 +587,17 @@ function App() {
         if (!focused || !active) return;
         const { selectedPath, viewMode, viewingCommit } = focusRefreshContextRef.current;
         if (!selectedPath || viewMode !== "working" || viewingCommit) return;
-        void refreshWorkingTreeRef.current();
+        if (Date.now() - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
+          return;
+        }
+        if (focusRefreshTimerRef.current !== null) {
+          window.clearTimeout(focusRefreshTimerRef.current);
+        }
+        focusRefreshTimerRef.current = window.setTimeout(() => {
+          focusRefreshTimerRef.current = null;
+          lastFocusRefreshAtRef.current = Date.now();
+          void refreshWorkingTreeRef.current();
+        }, FOCUS_REFRESH_DEBOUNCE_MS);
       })
       .then((fn) => {
         if (active) unlisten = fn;
@@ -554,27 +606,34 @@ function App() {
 
     return () => {
       active = false;
+      if (focusRefreshTimerRef.current !== null) {
+        window.clearTimeout(focusRefreshTimerRef.current);
+        focusRefreshTimerRef.current = null;
+      }
       unlisten?.();
     };
   }, []);
 
-  async function selectAfterToggle(anchor: SelectionAnchor) {
-    const snap = await refreshRepo();
-    if (!snap) return;
-
+  async function selectAfterToggle(anchor: SelectionAnchor, changes?: FileChange[]) {
     const list =
-      anchor.section === "unstaged"
-        ? snap.changes.filter(isUnstaged)
-        : snap.changes.filter(isStaged);
+      changes ??
+      (await refreshChangesQuiet()) ??
+      snapshot?.changes ??
+      [];
 
-    if (list.length === 0) {
+    const sectionList =
+      anchor.section === "unstaged"
+        ? list.filter(isUnstaged)
+        : list.filter(isStaged);
+
+    if (sectionList.length === 0) {
       setFocus(null);
       setDiff(emptyDiff);
       return;
     }
 
-    const index = Math.min(anchor.index, list.length - 1);
-    await inspectFile(list[index], anchor.section);
+    const index = Math.min(anchor.index, sectionList.length - 1);
+    await inspectFileQuiet(sectionList[index], anchor.section);
   }
 
   async function addRepo(path: string) {
@@ -794,21 +853,77 @@ function App() {
   }
 
   async function stageFiles(files: string[], anchor?: SelectionAnchor) {
-    const result = await run(() =>
-      invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: true }),
-    );
-    if (!result) return;
-    if (anchor) await selectAfterToggle(anchor);
-    else await refreshRepo();
+    if (!selectedPath || files.length === 0) return;
+
+    setLoading(true);
+    setError("");
+    let success = false;
+    try {
+      await invoke<ActionResult>("stage_files", {
+        path: selectedPath,
+        files,
+        stage: true,
+      });
+      success = true;
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+    if (!success) return;
+
+    applyChangesOptimistic(files, true);
+    const changes = await refreshChangesQuiet();
+    if (!changes) return;
+
+    if (anchor) {
+      await selectAfterToggle(anchor, changes);
+      return;
+    }
+
+    if (focus?.kind === "file" && files.includes(focus.file.path)) {
+      const staged = changes.find((file) => file.path === focus.file.path && isStaged(file));
+      if (staged) {
+        await inspectFileQuiet(staged, "staged");
+      }
+    }
   }
 
   async function unstageFiles(files: string[], anchor?: SelectionAnchor) {
-    const result = await run(() =>
-      invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: false }),
-    );
-    if (!result) return;
-    if (anchor) await selectAfterToggle(anchor);
-    else await refreshRepo();
+    if (!selectedPath || files.length === 0) return;
+
+    setLoading(true);
+    setError("");
+    let success = false;
+    try {
+      await invoke<ActionResult>("stage_files", {
+        path: selectedPath,
+        files,
+        stage: false,
+      });
+      success = true;
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+    if (!success) return;
+
+    applyChangesOptimistic(files, false);
+    const changes = await refreshChangesQuiet();
+    if (!changes) return;
+
+    if (anchor) {
+      await selectAfterToggle(anchor, changes);
+      return;
+    }
+
+    if (focus?.kind === "file" && files.includes(focus.file.path)) {
+      const unstaged = changes.find((file) => file.path === focus.file.path && isUnstaged(file));
+      if (unstaged) {
+        await inspectFileQuiet(unstaged, "unstaged");
+      }
+    }
   }
 
   async function handleAmendChange(checked: boolean) {
@@ -988,15 +1103,24 @@ function App() {
     try {
       const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force });
       setMessage([result.message, result.output].filter(Boolean).join("\n"));
-      setPushPhase("done");
-      if (pushDoneTimerRef.current !== null) {
-        window.clearTimeout(pushDoneTimerRef.current);
-      }
-      pushDoneTimerRef.current = window.setTimeout(() => {
+      const snap = await refreshRepoQuiet(selectedPath);
+      const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
+      if (remaining === 0) {
+        if (pushDoneTimerRef.current !== null) {
+          window.clearTimeout(pushDoneTimerRef.current);
+          pushDoneTimerRef.current = null;
+        }
         setPushPhase("idle");
-        pushDoneTimerRef.current = null;
-      }, 1600);
-      await refreshRepoQuiet(selectedPath);
+      } else {
+        setPushPhase("done");
+        if (pushDoneTimerRef.current !== null) {
+          window.clearTimeout(pushDoneTimerRef.current);
+        }
+        pushDoneTimerRef.current = window.setTimeout(() => {
+          setPushPhase("idle");
+          pushDoneTimerRef.current = null;
+        }, 1600);
+      }
       return true;
     } catch (err) {
       setError(String(err));
@@ -1013,9 +1137,8 @@ function App() {
 
   const stageAllRef = useRef(async () => {});
   stageAllRef.current = async () => {
-    const snap = await refreshRepo();
-    if (!snap) return;
-    const paths = snap.changes.filter(isUnstaged).map((file) => file.path);
+    if (!selectedPath || !snapshot || snapshot.repo.path !== selectedPath) return;
+    const paths = snapshot.changes.filter(isUnstaged).map((file) => file.path);
     if (paths.length === 0) return;
     await stageFiles(paths);
   };

@@ -157,7 +157,9 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
             type="checkbox"
             checked={isStagedRow}
             disabled={disabled}
-            onChange={() => toggleStage(entry)}
+            onChange={() =>
+              toggleStage(entry, { section: entry.section, index: indexInSection(entry) })
+            }
           />
         ) : null}
         <button

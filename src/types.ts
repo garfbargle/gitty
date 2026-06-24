@@ -44,6 +44,11 @@ export type TagEntry = {
   unpushed: boolean;
 };
 
+export type RepoChanges = {
+  changes: FileChange[];
+  isClean: boolean;
+};
+
 export type RepoSnapshot = {
   repo: RepoEntry;
   branch: string;

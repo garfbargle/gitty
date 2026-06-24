@@ -31,10 +31,11 @@ export function PushButton({
   const badgeAheadRef = useRef(ahead + unpushedTags);
 
   const pushCount = ahead + unpushedTags;
-  const visible = hasRemotes && (pushCount > 0 || pushPhase !== "idle");
+  const visible = hasRemotes && (pushCount > 0 || pushPhase === "pushing" || pushPhase === "done");
   const suggestsForcePush = behind > 0;
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
+  const showBadge = pushPhase === "pushing" || (pushPhase === "idle" && pushCount > 0);
 
   useEffect(() => {
     if (pushPhase === "idle") {
@@ -71,7 +72,7 @@ export function PushButton({
     return null;
   }
 
-  const badgeCount = pushPhase === "idle" ? pushCount : badgeAheadRef.current;
+  const badgeCount = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
 
   function pushTitle() {
     if (pushPhase === "pushing") return "Push in progress…";
@@ -98,9 +99,11 @@ export function PushButton({
       ref={rootRef}
       aria-live="polite"
     >
-      <span className="push-btn-badge" aria-hidden="true">
-        {badgeCount}
-      </span>
+      {showBadge ? (
+        <span className="push-btn-badge" aria-hidden="true">
+          {badgeCount}
+        </span>
+      ) : null}
       <button
         type="button"
         className="push-btn-main"

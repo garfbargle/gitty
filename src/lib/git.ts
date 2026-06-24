@@ -28,6 +28,39 @@ export function stagedPathsKey(changes: FileChange[]): string {
     .join("|");
 }
 
+function optimisticStaged(change: FileChange): FileChange {
+  const index = change.status[0] ?? " ";
+  const worktree = change.status[1] ?? " ";
+  if (index === "?" && worktree === "?") {
+    return { ...change, status: "A " };
+  }
+  const stagedIndex = index !== " " && index !== "?" ? index : worktree !== " " ? worktree : "M";
+  return { ...change, status: `${stagedIndex} ` };
+}
+
+function optimisticUnstaged(change: FileChange): FileChange {
+  const index = change.status[0] ?? " ";
+  const worktree = change.status[1] ?? " ";
+  if (index === "A" && worktree === " ") {
+    return { ...change, status: "??" };
+  }
+  const wt = worktree !== " " ? worktree : index !== " " && index !== "?" ? index : "M";
+  return { ...change, status: ` ${wt}` };
+}
+
+export function applyStageToChanges(
+  changes: FileChange[],
+  paths: string[],
+  stage: boolean,
+): FileChange[] {
+  if (paths.length === 0) return changes;
+  const pathSet = new Set(paths);
+  return changes.map((change) => {
+    if (!pathSet.has(change.path)) return change;
+    return stage ? optimisticStaged(change) : optimisticUnstaged(change);
+  });
+}
+
 export function statusCode(status: string) {
   const index = status[0] ?? " ";
   const worktree = status[1] ?? " ";

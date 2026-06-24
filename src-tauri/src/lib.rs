@@ -739,6 +739,23 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoChanges {
+    changes: Vec<FileChange>,
+    is_clean: bool,
+}
+
+#[tauri::command]
+fn repo_changes(path: String) -> Result<RepoChanges, String> {
+    let repo = normalize_repo(&path)?;
+    let changes = changed_files(Path::new(&repo.path));
+    Ok(RepoChanges {
+        is_clean: changes.is_empty(),
+        changes,
+    })
+}
+
 #[tauri::command]
 async fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || repo_snapshot_blocking(path, limit))
@@ -1457,6 +1474,7 @@ pub fn run() {
             remove_repo,
             start_repo_discovery,
             repo_snapshot,
+            repo_changes,
             commit_files_command,
             commit_diff,
             file_diff,
