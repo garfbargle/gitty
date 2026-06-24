@@ -428,6 +428,7 @@ fn ahead_commits(
     repo_path: &Path,
     head_commits: &[CommitEntry],
     limit: u32,
+    current_branch: &str,
 ) -> (Vec<CommitEntry>, Option<String>) {
     let head = match git(repo_path, &["rev-parse", "HEAD"]) {
         Ok(hash) if !hash.is_empty() => hash,
@@ -440,11 +441,10 @@ fn ahead_commits(
     let mut resume_branch: Option<String> = None;
     let mut best_count = 0usize;
 
-    let current_branch = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
     let relevant_branches: Vec<String> = if current_branch.is_empty() {
         branches_containing(repo_path, &head)
     } else {
-        vec![current_branch.clone()]
+        vec![current_branch.to_string()]
     };
 
     for branch in &relevant_branches {
@@ -480,7 +480,7 @@ fn ahead_commits(
             if current_branch.is_empty() {
                 None
             } else {
-                Some(current_branch)
+                Some(current_branch.to_string())
             }
         })
     };
@@ -593,13 +593,31 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
 fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
+    let log_limit = limit.unwrap_or(120);
+
     let branch = current_branch(&repo_path);
     let upstream = upstream(&repo_path);
+
+    let repo_path_changes = repo_path.clone();
+    let repo_path_commits = repo_path.clone();
+    let repo_path_remotes = repo_path.clone();
+    let repo_path_branches = repo_path.clone();
+
+    let (changes, commits, remotes, branches) = std::thread::scope(|scope| {
+        let changes_handle = scope.spawn(|| changed_files(&repo_path_changes));
+        let commits_handle = scope.spawn(|| commit_log(&repo_path_commits, log_limit));
+        let remotes_handle = scope.spawn(|| remote_list(&repo_path_remotes));
+        let branches_handle = scope.spawn(|| branch_list(&repo_path_branches));
+        (
+            changes_handle.join().unwrap(),
+            commits_handle.join().unwrap(),
+            remotes_handle.join().unwrap(),
+            branches_handle.join().unwrap(),
+        )
+    });
+
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
-    let changes = changed_files(&repo_path);
-    let log_limit = limit.unwrap_or(120);
-    let commits = commit_log(&repo_path, log_limit);
-    let (ahead_commits, ahead_branch) = ahead_commits(&repo_path, &commits, log_limit);
+    let (ahead_commits, ahead_branch) = ahead_commits(&repo_path, &commits, log_limit, &branch);
 
     Ok(RepoSnapshot {
         repo,
@@ -612,8 +630,8 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
         commits,
         ahead_commits,
         ahead_branch,
-        remotes: remote_list(&repo_path),
-        branches: branch_list(&repo_path),
+        remotes,
+        branches,
     })
 }
 

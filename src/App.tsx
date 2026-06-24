@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderPlus, GitBranch } from "lucide-react";
+import { FolderPlus, GitBranch, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
@@ -176,7 +176,13 @@ function App() {
   }, [snapshot]);
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
+  const displaySnapshot = useMemo(() => {
+    if (!snapshot) return null;
+    if (selectedPath && snapshot.repo.path !== selectedPath) return null;
+    return snapshot;
+  }, [snapshot, selectedPath]);
   const discoveryStarted = useRef(false);
+  const selectRepoRequestRef = useRef(0);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
   const focusRefreshContextRef = useRef({
     selectedPath,
@@ -268,12 +274,13 @@ function App() {
 
   useEffect(() => {
     if (!snapshot || viewMode !== "working") return;
+    if (snapshot.repo.path !== selectedPath) return;
     const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
     if (first) {
       const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
-      void inspectFile(first, section, snapshot.repo.path);
+      void inspectFileQuiet(first, section, snapshot.repo.path);
     }
-  }, [snapshot?.repo.path]);
+  }, [snapshot?.repo.path, selectedPath, viewMode]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
     setLoading(true);
@@ -422,6 +429,10 @@ function App() {
   }
 
   async function selectRepo(path: string) {
+    if (path === selectedPath && snapshot?.repo.path === path) return;
+
+    const requestId = ++selectRepoRequestRef.current;
+
     setSelectedPath(path);
     setViewingCommit(null);
     setCommitFiles([]);
@@ -434,7 +445,15 @@ function App() {
     setViewMode("working");
     setNavZone("files");
     setRepoSettingsOpen(false);
-    await refreshRepo(path);
+
+    const result = await refreshRepoQuiet(path, { updateState: false });
+    if (requestId !== selectRepoRequestRef.current) return;
+    if (result) {
+      setSnapshot(result);
+      setSelectedPath(result.repo.path);
+    } else if (snapshot?.repo.path) {
+      setSelectedPath(snapshot.repo.path);
+    }
   }
 
   async function refreshRepo(path = selectedPath): Promise<RepoSnapshot | null> {
@@ -450,12 +469,18 @@ function App() {
     return null;
   }
 
-  async function refreshRepoQuiet(path = selectedPath): Promise<RepoSnapshot | null> {
+  async function refreshRepoQuiet(
+    path = selectedPath,
+    options?: { updateState?: boolean },
+  ): Promise<RepoSnapshot | null> {
     if (!path) return null;
+    const updateState = options?.updateState !== false;
     try {
       const result = await invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 });
-      setSnapshot(result);
-      setSelectedPath(result.repo.path);
+      if (updateState) {
+        setSnapshot(result);
+        setSelectedPath(result.repo.path);
+      }
       return result;
     } catch (err) {
       setError(String(err));
@@ -614,6 +639,18 @@ function App() {
       invoke<string>("file_diff", { path, filePath: file.path }),
     );
     if (result !== null) setDiff(result || "This file has no tracked diff.");
+  }
+
+  async function inspectFileQuiet(file: FileChange, section: ChangeSection, path = selectedPath) {
+    setViewingCommit(null);
+    setCommitFiles([]);
+    setFocus({ kind: "file", file, section });
+    try {
+      const result = await invoke<string>("file_diff", { path, filePath: file.path });
+      setDiff(result || "This file has no tracked diff.");
+    } catch (err) {
+      setError(String(err));
+    }
   }
 
   async function checkoutBranch(branch: string) {
@@ -1179,22 +1216,22 @@ function App() {
       />
 
       <section className="main-area">
-        {snapshot ? (
+        {displaySnapshot ? (
           <>
             <TopBar
               repos={repos}
               selectedPath={selectedPath}
-              branch={snapshot.branch}
-              branches={branchNames.length > 0 ? branchNames : [snapshot.branch]}
-              commits={snapshot.commits}
-              aheadCommits={snapshot.aheadCommits ?? []}
-              aheadBranch={snapshot.aheadBranch}
-              changeCount={snapshot.changes.length}
+              branch={displaySnapshot.branch}
+              branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
+              commits={displaySnapshot.commits}
+              aheadCommits={displaySnapshot.aheadCommits ?? []}
+              aheadBranch={displaySnapshot.aheadBranch}
+              changeCount={displaySnapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
               pushPhase={pushPhase}
-              ahead={snapshot.ahead}
-              behind={snapshot.behind}
+              ahead={displaySnapshot.ahead}
+              behind={displaySnapshot.behind}
               hasRemotes={hasRemotes}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
@@ -1222,10 +1259,10 @@ function App() {
             {viewMode === "working" ? (
               <div className="working-view">
                 <HistoryTimeline
-                  key={snapshot.repo.path}
-                  commits={snapshot.commits}
-                  aheadCommits={snapshot.aheadCommits ?? []}
-                  changeCount={snapshot.changes.length}
+                  key={displaySnapshot.repo.path}
+                  commits={displaySnapshot.commits}
+                  aheadCommits={displaySnapshot.aheadCommits ?? []}
+                  changeCount={displaySnapshot.changes.length}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
                   onInteract={() => setNavZone("timeline")}
@@ -1234,12 +1271,12 @@ function App() {
                 />
 
                 {showGittyEmptyState ? (
-                  <GittyEmptyState projectName={snapshot.repo.name} />
+                  <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
                     <ChangesList
                       ref={changesListRef}
-                      changes={viewingCommit ? commitFiles : snapshot.changes}
+                      changes={viewingCommit ? commitFiles : displaySnapshot.changes}
                       repoPath={selectedPath}
                       variant={viewingCommit ? "commit" : "working"}
                       selectedKey={selectedFileKey}
@@ -1257,7 +1294,7 @@ function App() {
                       onStage={(files, anchor) => void stageFiles(files, anchor)}
                       onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
                       onResetAll={
-                        workingTreeActive && snapshot.changes.length > 0
+                        workingTreeActive && displaySnapshot.changes.length > 0
                           ? () => setResetAllOpen(true)
                           : undefined
                       }
@@ -1278,8 +1315,8 @@ function App() {
                     <CommitPanel
                       message={commitMessage}
                       messageInputRef={commitMessageRef}
-                      branch={snapshot.branch}
-                      branches={snapshot.branches ?? []}
+                      branch={displaySnapshot.branch}
+                      branches={displaySnapshot.branches ?? []}
                       amend={amend}
                       resetMode={resetMode}
                       selectedCommit={selectedCommit}
@@ -1326,7 +1363,7 @@ function App() {
                   onSplitChange={setHistorySplit}
                   primary={
                     <HistoryTable
-                      commits={snapshot.commits}
+                      commits={displaySnapshot.commits}
                       selectedHash={selectedCommit?.hash}
                       search=""
                       onSelect={(commit) => void inspectCommitHistory(commit)}
@@ -1345,6 +1382,11 @@ function App() {
               </div>
             )}
           </>
+        ) : selectedPath ? (
+          <div className="repo-loading-state">
+            <RefreshCw size={28} className="spin" />
+            <p>Loading repository…</p>
+          </div>
         ) : (
           <div className="empty-state">
             <GitBranch size={36} />
@@ -1364,20 +1406,20 @@ function App() {
         )}
       </section>
 
-      {snapshot ? (
+      {displaySnapshot ? (
         <>
           <ResetAllConfirmDialog
             open={resetAllOpen}
-            repoName={snapshot.repo.name}
-            changes={snapshot.changes}
+            repoName={displaySnapshot.repo.name}
+            changes={displaySnapshot.changes}
             loading={loading}
             onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
             onCancel={() => setResetAllOpen(false)}
           />
           <RepoSettingsDrawer
             open={repoSettingsOpen}
-            repoName={snapshot.repo.name}
-            remotes={snapshot.remotes}
+            repoName={displaySnapshot.repo.name}
+            remotes={displaySnapshot.remotes}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}
             onRemoveRemote={removeRemote}

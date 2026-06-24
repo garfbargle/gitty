@@ -5,3 +5,6 @@ src-tauri/target/
 
 .DS_Store
 *.log
+
+.env.macos-signing.local
+AuthKey_*.p8
