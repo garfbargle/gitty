@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { ChangeSection, FileChange } from "../types";
+import type { ChangeSection, FileChange, SelectionAnchor } from "../types";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 
 type ChangeEntry = {
@@ -12,8 +12,8 @@ type ChangesListProps = {
   changes: FileChange[];
   selectedKey?: string;
   onSelect: (file: FileChange, section: ChangeSection) => void;
-  onStage: (files: string[]) => void;
-  onUnstage: (files: string[]) => void;
+  onStage: (files: string[], anchor?: SelectionAnchor) => void;
+  onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
   disabled?: boolean;
 };
 
@@ -74,12 +74,17 @@ export function ChangesList({
     selectEntry(entries[next]);
   }
 
-  function toggleStage(entry: ChangeEntry) {
+  function indexInSection(entry: ChangeEntry) {
+    const list = entry.section === "unstaged" ? unstaged : staged;
+    return list.findIndex((file) => file.path === entry.file.path);
+  }
+
+  function toggleStage(entry: ChangeEntry, anchor?: SelectionAnchor) {
     if (disabled) return;
     if (entry.section === "unstaged") {
-      onStage([entry.file.path]);
+      onStage([entry.file.path], anchor);
     } else {
-      onUnstage([entry.file.path]);
+      onUnstage([entry.file.path], anchor);
     }
   }
 
@@ -93,7 +98,8 @@ export function ChangesList({
     } else if (event.key === " " || event.code === "Space") {
       event.preventDefault();
       if (activeIndex < 0) return;
-      toggleStage(entries[activeIndex]);
+      const entry = entries[activeIndex];
+      toggleStage(entry, { section: entry.section, index: indexInSection(entry) });
     }
   }
 

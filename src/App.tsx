@@ -20,6 +20,7 @@ import type {
   FileChange,
   RepoEntry,
   RepoSnapshot,
+  SelectionAnchor,
 } from "./types";
 import { isStaged, isUnstaged, parseRefs, primaryRef } from "./lib/git";
 import "./App.css";
@@ -172,18 +173,23 @@ function App() {
     return null;
   }
 
-  async function syncFileSelectionAfterToggle(paths: string[]) {
-    if (paths.length !== 1) return;
+  async function selectAfterToggle(anchor: SelectionAnchor) {
     const snap = await refreshRepo();
     if (!snap) return;
-    const updated = snap.changes.find((change) => change.path === paths[0]);
-    if (!updated) {
+
+    const list =
+      anchor.section === "unstaged"
+        ? snap.changes.filter(isUnstaged)
+        : snap.changes.filter(isStaged);
+
+    if (list.length === 0) {
       setFocus(null);
       setDiff(emptyDiff);
       return;
     }
-    const section: ChangeSection = isStaged(updated) ? "staged" : "unstaged";
-    await inspectFile(updated, section);
+
+    const index = Math.min(anchor.index, list.length - 1);
+    await inspectFile(list[index], anchor.section);
   }
 
   async function addRepo(path: string) {
@@ -252,18 +258,22 @@ function App() {
     }
   }
 
-  async function stageFiles(files: string[]) {
+  async function stageFiles(files: string[], anchor?: SelectionAnchor) {
     const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: true }),
     );
-    if (result) await syncFileSelectionAfterToggle(files);
+    if (!result) return;
+    if (anchor) await selectAfterToggle(anchor);
+    else await refreshRepo();
   }
 
-  async function unstageFiles(files: string[]) {
+  async function unstageFiles(files: string[], anchor?: SelectionAnchor) {
     const result = await run(() =>
       invoke<ActionResult>("stage_files", { path: selectedPath, files, stage: false }),
     );
-    if (result) await syncFileSelectionAfterToggle(files);
+    if (!result) return;
+    if (anchor) await selectAfterToggle(anchor);
+    else await refreshRepo();
   }
 
   async function commit() {
@@ -427,8 +437,8 @@ function App() {
                     changes={snapshot.changes}
                     selectedKey={selectedFileKey}
                     onSelect={(file, section) => void inspectFile(file, section)}
-                    onStage={(files) => void stageFiles(files)}
-                    onUnstage={(files) => void unstageFiles(files)}
+                    onStage={(files, anchor) => void stageFiles(files, anchor)}
+                    onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
                     disabled={loading}
                   />
 

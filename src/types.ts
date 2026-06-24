@@ -57,6 +57,11 @@ export type ActionResult = {
 
 export type ChangeSection = "unstaged" | "staged";
 
+export type SelectionAnchor = {
+  section: ChangeSection;
+  index: number;
+};
+
 export type DiffFocus =
   | { kind: "commit"; commit: CommitEntry }
   | { kind: "file"; file: FileChange; section: ChangeSection }
