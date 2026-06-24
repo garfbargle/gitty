@@ -466,6 +466,17 @@ function App() {
     }
   }
 
+  const pushRef = useRef(push);
+  pushRef.current = push;
+
+  const stageAllRef = useRef(() => {});
+  stageAllRef.current = () => {
+    if (!snapshot) return;
+    const paths = snapshot.changes.filter(isUnstaged).map((file) => file.path);
+    if (paths.length === 0) return;
+    void stageFiles(paths);
+  };
+
   async function reset() {
     if (!selectedCommit || !selectedPath) return;
     if (resetMode === "hard" && !window.confirm(`Hard reset to ${selectedCommit.shortHash}?`)) {
@@ -548,6 +559,37 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewMode, workingTreeActive]);
+
+  const canPush = hasRemotes && (snapshot?.ahead ?? 0) > 0;
+
+  useEffect(() => {
+    if (viewMode !== "working" || !workingTreeActive || !canPush || loading) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      void pushRef.current(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewMode, workingTreeActive, canPush, loading]);
+
+  useEffect(() => {
+    if (viewMode !== "working" || !workingTreeActive || loading || unstagedCount === 0) return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "a") return;
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+      event.preventDefault();
+      stageAllRef.current();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewMode, workingTreeActive, loading, unstagedCount]);
 
   useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;

@@ -71,6 +71,7 @@ export function PushButton({
         <Upload size={15} />
         Push
         <em>{ahead}</em>
+        <kbd>⌘⇧↵</kbd>
       </button>
 
       {suggestsForcePush ? (

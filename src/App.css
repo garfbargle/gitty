@@ -805,6 +805,16 @@ button:focus-visible {
   text-align: center;
 }
 
+.push-btn-main kbd {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 2px;
+  padding: 2px 5px;
+}
+
 .push-btn-group.diverged .push-btn-main,
 .push-btn-group.diverged .push-btn-chevron {
   background: var(--warning);
@@ -1172,6 +1182,16 @@ button:focus-visible {
 .badge.stage-all:hover:not(:disabled) {
   background: var(--success);
   color: var(--bg-panel);
+}
+
+.badge.stage-all kbd {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  padding: 1px 4px;
 }
 
 .diff-toolbar-right {

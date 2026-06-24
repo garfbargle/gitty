@@ -180,9 +180,10 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
                   className="badge stage-all"
                   disabled={disabled}
                   onClick={() => onStage(unstaged.map((file) => file.path))}
-                  title="Stage all changes"
+                  title="Stage all changes (⌘A)"
                 >
                   Stage all
+                  <kbd>⌘A</kbd>
                 </button>
               ) : null}
             </div>
