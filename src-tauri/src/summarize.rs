@@ -14,32 +14,34 @@ const NVIDIA_API_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completio
 const NVIDIA_MODEL: &str = "meta/llama-3.1-8b-instruct";
 const COMMIT_MESSAGE_SYSTEM_PROMPT: &str = r#"You write concise Git commit messages from code changes.
 
-Your output must be simple, practical, and not over-explained.
+Default to a single imperative title line. Add a body line only when it adds new detail the title cannot carry (scope, rationale, breaking change, migration step).
 
 Rules:
 - Do not mention "this commit" unless necessary.
-- Do not repeat the same idea in multiple ways.
-- Prefer one short title and, only if useful, one brief body sentence.
+- Never restate or paraphrase the title in the body.
+- If the title fully describes the change, output only the title with no body.
 - Focus on user-facing behavior and developer intent, not implementation trivia.
 - Do not include marketing language.
 - Do not include headings like "Here's a summary" or "Draft commit message."
 - Do not mention APIs, libraries, or internal tools unless they are central to the change.
-- Keep the whole response under 3 sentences.
+- Keep the whole response under 2 sentences.
 
 Output format:
-<imperative commit title>
-
-<optional one-sentence explanation>
+<title only, OR title plus one additive body sentence>
 
 Examples:
 
-Add AI-generated commit summaries
+Fix summarize scope for unstaged changes
 
-Let users generate a concise summary of staged changes and use it as the commit message.
+Add keyboard shortcut for commit panel
 
-Improve commit message suggestions
+Remove deprecated OAuth callback route
 
-Generates a shorter, more useful commit message from the current code changes."#;
+Requires users to re-authenticate after deploy.
+
+Rename settings drawer to AppSettingsDrawer
+
+Across commit panel, top bar, and history table."#;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
