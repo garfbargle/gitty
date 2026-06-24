@@ -6,6 +6,7 @@ export type PushPhase = "idle" | "pushing" | "done";
 type PushButtonProps = {
   ahead: number;
   behind: number;
+  unpushedTags?: number;
   hasRemotes: boolean;
   pushPhase?: PushPhase;
   loading?: boolean;
@@ -17,6 +18,7 @@ type PushButtonProps = {
 export function PushButton({
   ahead,
   behind,
+  unpushedTags = 0,
   hasRemotes,
   pushPhase = "idle",
   loading,
@@ -26,18 +28,19 @@ export function PushButton({
 }: PushButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const badgeAheadRef = useRef(ahead);
+  const badgeAheadRef = useRef(ahead + unpushedTags);
 
-  const visible = hasRemotes && (ahead > 0 || pushPhase !== "idle");
+  const pushCount = ahead + unpushedTags;
+  const visible = hasRemotes && (pushCount > 0 || pushPhase !== "idle");
   const suggestsForcePush = behind > 0;
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
 
   useEffect(() => {
     if (pushPhase === "idle") {
-      badgeAheadRef.current = ahead;
+      badgeAheadRef.current = pushCount;
     }
-  }, [ahead, pushPhase]);
+  }, [pushCount, pushPhase]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +71,26 @@ export function PushButton({
     return null;
   }
 
-  const badgeCount = pushPhase === "idle" ? ahead : badgeAheadRef.current;
+  const badgeCount = pushPhase === "idle" ? pushCount : badgeAheadRef.current;
+
+  function pushTitle() {
+    if (pushPhase === "pushing") return "Push in progress…";
+    if (pushPhase === "done") return "Push completed";
+
+    const parts: string[] = [];
+    if (ahead > 0) {
+      parts.push(`${ahead} commit${ahead === 1 ? "" : "s"}`);
+    }
+    if (unpushedTags > 0) {
+      parts.push(`${unpushedTags} tag${unpushedTags === 1 ? "" : "s"}`);
+    }
+    const summary = parts.length > 0 ? parts.join(" and ") : "changes";
+
+    if (suggestsForcePush) {
+      return `Push ${summary} — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`;
+    }
+    return `Push ${summary}`;
+  }
 
   return (
     <div
@@ -82,15 +104,7 @@ export function PushButton({
       <button
         type="button"
         className="push-btn-main"
-        title={
-          pushPhase === "pushing"
-            ? "Push in progress…"
-            : pushPhase === "done"
-              ? "Push completed"
-              : suggestsForcePush
-                ? `${ahead} commit${ahead === 1 ? "" : "s"} to push — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`
-                : `Push ${ahead} commit${ahead === 1 ? "" : "s"}`
-        }
+        title={pushTitle()}
         disabled={isLocked}
         aria-busy={pushPhase === "pushing"}
         onClick={() => void onPush()}

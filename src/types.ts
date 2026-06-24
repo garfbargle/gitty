@@ -37,6 +37,13 @@ export type BranchEntry = {
   upstream?: string | null;
 };
 
+export type TagEntry = {
+  name: string;
+  date: string;
+  shortHash: string;
+  unpushed: boolean;
+};
+
 export type RepoSnapshot = {
   repo: RepoEntry;
   branch: string;
@@ -50,6 +57,8 @@ export type RepoSnapshot = {
   aheadBranch?: string | null;
   remotes: RemoteEntry[];
   branches: BranchEntry[];
+  tags: TagEntry[];
+  unpushedTags: string[];
 };
 
 export type ActionResult = {

@@ -61,6 +61,15 @@ struct BranchEntry {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct TagEntry {
+    name: String,
+    date: String,
+    short_hash: String,
+    unpushed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RepoSnapshot {
     repo: RepoEntry,
     branch: String,
@@ -74,6 +83,8 @@ struct RepoSnapshot {
     ahead_branch: Option<String>,
     remotes: Vec<RemoteEntry>,
     branches: Vec<BranchEntry>,
+    tags: Vec<TagEntry>,
+    unpushed_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -218,6 +229,88 @@ fn parse_ahead_behind(output: &str) -> (u32, u32) {
         .and_then(|value| value.parse().ok())
         .unwrap_or(0);
     (ahead, behind)
+}
+
+fn validate_tag_name(name: &str) -> Result<String, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Tag name is required.".to_string());
+    }
+    if name.starts_with('-') || name.contains("..") || name.ends_with('.') || name.ends_with('/') {
+        return Err("Invalid tag name.".to_string());
+    }
+    if name.contains(' ') {
+        return Err("Tag names cannot contain spaces.".to_string());
+    }
+    Ok(name)
+}
+
+fn local_tags(repo_path: &Path) -> Vec<String> {
+    let Ok(output) = git(repo_path, &["tag", "-l"]) else {
+        return Vec::new();
+    };
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn unpushed_tags(repo_path: &Path) -> Vec<String> {
+    let Some(remote) = default_remote_name(repo_path) else {
+        return Vec::new();
+    };
+
+    local_tags(repo_path)
+        .into_iter()
+        .filter(|tag| {
+            let local_ref = format!("refs/tags/{tag}");
+            let Ok(local_hash) = git(repo_path, &["rev-parse", &local_ref]) else {
+                return false;
+            };
+            let remote_ref = format!("refs/tags/{tag}");
+            let remote_output = git(repo_path, &["ls-remote", &remote, &remote_ref]).unwrap_or_default();
+            let remote_hash = remote_output.split_whitespace().next().unwrap_or("");
+            remote_hash != local_hash
+        })
+        .collect()
+}
+
+fn tag_list(repo_path: &Path) -> Vec<TagEntry> {
+    let unpushed: HashSet<String> = unpushed_tags(repo_path).into_iter().collect();
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "refs/tags",
+            "--sort=-creatordate",
+            "--format=%(refname:short)\x1f%(creatordate:iso-strict)\x1f%(*objectname:short)\x1e",
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    output
+        .split('\x1e')
+        .filter_map(|record| {
+            let record = record.trim();
+            if record.is_empty() {
+                return None;
+            }
+
+            let mut parts = record.split('\x1f');
+            let name = parts.next()?.to_string();
+            let date = parts.next().unwrap_or_default().to_string();
+            let short_hash = parts.next().unwrap_or_default().to_string();
+            Some(TagEntry {
+                name: name.clone(),
+                date,
+                short_hash,
+                unpushed: unpushed.contains(&name),
+            })
+        })
+        .collect()
 }
 
 fn unpushed_without_tracking(repo_path: &Path) -> (u32, u32) {
@@ -625,6 +718,8 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
     let (ahead_commits, ahead_branch) =
         ahead_commits(&repo_path, &commits, log_limit, &branch);
+    let unpushed_tags = unpushed_tags(&repo_path);
+    let tags = tag_list(&repo_path);
 
     Ok(RepoSnapshot {
         repo,
@@ -639,6 +734,8 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
         ahead_branch,
         remotes,
         branches,
+        tags,
+        unpushed_tags,
     })
 }
 
@@ -1107,34 +1204,69 @@ fn remove_remote(path: String, name: String) -> Result<ActionResult, String> {
     })
 }
 
+fn push_tags(repo_path: &Path, remote: &str, tags: &[String]) -> Result<String, String> {
+    if tags.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut args = vec!["push".to_string(), remote.to_string()];
+    args.extend(tags.iter().cloned());
+    git_owned(repo_path, args)
+}
+
 fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let branch = current_branch(repo_path);
-    let mut args = vec!["push".to_string()];
-    if force {
-        args.push("--force-with-lease".to_string());
-    }
+    let tags_to_push = unpushed_tags(repo_path);
+    let remote = default_remote_name(repo_path);
+    let mut outputs = Vec::new();
+    let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
+    let branch_pushed = ahead > 0 || (force && behind > 0);
 
-    if upstream(repo_path).is_none() {
-        if !is_detached_branch(&branch) {
-            if let Some(remote) = default_remote_name(repo_path) {
-                args.push("-u".to_string());
-                args.push(remote);
-                args.push(branch);
+    if branch_pushed {
+        let mut args = vec!["push".to_string()];
+        if force {
+            args.push("--force-with-lease".to_string());
+        }
+
+        if upstream(repo_path).is_none() {
+            if !is_detached_branch(&branch) {
+                if let Some(remote_name) = remote.as_deref() {
+                    args.push("-u".to_string());
+                    args.push(remote_name.to_string());
+                    args.push(branch.clone());
+                }
             }
         }
+
+        outputs.push(git_owned(repo_path, args)?);
     }
 
-    let output = git_owned(repo_path, args)?;
+    if !tags_to_push.is_empty() {
+        let remote_name = remote
+            .as_deref()
+            .ok_or_else(|| "Add a remote before pushing tags.".to_string())?;
+        outputs.push(push_tags(repo_path, remote_name, &tags_to_push)?);
+    }
+
+    if outputs.is_empty() {
+        return Err("Nothing to push.".to_string());
+    }
+
+    let tag_count = tags_to_push.len();
+    let message = match (branch_pushed, tag_count) {
+        (true, 0) if force => "Force push completed with --force-with-lease.".to_string(),
+        (true, 0) => "Push completed.".to_string(),
+        (true, 1) => "Push completed (1 tag pushed).".to_string(),
+        (true, count) => format!("Push completed ({count} tags pushed)."),
+        (false, 1) => "Pushed 1 tag.".to_string(),
+        (false, count) => format!("Pushed {count} tags."),
+    };
 
     Ok(ActionResult {
-        message: if force {
-            "Force push completed with --force-with-lease.".to_string()
-        } else {
-            "Push completed.".to_string()
-        },
-        output,
+        message,
+        output: outputs.join("\n\n"),
     })
 }
 
@@ -1143,6 +1275,34 @@ async fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
     tauri::async_runtime::spawn_blocking(move || push_repo_blocking(path, force))
         .await
         .map_err(|err| format!("Push task failed: {err}"))?
+}
+
+#[tauri::command]
+fn create_tag(path: String, name: String, commit: Option<String>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let name = validate_tag_name(&name)?;
+    let mut args = vec!["tag".to_string(), name.clone()];
+    if let Some(commit) = commit.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        args.push(commit);
+    }
+    let output = git_owned(repo_path, args)?;
+    Ok(ActionResult {
+        message: format!("Created tag {name}."),
+        output,
+    })
+}
+
+#[tauri::command]
+fn delete_tag(path: String, name: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let name = validate_tag_name(&name)?;
+    let output = git(repo_path, &["tag", "-d", &name])?;
+    Ok(ActionResult {
+        message: format!("Deleted tag {name}."),
+        output,
+    })
 }
 
 #[tauri::command]
@@ -1311,6 +1471,8 @@ pub fn run() {
             fetch_repo,
             remove_remote,
             push_repo,
+            create_tag,
+            delete_tag,
             reset_working_tree,
             reset_to_commit,
             set_remote,

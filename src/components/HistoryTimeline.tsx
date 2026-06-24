@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CommitEntry } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
+import { buildCommitTagMenuItems } from "../lib/commitTags";
 import { laneColor } from "../lib/graph";
-import { formatDate, formatRelativeTime, relativeTimeRefreshMs } from "../lib/git";
+import { formatDate, formatRelativeTime, relativeTimeRefreshMs, tagName, tagRefs } from "../lib/git";
+import { ContextMenu } from "./ContextMenu";
+import { TagBadge } from "./TagBadge";
 
 const SCROLL_END_THRESHOLD = 24;
 const SCROLLBAR_HIDE_DELAY_MS = 800;
@@ -11,10 +14,13 @@ type HistoryTimelineProps = {
   commits: CommitEntry[];
   aheadCommits?: CommitEntry[];
   changeCount: number;
+  unpushedTags?: Set<string>;
   selectedHash?: string;
   onSelect: (commit: CommitEntry) => void;
   onSelectWorkingTree: () => void;
   onInteract?: () => void;
+  onCreateTag?: (commit: CommitEntry) => void;
+  onDeleteTag?: (commit: CommitEntry, name: string) => void;
   workingTreeActive?: boolean;
 };
 
@@ -22,12 +28,22 @@ export function HistoryTimeline({
   commits,
   aheadCommits = [],
   changeCount,
+  unpushedTags,
   selectedHash,
   onSelect,
   onSelectWorkingTree,
   onInteract,
+  onCreateTag,
+  onDeleteTag,
   workingTreeActive,
 }: HistoryTimelineProps) {
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ReturnType<typeof buildCommitTagMenuItems>;
+  } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const tagActionsEnabled = !!(onCreateTag && onDeleteTag);
   const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
   const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
   const commitDates = useMemo(
@@ -198,6 +214,20 @@ export function HistoryTimeline({
     onSelectWorkingTree();
   }
 
+  function openTagContextMenu(event: React.MouseEvent, commit: CommitEntry) {
+    if (!tagActionsEnabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: buildCommitTagMenuItems(commit, {
+        onCreateTag: onCreateTag!,
+        onDeleteTag: onDeleteTag!,
+      }),
+    });
+  }
+
   function renderCommitNode(
     commit: CommitEntry,
     index: number,
@@ -206,6 +236,8 @@ export function HistoryTimeline({
   ) {
     const color = laneColor(index % 6);
     const active = commit.hash === selectedHash && !workingTreeActive;
+    const tags = tagRefs(commit.refs).map(tagName);
+    const tagSummary = tags.length > 0 ? ` · ${tags.join(", ")}` : "";
     return (
       <button
         className={`timeline-node ${active ? "active" : ""} ${isAhead ? "ahead" : ""}`}
@@ -216,7 +248,8 @@ export function HistoryTimeline({
           else nodeRefs.current.delete(commit.hash);
         }}
         onClick={() => selectCommit(commit)}
-        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${isAhead ? " · ahead on branch" : ""}`}
+        onContextMenu={(event) => openTagContextMenu(event, commit)}
+        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}`}
       >
         <span
           className="node-dot"
@@ -230,6 +263,13 @@ export function HistoryTimeline({
         <span className="node-hash">{commit.shortHash}</span>
         <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
         <span className="node-subject">{commit.subject}</span>
+        {tags.length > 0 ? (
+          <span className="node-tags">
+            {tags.map((name) => (
+              <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
+            ))}
+          </span>
+        ) : null}
         {isAhead ? <span className="node-ahead-label">ahead</span> : null}
         {showConnector ? <span className="node-connector" style={{ background: color }} /> : null}
       </button>
@@ -271,6 +311,15 @@ export function HistoryTimeline({
           )}
         </div>
       </div>
+
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={closeContextMenu}
+        />
+      ) : null}
     </div>
   );
 }

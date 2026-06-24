@@ -19,6 +19,7 @@ type TopBarProps = {
   pushPhase?: PushPhase;
   ahead?: number;
   behind?: number;
+  unpushedTags?: number;
   hasRemotes?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
@@ -48,6 +49,7 @@ export function TopBar({
   pushPhase = "idle",
   ahead = 0,
   behind = 0,
+  unpushedTags = 0,
   hasRemotes = false,
   onRepoChange,
   onBranchChange,
@@ -140,6 +142,7 @@ export function TopBar({
             <PushButton
               ahead={ahead}
               behind={behind}
+              unpushedTags={unpushedTags}
               hasRemotes={hasRemotes}
               pushPhase={pushPhase}
               loading={loading}

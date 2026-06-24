@@ -155,6 +155,18 @@ export function primaryRef(refs: string) {
   return branch?.replace("tag: ", "") ?? "";
 }
 
+export function tagRefs(refs: string) {
+  return parseRefs(refs).filter((ref) => ref.startsWith("tag:"));
+}
+
+export function tagName(ref: string) {
+  return ref.replace(/^tag:\s*/, "");
+}
+
+export function branchRefs(refs: string) {
+  return parseRefs(refs).filter((ref) => !ref.startsWith("tag:") && !ref.includes("HEAD"));
+}
+
 export function authorInitials(name: string) {
   return name
     .split(/\s+/)

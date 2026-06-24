@@ -16,6 +16,8 @@ import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
 import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
+import { TagCreateDialog } from "./components/TagCreateDialog";
+import { TagDeleteDialog } from "./components/TagDeleteDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
@@ -30,7 +32,7 @@ import type {
   RepoSnapshot,
   SelectionAnchor,
 } from "./types";
-import { changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey } from "./lib/git";
+import { changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey, tagName } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import {
   buildTimelineItems,
@@ -143,6 +145,11 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [resetAllOpen, setResetAllOpen] = useState(false);
+  const [tagCreateCommit, setTagCreateCommit] = useState<CommitEntry | null>(null);
+  const [tagDeleteTarget, setTagDeleteTarget] = useState<{
+    commit: CommitEntry;
+    name: string;
+  } | null>(null);
   const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
   const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
   const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
@@ -721,6 +728,13 @@ function App() {
 
   async function checkoutFromCommit(commit: CommitEntry) {
     const ref = primaryRef(commit.refs) || parseRefs(commit.refs)[0];
+    if (ref?.startsWith("tag:")) {
+      const name = tagName(ref);
+      if (!window.confirm(`Check out tag ${name}?`)) return;
+      await checkoutBranch(name);
+      await selectWorkingTree();
+      return;
+    }
     if (ref && !ref.startsWith("tag:")) {
       await checkoutBranch(ref.replace(/^origin\//, "") || ref);
       await selectWorkingTree();
@@ -738,6 +752,44 @@ function App() {
       setDiff(emptyDiff);
       await refreshRepo();
       await selectWorkingTree();
+    }
+  }
+
+  function openCreateTagDialog(commit: CommitEntry) {
+    setTagCreateCommit(commit);
+  }
+
+  async function submitCreateTag(name: string) {
+    if (!selectedPath || !tagCreateCommit) return;
+    const commit = tagCreateCommit;
+    const result = await run(() =>
+      invoke<ActionResult>("create_tag", {
+        path: selectedPath,
+        name,
+        commit: commit.hash,
+      }),
+    );
+    if (result) {
+      setMessage(result.message);
+      setTagCreateCommit(null);
+      await refreshRepo();
+    }
+  }
+
+  function openDeleteTagDialog(commit: CommitEntry, name: string) {
+    setTagDeleteTarget({ commit, name });
+  }
+
+  async function submitDeleteTag() {
+    if (!selectedPath || !tagDeleteTarget) return;
+    const { name } = tagDeleteTarget;
+    const result = await run(() =>
+      invoke<ActionResult>("delete_tag", { path: selectedPath, name }),
+    );
+    if (result) {
+      setMessage(result.message);
+      setTagDeleteTarget(null);
+      await refreshRepo();
     }
   }
 
@@ -949,6 +1001,7 @@ function App() {
     } catch (err) {
       setError(String(err));
       setPushPhase("idle");
+      await refreshRepoQuiet(selectedPath);
       return false;
     } finally {
       pushLockRef.current = false;
@@ -1139,7 +1192,12 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [viewMode, workingTreeActive]);
 
-  const canPush = hasRemotes && (snapshot?.ahead ?? 0) > 0;
+  const canPush =
+    hasRemotes && ((snapshot?.ahead ?? 0) > 0 || (snapshot?.unpushedTags?.length ?? 0) > 0);
+  const unpushedTagSet = useMemo(
+    () => new Set(snapshot?.unpushedTags ?? []),
+    [snapshot?.unpushedTags],
+  );
 
   useEffect(() => {
     if (viewMode !== "working" || !workingTreeActive || !canPush || pushPhase !== "idle") return;
@@ -1272,6 +1330,7 @@ function App() {
               pushPhase={pushPhase}
               ahead={snapshot.ahead}
               behind={snapshot.behind}
+              unpushedTags={snapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
@@ -1303,11 +1362,14 @@ function App() {
                   commits={snapshot.commits}
                   aheadCommits={snapshot.aheadCommits ?? []}
                   changeCount={snapshot.changes.length}
+                  unpushedTags={unpushedTagSet}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
+                  onCreateTag={(commit) => openCreateTagDialog(commit)}
+                  onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                 />
 
                 {showGittyEmptyState ? (
@@ -1410,10 +1472,13 @@ function App() {
                           ? new Set(snapshot.aheadCommits.map((commit) => commit.hash))
                           : undefined
                       }
+                      unpushedTags={unpushedTagSet}
                       selectedHash={selectedCommit?.hash}
                       search=""
                       onSelect={(commit) => void inspectCommitHistory(commit)}
                       onDoubleClick={(commit) => void checkoutFromCommit(commit)}
+                      onCreateTag={(commit) => openCreateTagDialog(commit)}
+                      onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                     />
                   }
                   secondary={
@@ -1456,6 +1521,22 @@ function App() {
             loading={loading}
             onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
             onCancel={() => setResetAllOpen(false)}
+          />
+          <TagCreateDialog
+            open={!!tagCreateCommit}
+            commit={tagCreateCommit}
+            recentTags={snapshot.tags ?? []}
+            loading={loading}
+            onConfirm={(name) => void submitCreateTag(name)}
+            onCancel={() => setTagCreateCommit(null)}
+          />
+          <TagDeleteDialog
+            open={!!tagDeleteTarget}
+            commit={tagDeleteTarget?.commit ?? null}
+            tagName={tagDeleteTarget?.name ?? ""}
+            loading={loading}
+            onConfirm={() => void submitDeleteTag()}
+            onCancel={() => setTagDeleteTarget(null)}
           />
           <RepoSettingsDrawer
             open={repoSettingsOpen}
