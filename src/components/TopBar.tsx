@@ -1,4 +1,4 @@
-import { ChevronDown, GitBranch, History, Link2, RefreshCw } from "lucide-react";
+import { ChevronDown, GitBranch, History, Link2, RefreshCw, Settings } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
@@ -27,6 +27,7 @@ type TopBarProps = {
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onSetupRemote?: () => void;
+  onOpenRepoSettings?: () => void;
 };
 
 export function TopBar({
@@ -52,6 +53,7 @@ export function TopBar({
   onPush,
   onForcePush,
   onSetupRemote,
+  onOpenRepoSettings,
 }: TopBarProps) {
   return (
     <header className="top-bar">
@@ -133,6 +135,17 @@ export function TopBar({
           >
             <Link2 size={14} />
             Add remote
+          </button>
+        ) : null}
+        {onOpenRepoSettings ? (
+          <button
+            type="button"
+            className="ghost-btn"
+            title="Repository settings"
+            disabled={loading}
+            onClick={onOpenRepoSettings}
+          >
+            <Settings size={15} />
           </button>
         ) : null}
       </div>

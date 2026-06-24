@@ -16,6 +16,7 @@ type RepoSidebarProps = {
   onRemoveRepo: (path: string) => void;
   onAddExisting: () => void;
   onOpenSettings: () => void;
+  onOpenRepoSettings: (path: string) => void;
 };
 
 export function RepoSidebar({
@@ -28,6 +29,7 @@ export function RepoSidebar({
   onRemoveRepo,
   onAddExisting,
   onOpenSettings,
+  onOpenRepoSettings,
 }: RepoSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -37,17 +39,24 @@ export function RepoSidebar({
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
-  function openRepoContextMenu(event: React.MouseEvent, path: string) {
+  function openRepoContextMenu(event: React.MouseEvent, path: string, isSaved: boolean) {
     event.preventDefault();
+    const items: ContextMenuItem[] = [
+      {
+        label: "Open in Finder",
+        onClick: () => void revealInFinder(path),
+      },
+    ];
+    if (isSaved) {
+      items.push({
+        label: "Repository settings",
+        onClick: () => onOpenRepoSettings(path),
+      });
+    }
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
-      items: [
-        {
-          label: "Open in Finder",
-          onClick: () => void revealInFinder(path),
-        },
-      ],
+      items,
     });
   }
 
@@ -66,7 +75,7 @@ export function RepoSidebar({
             className={`repo-item saved ${repo.path === selectedPath ? "active" : ""}`}
             key={repo.id}
             title={repo.path}
-            onContextMenu={(event) => openRepoContextMenu(event, repo.path)}
+            onContextMenu={(event) => openRepoContextMenu(event, repo.path, true)}
           >
             <button
               className="repo-item-main"
@@ -107,7 +116,7 @@ export function RepoSidebar({
                 className={`repo-item discovered ${repo.path === selectedPath ? "active" : ""}`}
                 key={repo.id}
                 title={repo.path}
-                onContextMenu={(event) => openRepoContextMenu(event, repo.path)}
+                onContextMenu={(event) => openRepoContextMenu(event, repo.path, false)}
               >
                 <button
                   className="repo-item-main"
@@ -143,7 +152,7 @@ export function RepoSidebar({
           <Plus size={15} />
           Add Repository
         </button>
-        <button type="button" className="icon-btn sm" title="Settings" onClick={onOpenSettings}>
+        <button type="button" className="icon-btn sm" title="App settings" onClick={onOpenSettings}>
           <Settings size={16} />
         </button>
       </footer>

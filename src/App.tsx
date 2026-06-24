@@ -10,7 +10,8 @@ import { DiffViewer } from "./components/DiffViewer";
 import { HistoryTable } from "./components/HistoryTable";
 import { HistoryTimeline } from "./components/HistoryTimeline";
 import { SplitPane, type SplitOrientation } from "./components/SplitPane";
-import { SettingsDrawer } from "./components/MainToolbar";
+import { AppSettingsDrawer } from "./components/AppSettingsDrawer";
+import { RepoSettingsDrawer } from "./components/RepoSettingsDrawer";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
 import { GittyEmptyState } from "./components/GittyEmptyState";
@@ -18,6 +19,7 @@ import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
+  RemoteEntry,
   AppSettingsView,
   ChangeSection,
   ChangeSummary,
@@ -139,7 +141,9 @@ function App() {
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [remoteName, setRemoteName] = useState("origin");
   const [remoteUrl, setRemoteUrl] = useState("");
+  const [editingRemote, setEditingRemote] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
   const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
@@ -282,6 +286,23 @@ function App() {
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
   }
 
+  function resetRemoteForm() {
+    setRemoteName("origin");
+    setRemoteUrl("");
+    setEditingRemote(null);
+  }
+
+  function openRepoSettings() {
+    resetRemoteForm();
+    setRepoSettingsOpen(true);
+  }
+
+  function editRemote(remote: RemoteEntry) {
+    setRemoteName(remote.name);
+    setRemoteUrl(remote.url);
+    setEditingRemote(remote.name);
+  }
+
   useEffect(() => {
     if (settingsOpen) {
       void loadAppSettings();
@@ -403,6 +424,8 @@ function App() {
     setChangeSummaryVisible(false);
     setViewMode("working");
     setNavZone("files");
+    setRepoSettingsOpen(false);
+    resetRemoteForm();
     await refreshRepo(path);
   }
 
@@ -880,7 +903,7 @@ function App() {
     );
     if (result) {
       setMessage(result.message);
-      setRemoteUrl("");
+      resetRemoteForm();
       await refreshRepo();
     }
   }
@@ -892,6 +915,9 @@ function App() {
     );
     if (result) {
       setMessage(result.message);
+      if (name === editingRemote) {
+        resetRemoteForm();
+      }
       await refreshRepo();
     }
   }
@@ -904,6 +930,7 @@ function App() {
     if (result) {
       setRepos(result);
       setSettingsOpen(false);
+      setRepoSettingsOpen(false);
       if (path === selectedPath) {
         const next = result[0];
         if (next) await selectRepo(next.path);
@@ -1089,6 +1116,13 @@ function App() {
         onRemoveRepo={(path) => void removeRepo(path)}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenRepoSettings={(path) => {
+          if (path !== selectedPath) {
+            void selectRepo(path).then(() => openRepoSettings());
+          } else {
+            openRepoSettings();
+          }
+        }}
       />
 
       <section className="main-area">
@@ -1126,7 +1160,7 @@ function App() {
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
-              onSetupRemote={() => setSettingsOpen(true)}
+              onSetupRemote={() => openRepoSettings()}
             />
 
             {viewMode === "working" ? (
@@ -1220,7 +1254,7 @@ function App() {
                       onResetModeChange={setResetMode}
                       onCommit={() => void commit()}
                       onReset={() => void reset()}
-                      onSetupRemote={() => setSettingsOpen(true)}
+                      onSetupRemote={() => openRepoSettings()}
                       disabled={loading}
                     />
                   </div>
@@ -1283,34 +1317,47 @@ function App() {
             onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
             onCancel={() => setResetAllOpen(false)}
           />
-          <SettingsDrawer
-          open={settingsOpen}
-          remotes={snapshot.remotes}
-          remoteName={remoteName}
-          remoteUrl={remoteUrl}
-          autoSummarizeEnabled={autoSummarizeEnabled}
-          nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
-          nvidiaApiKeyPreview={nvidiaApiKeyPreview}
-          settingsNvidiaKey={settingsNvidiaKey}
-          nvidiaKeyTesting={nvidiaKeyTesting}
-          nvidiaKeyTestMessage={nvidiaKeyTestMessage}
-          nvidiaKeyTestError={nvidiaKeyTestError}
-          onClose={() => setSettingsOpen(false)}
-          onRemoteNameChange={setRemoteName}
-          onRemoteUrlChange={setRemoteUrl}
-          onAutoSummarizeEnabledChange={(enabled) => void setAutoSummarizeEnabledSetting(enabled)}
-          onSettingsNvidiaKeyChange={setSettingsNvidiaKey}
-          onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromSettings()}
-          onDeleteNvidiaApiKey={() => void deleteNvidiaApiKey()}
-          onTestNvidiaApiKey={() => void testNvidiaApiKey()}
-          onSaveRemote={() => void saveRemote()}
-          onRemoveRemote={(name) => void removeRemote(name)}
-          onFetch={() => void fetchRepo()}
-          onRemoveRepo={() => void removeSelectedRepo()}
-          disabled={loading}
-        />
+          <RepoSettingsDrawer
+            open={repoSettingsOpen}
+            repoName={snapshot.repo.name}
+            remotes={snapshot.remotes}
+            remoteName={remoteName}
+            remoteUrl={remoteUrl}
+            editingRemote={editingRemote}
+            onClose={() => {
+              setRepoSettingsOpen(false);
+              resetRemoteForm();
+            }}
+            onRemoteNameChange={setRemoteName}
+            onRemoteUrlChange={setRemoteUrl}
+            onEditRemote={editRemote}
+            onClearRemoteEdit={resetRemoteForm}
+            onSaveRemote={() => void saveRemote()}
+            onRemoveRemote={(name) => void removeRemote(name)}
+            onFetch={() => void fetchRepo()}
+            onRemoveRepo={() => void removeSelectedRepo()}
+            disabled={loading}
+          />
         </>
       ) : null}
+
+      <AppSettingsDrawer
+        open={settingsOpen}
+        autoSummarizeEnabled={autoSummarizeEnabled}
+        nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
+        nvidiaApiKeyPreview={nvidiaApiKeyPreview}
+        settingsNvidiaKey={settingsNvidiaKey}
+        nvidiaKeyTesting={nvidiaKeyTesting}
+        nvidiaKeyTestMessage={nvidiaKeyTestMessage}
+        nvidiaKeyTestError={nvidiaKeyTestError}
+        onClose={() => setSettingsOpen(false)}
+        onAutoSummarizeEnabledChange={(enabled) => void setAutoSummarizeEnabledSetting(enabled)}
+        onSettingsNvidiaKeyChange={setSettingsNvidiaKey}
+        onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromSettings()}
+        onDeleteNvidiaApiKey={() => void deleteNvidiaApiKey()}
+        onTestNvidiaApiKey={() => void testNvidiaApiKey()}
+        disabled={loading}
+      />
     </main>
   );
 }
