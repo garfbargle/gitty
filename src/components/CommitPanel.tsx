@@ -32,10 +32,15 @@ type CommitPanelProps = {
   changeSummaryLoading?: boolean;
   changeSummaryError?: string | null;
   changeSummaryVisible?: boolean;
+  changeSummaryScope?: "all" | "staged";
+  showResummarizeStaged?: boolean;
+  showAllChangesSummary?: boolean;
   onMessageChange: (value: string) => void;
   onMessageFocus: () => void;
   onUseSummary: () => void;
   onDismissSummary: () => void;
+  onResummarizeStaged: () => void;
+  onShowAllChangesSummary: () => void;
   onNvidiaApiKeyChange: (value: string) => void;
   onSaveNvidiaApiKey: () => void;
   onAmendChange: (value: boolean) => void;
@@ -66,10 +71,15 @@ export function CommitPanel({
   changeSummaryLoading = false,
   changeSummaryError = null,
   changeSummaryVisible = false,
+  changeSummaryScope = "all",
+  showResummarizeStaged = false,
+  showAllChangesSummary = false,
   onMessageChange,
   onMessageFocus,
   onUseSummary,
   onDismissSummary,
+  onResummarizeStaged,
+  onShowAllChangesSummary,
   onNvidiaApiKeyChange,
   onSaveNvidiaApiKey,
   onAmendChange,
@@ -168,12 +178,12 @@ export function CommitPanel({
                 {changeSummaryLoading ? <Loader2 size={13} className="spin" /> : null}
                 <button
                   type="button"
-                  className="change-summary-dismiss icon-btn"
+                  className="change-summary-dismiss"
                   onClick={onDismissSummary}
                   title="Hide"
                   aria-label={nvidiaApiKeyConfigured ? "Hide summary" : "Hide AI setup"}
                 >
-                  <X size={14} />
+                  <X size={11} />
                 </button>
               </div>
 
@@ -246,7 +256,31 @@ export function CommitPanel({
                       >
                         {changeSummary}
                       </button>
-                      <p className="change-summary-hint muted">Click to use as commit message</p>
+                      <p className="change-summary-hint muted">
+                        {changeSummaryScope === "staged"
+                          ? "Staged changes only · click to use as commit message"
+                          : "All changes · click to use as commit message"}
+                      </p>
+                      {showResummarizeStaged ? (
+                        <button
+                          type="button"
+                          className="change-summary-resummarize"
+                          disabled={disabled || changeSummaryLoading}
+                          onClick={onResummarizeStaged}
+                        >
+                          Summarize staged only ({stagedCount} file{stagedCount === 1 ? "" : "s"})
+                        </button>
+                      ) : null}
+                      {showAllChangesSummary ? (
+                        <button
+                          type="button"
+                          className="change-summary-resummarize"
+                          disabled={disabled || changeSummaryLoading}
+                          onClick={onShowAllChangesSummary}
+                        >
+                          Show all changes summary
+                        </button>
+                      ) : null}
                     </>
                   ) : null}
                 </>

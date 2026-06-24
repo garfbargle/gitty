@@ -46,14 +46,35 @@ Generates a shorter, more useful commit message from the current code changes."#
 pub struct ChangeSummary {
     pub summary: String,
     pub fingerprint: String,
+    pub scope: String,
     pub files_included: usize,
     pub files_skipped: usize,
 }
 
-#[derive(Debug, Clone)]
-struct DiffFile {
-    path: String,
-    staged: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SummarizeScope {
+    All,
+    Staged,
+}
+
+impl SummarizeScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Staged => "staged",
+        }
+    }
+
+    fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("staged") => Self::Staged,
+            _ => Self::All,
+        }
+    }
+}
+
+pub fn parse_summarize_scope(value: Option<&str>) -> SummarizeScope {
+    SummarizeScope::parse(value)
 }
 
 #[derive(Serialize)]
@@ -87,16 +108,24 @@ struct ChatMessageContent {
     content: String,
 }
 
-pub fn summarize_changes(app: &AppHandle, repo_path: &Path) -> Result<ChangeSummary, String> {
+pub fn summarize_changes(
+    app: &AppHandle,
+    repo_path: &Path,
+    scope: SummarizeScope,
+) -> Result<ChangeSummary, String> {
     let api_key = settings::nvidia_api_key(app)?;
 
-    let files = collect_diff_files(repo_path)?;
-    if files.is_empty() {
-        return Err("No changes to summarize.".to_string());
+    let paths = collect_change_paths(repo_path, scope)?;
+    if paths.is_empty() {
+        return Err(if scope == SummarizeScope::Staged {
+            "No staged changes to summarize.".to_string()
+        } else {
+            "No changes to summarize.".to_string()
+        });
     }
 
-    let fingerprint = fingerprint_files(&files);
-    let (context, files_included, files_skipped) = build_diff_context(repo_path, &files)?;
+    let fingerprint = fingerprint_paths(&paths, scope);
+    let (context, files_included, files_skipped) = build_diff_context(repo_path, &paths, scope)?;
     if context.trim().is_empty() {
         return Err("All changed files were skipped (binaries, lockfiles, or large data).".to_string());
     }
@@ -105,103 +134,97 @@ pub fn summarize_changes(app: &AppHandle, repo_path: &Path) -> Result<ChangeSumm
     Ok(ChangeSummary {
         summary,
         fingerprint,
+        scope: scope.as_str().to_string(),
         files_included,
         files_skipped,
     })
 }
 
-fn collect_diff_files(repo_path: &Path) -> Result<Vec<DiffFile>, String> {
+fn collect_change_paths(repo_path: &Path, scope: SummarizeScope) -> Result<Vec<String>, String> {
     let output = git(repo_path, &["status", "--porcelain=v1", "-uall"])?;
-    let mut staged = Vec::new();
-    let mut unstaged = Vec::new();
+    let mut paths = Vec::new();
 
     for line in output.lines() {
         if line.len() < 4 {
             continue;
         }
-        let status = line.get(0..2).unwrap_or("  ");
+        let index = line.as_bytes().first().copied().unwrap_or(b' ');
+        let worktree = line.as_bytes().get(1).copied().unwrap_or(b' ');
         let raw_path = line.get(3..).unwrap_or("").trim().to_string();
         let path = raw_path
             .split_once(" -> ")
             .map(|(_, path)| path.to_string())
             .unwrap_or(raw_path);
 
-        if status.as_bytes().get(1).is_some_and(|byte| *byte != b' ') {
-            staged.push(DiffFile {
-                path,
-                staged: true,
-            });
-        } else if status.as_bytes().first().is_some_and(|byte| *byte != b' ') {
-            unstaged.push(DiffFile {
-                path,
-                staged: false,
-            });
+        let include = match scope {
+            SummarizeScope::All => {
+                (index != b' ' && index != b'?') || worktree != b' ' || (index == b'?' && worktree == b'?')
+            }
+            SummarizeScope::Staged => index != b' ' && index != b'?',
+        };
+
+        if include {
+            paths.push(path);
         }
     }
 
-    if !staged.is_empty() {
-        Ok(staged)
-    } else {
-        Ok(unstaged)
-    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
 }
 
-fn fingerprint_files(files: &[DiffFile]) -> String {
+fn fingerprint_paths(paths: &[String], scope: SummarizeScope) -> String {
     let mut hasher = DefaultHasher::new();
-    for file in files {
-        file.path.hash(&mut hasher);
-        file.staged.hash(&mut hasher);
+    scope.as_str().hash(&mut hasher);
+    for path in paths {
+        path.hash(&mut hasher);
     }
     format!("{:x}", hasher.finish())
 }
 
 fn build_diff_context(
     repo_path: &Path,
-    files: &[DiffFile],
+    paths: &[String],
+    scope: SummarizeScope,
 ) -> Result<(String, usize, usize), String> {
     let mut context = String::new();
     let mut files_included = 0;
     let mut files_skipped = 0;
-    let scope = if files.first().is_some_and(|file| file.staged) {
-        "staged"
-    } else {
-        "unstaged"
+    let scope_label = match scope {
+        SummarizeScope::All => "all uncommitted",
+        SummarizeScope::Staged => "staged",
     };
-    context.push_str(&format!("Scope: {scope} changes\n\n"));
+    context.push_str(&format!("Scope: {scope_label} changes\n\n"));
 
-    for file in files.iter().take(MAX_FILES) {
+    for path in paths.iter().take(MAX_FILES) {
         if context.len() >= MAX_TOTAL_CONTEXT {
             files_skipped += 1;
             continue;
         }
 
-        if let Some(reason) = skip_reason(&file.path) {
-            context.push_str(&format!("--- {} ---\n(skipped: {reason})\n\n", file.path));
+        if let Some(reason) = skip_reason(path) {
+            context.push_str(&format!("--- {path} ---\n(skipped: {reason})\n\n"));
             files_skipped += 1;
             continue;
         }
 
-        let diff = fetch_file_diff(repo_path, &file.path, file.staged)?;
+        let diff = fetch_file_diff(repo_path, path, scope)?;
         if diff.contains("Binary files") {
-            context.push_str(&format!(
-                "--- {} ---\n(skipped: binary file)\n\n",
-                file.path
-            ));
+            context.push_str(&format!("--- {path} ---\n(skipped: binary file)\n\n"));
             files_skipped += 1;
             continue;
         }
 
         if looks_like_tabular_data(&diff) {
             context.push_str(&format!(
-                "--- {} ---\n(skipped: tabular or CSV-like data)\n\n",
-                file.path
+                "--- {path} ---\n(skipped: tabular or CSV-like data)\n\n"
             ));
             files_skipped += 1;
             continue;
         }
 
         let truncated = truncate_diff(&diff, MAX_FILE_DIFF);
-        context.push_str(&format!("--- {} ---\n{truncated}\n\n", file.path));
+        context.push_str(&format!("--- {path} ---\n{truncated}\n\n"));
         files_included += 1;
 
         if context.len() > MAX_TOTAL_CONTEXT {
@@ -211,11 +234,11 @@ fn build_diff_context(
         }
     }
 
-    if files.len() > MAX_FILES {
-        files_skipped += files.len() - MAX_FILES;
+    if paths.len() > MAX_FILES {
+        files_skipped += paths.len() - MAX_FILES;
         context.push_str(&format!(
             "\n({} additional files omitted from context)\n",
-            files.len() - MAX_FILES
+            paths.len() - MAX_FILES
         ));
     }
 
@@ -284,17 +307,29 @@ fn skip_reason(path: &str) -> Option<&'static str> {
     None
 }
 
-fn fetch_file_diff(repo_path: &Path, file_path: &str, staged: bool) -> Result<String, String> {
-    let mut args = vec![
-        "--no-pager".to_string(),
-        "diff".to_string(),
-        "--color=never".to_string(),
-        "--".to_string(),
-        file_path.to_string(),
-    ];
-    if staged {
-        args.insert(2, "--cached".to_string());
-    }
+fn fetch_file_diff(
+    repo_path: &Path,
+    file_path: &str,
+    scope: SummarizeScope,
+) -> Result<String, String> {
+    let args = match scope {
+        SummarizeScope::Staged => vec![
+            "--no-pager".to_string(),
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--color=never".to_string(),
+            "--".to_string(),
+            file_path.to_string(),
+        ],
+        SummarizeScope::All => vec![
+            "--no-pager".to_string(),
+            "diff".to_string(),
+            "HEAD".to_string(),
+            "--color=never".to_string(),
+            "--".to_string(),
+            file_path.to_string(),
+        ],
+    };
     git_owned(repo_path, args)
 }
 

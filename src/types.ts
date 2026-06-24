@@ -64,6 +64,7 @@ export type AppSettingsView = {
 export type ChangeSummary = {
   summary: string;
   fingerprint: string;
+  scope: string;
   filesIncluded: number;
   filesSkipped: number;
 };

@@ -10,6 +10,18 @@ export function isUnstaged(change: FileChange) {
   return worktree !== " ";
 }
 
+export function changePathsKey(changes: FileChange[]): string {
+  return [...new Set(changes.map((change) => change.path))].sort().join("|");
+}
+
+export function stagedPathsKey(changes: FileChange[]): string {
+  return changes
+    .filter(isStaged)
+    .map((change) => change.path)
+    .sort()
+    .join("|");
+}
+
 export function statusCode(status: string) {
   const index = status[0] ?? " ";
   const worktree = status[1] ?? " ";

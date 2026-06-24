@@ -1520,7 +1520,29 @@ button:focus-visible {
 }
 
 .change-summary-dismiss {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
   margin-left: auto;
+  opacity: 0.35;
+  padding: 0;
+  width: 18px;
+}
+
+.change-summary-panel:hover .change-summary-dismiss,
+.change-summary-dismiss:hover,
+.change-summary-dismiss:focus-visible {
+  opacity: 0.75;
+}
+
+.change-summary-dismiss:hover {
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
 }
 
 .change-summary-link {
@@ -1546,6 +1568,22 @@ button:focus-visible {
 .change-summary-hint {
   font-size: 11px;
   margin: 0;
+}
+
+.change-summary-resummarize {
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.change-summary-resummarize:hover:not(:disabled) {
+  background: var(--accent-soft);
 }
 
 .change-summary-body {
