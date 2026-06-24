@@ -36,7 +36,7 @@ def apply_macos_squircle(
     src: Path,
     dst: Path,
     size: int = 1024,
-    art_scale: float = 0.68,
+    art_scale: float = 0.50,
     squircle_n: float = 3.8,
     background: tuple[int, int, int, int] = (0, 0, 0, 255),
 ) -> None:
@@ -68,8 +68,8 @@ def main() -> None:
     parser.add_argument(
         "--art-scale",
         type=float,
-        default=0.68,
-        help="Artwork scale relative to canvas (default: 0.68)",
+        default=0.50,
+        help="Artwork scale relative to canvas (default: 0.50)",
     )
     parser.add_argument(
         "--squircle-n",
