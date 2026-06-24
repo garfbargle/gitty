@@ -59,8 +59,7 @@ export function CommitPanel({
 }: CommitPanelProps) {
   const canCommit = (stagedCount > 0 || amend) && message.trim().length > 0;
   const localBranches = branches.filter((b) => !b.isRemote);
-  const showActionsSection =
-    showPushActions || showSetupRemote || (showResetSection && !!selectedCommit);
+  const resetLabel = resetMode === "soft" ? "Soft Reset" : "Hard Reset";
 
   useEffect(() => {
     if (!showCommitSection) return;
@@ -129,9 +128,12 @@ export function CommitPanel({
         </section>
       ) : null}
 
-      {showActionsSection ? (
+      {showPushActions || showSetupRemote ? (
         <section className="panel-block">
-          <header className="panel-title">Actions</header>
+          <header className="panel-title">
+            <Send size={14} />
+            <span>Remote</span>
+          </header>
           {showPushActions ? (
             <>
               <button type="button" className="action-row" disabled={disabled} onClick={onPush}>
@@ -150,30 +152,32 @@ export function CommitPanel({
                 <kbd>⌥⇧P</kbd>
               </button>
             </>
-          ) : null}
-          {showSetupRemote ? (
+          ) : (
             <button type="button" className="action-row" disabled={disabled} onClick={onSetupRemote}>
               <Link2 size={15} />
               <span>Set Up Remote</span>
             </button>
-          ) : null}
-          {showResetSection && selectedCommit ? (
-            <button
-              type="button"
-              className="action-row warn"
-              disabled={disabled}
-              onClick={onReset}
-            >
-              <RotateCcw size={15} />
-              <span>Reset Current Branch</span>
-            </button>
-          ) : null}
+          )}
         </section>
       ) : null}
 
-      {showResetSection ? (
+      {showResetSection && selectedCommit ? (
         <section className="panel-block reset-block">
-          <header className="panel-title">Reset to Commit</header>
+          <header className="panel-title">
+            <RotateCcw size={14} />
+            <span>Reset Branch</span>
+          </header>
+
+          <p className="reset-context">
+            Move <strong>{branch}</strong> to this commit:
+          </p>
+
+          <div className="reset-target" title={selectedCommit.subject}>
+            <code>{selectedCommit.shortHash}</code>
+            <span>{selectedCommit.subject}</span>
+          </div>
+
+          <label className="field-label">Mode</label>
           <div className="reset-toggle">
             <button
               type="button"
@@ -190,18 +194,28 @@ export function CommitPanel({
               Hard
             </button>
           </div>
+
+          <p className="reset-mode-hint">
+            {resetMode === "soft"
+              ? "Keeps your staged and unstaged changes."
+              : "Discards all uncommitted changes."}
+          </p>
+
           {resetMode === "hard" && (stagedCount > 0 || unstagedCount > 0) ? (
             <p className="reset-warning">
               This will discard {stagedCount} staged and {unstagedCount} unstaged changes.
             </p>
           ) : null}
-          <select className="branch-select" value={selectedCommit?.hash ?? ""} disabled>
-            <option value="">
-              {selectedCommit
-                ? `${selectedCommit.shortHash} · ${selectedCommit.subject}`
-                : "Select commit from history"}
-            </option>
-          </select>
+
+          <button
+            type="button"
+            className={`reset-primary ${resetMode === "hard" ? "danger" : "warn"}`}
+            disabled={disabled}
+            onClick={onReset}
+          >
+            <RotateCcw size={15} />
+            {resetLabel}
+          </button>
         </section>
       ) : null}
     </aside>

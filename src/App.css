@@ -1108,6 +1108,73 @@ button:focus-visible {
   margin: 0;
 }
 
+.reset-context {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.reset-target {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+}
+
+.reset-target code {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.reset-target span {
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reset-mode-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.reset-primary {
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  display: flex;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  min-height: 40px;
+  width: 100%;
+}
+
+.reset-primary.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.reset-primary.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.reset-primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.reset-primary:disabled {
+  opacity: 0.5;
+}
+
 /* History full view */
 .history-full {
   display: flex;
