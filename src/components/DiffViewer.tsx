@@ -8,6 +8,7 @@ import { isStaged as isFileStaged } from "../lib/git";
 type DiffViewerProps = {
   raw: string;
   file?: FileChange | null;
+  showWorkingTreeBadges?: boolean;
   emptyMessage?: string;
   onUnstage?: (path: string) => void;
 };
@@ -29,7 +30,13 @@ function HighlightedLine({ text }: { text: string }) {
   );
 }
 
-export function DiffViewer({ raw, file, emptyMessage, onUnstage }: DiffViewerProps) {
+export function DiffViewer({
+  raw,
+  file,
+  showWorkingTreeBadges = true,
+  emptyMessage,
+  onUnstage,
+}: DiffViewerProps) {
   const files = useMemo(() => parseUnifiedDiff(raw), [raw]);
   const [hunkIndex, setHunkIndex] = useState(0);
 
@@ -56,10 +63,16 @@ export function DiffViewer({ raw, file, emptyMessage, onUnstage }: DiffViewerPro
       <header className="diff-toolbar">
         <div className="diff-toolbar-left">
           <span className="diff-path">{filePath}</span>
-          {staged ? <span className="badge staged">Staged</span> : <span className="badge unstaged">Unstaged</span>}
+          {showWorkingTreeBadges && file ? (
+            staged ? (
+              <span className="badge staged">Staged</span>
+            ) : (
+              <span className="badge unstaged">Unstaged</span>
+            )
+          ) : null}
         </div>
         <div className="diff-toolbar-right">
-          {staged && onUnstage && file ? (
+          {showWorkingTreeBadges && staged && onUnstage && file ? (
             <button type="button" className="ghost-btn sm" onClick={() => onUnstage(file.path)}>
               Unstage File
             </button>

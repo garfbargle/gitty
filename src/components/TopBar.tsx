@@ -1,4 +1,4 @@
-import { ChevronDown, GitBranch, History, RefreshCw, Send, AlertTriangle } from "lucide-react";
+import { ChevronDown, GitBranch, History, RefreshCw } from "lucide-react";
 import type { RepoEntry } from "../types";
 
 type TopBarProps = {
@@ -13,8 +13,6 @@ type TopBarProps = {
   onBranchChange: (branch: string) => void;
   onToggleView: () => void;
   onRefresh: () => void;
-  onPush: () => void;
-  onForcePush: () => void;
 };
 
 export function TopBar({
@@ -29,8 +27,6 @@ export function TopBar({
   onBranchChange,
   onToggleView,
   onRefresh,
-  onPush,
-  onForcePush,
 }: TopBarProps) {
   return (
     <header className="top-bar">
@@ -87,15 +83,6 @@ export function TopBar({
         <button type="button" className="ghost-btn" onClick={onToggleView}>
           <History size={15} />
           {viewMode === "working" ? "Back to History" : "Working Tree"}
-        </button>
-        <button type="button" className="push-btn" disabled={loading} onClick={onPush}>
-          <Send size={14} />
-          Push
-          <ChevronDown size={14} />
-        </button>
-        <button type="button" className="force-push-btn" disabled={loading} onClick={onForcePush}>
-          <AlertTriangle size={14} />
-          Force Push
         </button>
       </div>
     </header>

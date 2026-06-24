@@ -8,6 +8,7 @@ import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
 import { HistoryTable } from "./components/HistoryTable";
 import { HistoryTimeline } from "./components/HistoryTimeline";
+import { SplitPane, type SplitOrientation } from "./components/SplitPane";
 import { SettingsDrawer } from "./components/MainToolbar";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
@@ -38,6 +39,8 @@ function App() {
   const [selectedPath, setSelectedPath] = useState("");
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("working");
+  const [viewingCommit, setViewingCommit] = useState<CommitEntry | null>(null);
+  const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
   const [commitMessage, setCommitMessage] = useState("");
@@ -46,14 +49,17 @@ function App() {
   const [remoteName, setRemoteName] = useState("origin");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historySplit, setHistorySplit] = useState(0.55);
+  const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const selectedCommit = focus?.kind === "commit" ? focus.commit : null;
+  const selectedCommit = viewingCommit ?? (focus?.kind === "commit" ? focus.commit : null);
   const selectedFile = focus?.kind === "file" ? focus.file : null;
   const selectedFileKey =
     focus?.kind === "file" ? `${focus.section}:${focus.file.path}` : undefined;
+  const workingTreeActive = !viewingCommit;
 
   const branchNames = useMemo(() => {
     const branches = snapshot?.branches ?? [];
@@ -151,6 +157,8 @@ function App() {
 
   async function selectRepo(path: string) {
     setSelectedPath(path);
+    setViewingCommit(null);
+    setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
     setCommitMessage("");
@@ -214,7 +222,7 @@ function App() {
     if (typeof folder === "string") await addRepo(folder);
   }
 
-  async function inspectCommit(commit: CommitEntry, path = selectedPath) {
+  async function inspectCommitHistory(commit: CommitEntry, path = selectedPath) {
     setFocus({ kind: "commit", commit });
     const result = await run(() =>
       invoke<string>("commit_diff", { path, commit: commit.hash }),
@@ -222,7 +230,55 @@ function App() {
     if (result !== null) setDiff(result || "This commit has no patch output.");
   }
 
+  async function inspectCommit(commit: CommitEntry, path = selectedPath) {
+    setViewingCommit(commit);
+    const files = await run(() =>
+      invoke<FileChange[]>("commit_files_command", { path, commit: commit.hash }),
+    );
+    if (files === null) return;
+
+    setCommitFiles(files);
+    if (files.length === 0) {
+      setFocus(null);
+      const result = await run(() =>
+        invoke<string>("commit_diff", { path, commit: commit.hash }),
+      );
+      if (result !== null) setDiff(result || "This commit has no patch output.");
+      return;
+    }
+
+    await inspectCommitFile(files[0], commit, path);
+  }
+
+  async function inspectCommitFile(
+    file: FileChange,
+    commit: CommitEntry = viewingCommit!,
+    path = selectedPath,
+  ) {
+    setFocus({ kind: "file", file, section: "commit" });
+    const result = await run(() =>
+      invoke<string>("file_diff", { path, filePath: file.path, commit: commit.hash }),
+    );
+    if (result !== null) setDiff(result || "This file has no patch in this commit.");
+  }
+
+  async function selectWorkingTree() {
+    setViewingCommit(null);
+    setCommitFiles([]);
+    if (!snapshot) return;
+    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
+    if (first) {
+      const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
+      await inspectFile(first, section);
+    } else {
+      setFocus(null);
+      setDiff(emptyDiff);
+    }
+  }
+
   async function inspectFile(file: FileChange, section: ChangeSection, path = selectedPath) {
+    setViewingCommit(null);
+    setCommitFiles([]);
     setFocus({ kind: "file", file, section });
     const result = await run(() =>
       invoke<string>("file_diff", { path, filePath: file.path }),
@@ -418,15 +474,17 @@ function App() {
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               onToggleView={() => {
-                setViewMode((mode) => (mode === "working" ? "history" : "working"));
                 if (viewMode === "history") {
                   setFocus(null);
                   setDiff(emptyDiff);
+                  void selectWorkingTree();
+                } else {
+                  setViewingCommit(null);
+                  setCommitFiles([]);
                 }
+                setViewMode((mode) => (mode === "working" ? "history" : "working"));
               }}
               onRefresh={() => void refreshRepo()}
-              onPush={() => void push(false)}
-              onForcePush={() => void push(true)}
             />
 
             {viewMode === "working" ? (
@@ -435,23 +493,23 @@ function App() {
                   commits={snapshot.commits}
                   changeCount={snapshot.changes.length}
                   selectedHash={selectedCommit?.hash}
-                  workingTreeActive={focus?.kind === "file" || (!selectedCommit && !!selectedFile)}
+                  workingTreeActive={workingTreeActive}
                   onSelect={(commit) => void inspectCommit(commit)}
-                  onSelectWorkingTree={() => {
-                    setViewMode("working");
-                    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
-                    if (first) {
-                      const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
-                      void inspectFile(first, section);
-                    }
-                  }}
+                  onSelectWorkingTree={() => void selectWorkingTree()}
                 />
 
                 <div className="workspace-grid">
                   <ChangesList
-                    changes={snapshot.changes}
+                    changes={viewingCommit ? commitFiles : snapshot.changes}
+                    variant={viewingCommit ? "commit" : "working"}
                     selectedKey={selectedFileKey}
-                    onSelect={(file, section) => void inspectFile(file, section)}
+                    onSelect={(file, section) => {
+                      if (section === "commit" && viewingCommit) {
+                        void inspectCommitFile(file, viewingCommit);
+                      } else {
+                        void inspectFile(file, section);
+                      }
+                    }}
                     onStage={(files, anchor) => void stageFiles(files, anchor)}
                     onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
                     disabled={loading}
@@ -460,6 +518,7 @@ function App() {
                   <DiffViewer
                     raw={diff}
                     file={selectedFile}
+                    showWorkingTreeBadges={!viewingCommit}
                     emptyMessage={emptyDiff}
                     onUnstage={(path) => void unstageFiles([path])}
                   />
@@ -487,18 +546,22 @@ function App() {
               </>
             ) : (
               <div className="history-full">
-                <HistoryTable
-                  commits={snapshot.commits}
-                  selectedHash={selectedCommit?.hash}
-                  search=""
-                  onSelect={(commit) => void inspectCommit(commit)}
-                  onDoubleClick={(commit) => void checkoutFromCommit(commit)}
+                <SplitPane
+                  orientation={historyOrientation}
+                  onOrientationChange={setHistoryOrientation}
+                  split={historySplit}
+                  onSplitChange={setHistorySplit}
+                  primary={
+                    <HistoryTable
+                      commits={snapshot.commits}
+                      selectedHash={selectedCommit?.hash}
+                      search=""
+                      onSelect={(commit) => void inspectCommitHistory(commit)}
+                      onDoubleClick={(commit) => void checkoutFromCommit(commit)}
+                    />
+                  }
+                  secondary={<DiffViewer raw={diff} emptyMessage={emptyDiff} />}
                 />
-                {selectedCommit ? (
-                  <div className="history-diff">
-                    <DiffViewer raw={diff} emptyMessage={emptyDiff} />
-                  </div>
-                ) : null}
               </div>
             )}
           </>

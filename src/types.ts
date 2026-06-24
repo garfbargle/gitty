@@ -55,7 +55,7 @@ export type ActionResult = {
   output: string;
 };
 
-export type ChangeSection = "unstaged" | "staged";
+export type ChangeSection = "unstaged" | "staged" | "commit";
 
 export type SelectionAnchor = {
   section: ChangeSection;

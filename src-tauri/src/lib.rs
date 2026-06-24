@@ -391,6 +391,59 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
     })
 }
 
+fn commit_files(repo_path: &Path, commit: &str) -> Result<Vec<FileChange>, String> {
+    let output = git_owned(
+        repo_path,
+        vec![
+            "show".to_string(),
+            "--name-status".to_string(),
+            "--pretty=format:".to_string(),
+            "--find-renames".to_string(),
+            commit.to_string(),
+        ],
+    )?;
+
+    Ok(output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+
+            let mut parts = line.split('\t');
+            let status_part = parts.next()?;
+            let status_code = status_part.chars().next().unwrap_or('M');
+
+            match status_code {
+                'R' | 'C' => {
+                    let old_path = parts.next().map(|value| value.to_string());
+                    let path = parts.next()?.to_string();
+                    Some(FileChange {
+                        status: format!("{status_code} "),
+                        path,
+                        old_path,
+                    })
+                }
+                _ => {
+                    let path = parts.next()?.to_string();
+                    Some(FileChange {
+                        status: format!("{status_code} "),
+                        path,
+                        old_path: None,
+                    })
+                }
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn commit_files_command(path: String, commit: String) -> Result<Vec<FileChange>, String> {
+    let repo = normalize_repo(&path)?;
+    commit_files(Path::new(&repo.path), &commit)
+}
+
 #[tauri::command]
 fn commit_diff(path: String, commit: String) -> Result<String, String> {
     let repo = normalize_repo(&path)?;
@@ -693,6 +746,7 @@ pub fn run() {
             remove_repo,
             start_repo_discovery,
             repo_snapshot,
+            commit_files_command,
             commit_diff,
             file_diff,
             checkout_branch,
