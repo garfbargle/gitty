@@ -12,8 +12,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
-const MAX_DEPTH: usize = 8;
-const MAX_DISCOVERED: usize = 48;
+const MAX_DEPTH: usize = 12;
 
 const SKIP_DIR_NAMES: &[&str] = &[
     "node_modules",
@@ -29,7 +28,6 @@ const SKIP_DIR_NAMES: &[&str] = &[
     ".Trash",
     "Caches",
     "Cache",
-    "go",
     ".cargo",
     ".npm",
     ".pnpm",
@@ -105,6 +103,14 @@ fn discovery_roots(home: &Path, saved_paths: &[String]) -> Vec<PathBuf> {
         home.join("Code"),
         home.join("Sites"),
         home.join("Work"),
+        home.join("src"),
+        home.join("repos"),
+        home.join("github"),
+        home.join("GitHub"),
+        home.join("workspace"),
+        home.join("workspaces"),
+        home.join("Desktop"),
+        home.join("go"),
         home.join("Documents"),
         home.to_path_buf(),
     ];
@@ -114,6 +120,7 @@ fn discovery_roots(home: &Path, saved_paths: &[String]) -> Vec<PathBuf> {
         if let Some(parent) = path.parent() {
             roots.push(parent.to_path_buf());
         }
+        roots.push(path);
     }
 
     roots.sort();
@@ -122,32 +129,50 @@ fn discovery_roots(home: &Path, saved_paths: &[String]) -> Vec<PathBuf> {
     roots
 }
 
+fn resolve_scan_dir(dir: &Path) -> Option<PathBuf> {
+    fs::canonicalize(dir).ok().or_else(|| {
+        if dir.is_dir() {
+            Some(dir.to_path_buf())
+        } else {
+            None
+        }
+    })
+}
+
 fn scan_roots(
     app: &AppHandle,
     roots: Vec<PathBuf>,
     saved: HashSet<String>,
     cancel: Arc<AtomicBool>,
 ) {
-    let mut seen = HashSet::new();
+    let mut seen_repos = HashSet::new();
+    let mut visited_dirs = HashSet::new();
     let mut found = 0usize;
 
     let _ = app.emit("repo-discovery-started", ());
 
     for root in roots {
-        if cancel.load(Ordering::Relaxed) || found >= MAX_DISCOVERED {
+        if cancel.load(Ordering::Relaxed) {
             break;
+        }
+
+        let Some(root) = resolve_scan_dir(&root) else {
+            continue;
+        };
+        if !visited_dirs.insert(root.clone()) {
+            continue;
         }
 
         let mut stack = vec![(root, 0usize)];
 
         while let Some((dir, depth)) = stack.pop() {
-            if cancel.load(Ordering::Relaxed) || found >= MAX_DISCOVERED {
+            if cancel.load(Ordering::Relaxed) {
                 break;
             }
 
             if dir.join(".git").exists() {
                 if let Some(repo) = quick_repo_entry(&dir) {
-                    if !saved.contains(&repo.path) && seen.insert(repo.path.clone()) {
+                    if !saved.contains(&repo.path) && seen_repos.insert(repo.path.clone()) {
                         found += 1;
                         let _ = app.emit(
                             "repo-discovery-found",
@@ -178,17 +203,37 @@ fn scan_roots(
                     Err(_) => continue,
                 };
 
-                if !file_type.is_dir() || file_type.is_symlink() {
+                if !file_type.is_dir() {
                     continue;
                 }
 
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name.starts_with('.') || should_skip_dir(&name) {
+                let child = entry.path();
+                let child = if file_type.is_symlink() {
+                    match fs::read_link(&child) {
+                        Ok(link) if link.is_absolute() => link,
+                        Ok(link) => dir.join(link),
+                        Err(_) => continue,
+                    }
+                } else {
+                    child
+                };
+
+                let Some(child) = resolve_scan_dir(&child) else {
+                    continue;
+                };
+                if !visited_dirs.insert(child.clone()) {
                     continue;
                 }
 
-                stack.push((entry.path(), depth + 1));
+                let name = child
+                    .file_name()
+                    .and_then(|part| part.to_str())
+                    .unwrap_or("");
+                if name.starts_with('.') || should_skip_dir(name) {
+                    continue;
+                }
+
+                stack.push((child, depth + 1));
             }
         }
     }

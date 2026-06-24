@@ -2,6 +2,7 @@ mod discovery;
 mod settings;
 mod summarize;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use discovery::{start_repo_discovery, RepoDiscovery};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -513,6 +514,127 @@ fn commit_diff(path: String, commit: String) -> Result<String, String> {
     )
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileImagePreview {
+    old_data_url: Option<String>,
+    new_data_url: Option<String>,
+}
+
+fn image_mime_type(path: &str) -> &'static str {
+    match Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("bmp") => "image/bmp",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
+fn is_image_path(path: &str) -> bool {
+    matches!(
+        Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some("png")
+            | Some("jpg")
+            | Some("jpeg")
+            | Some("gif")
+            | Some("webp")
+            | Some("svg")
+            | Some("ico")
+            | Some("bmp")
+            | Some("avif")
+    )
+}
+
+fn git_show_bytes(repo_path: &Path, spec: &str) -> Option<Vec<u8>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["show", spec])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .ok()?;
+
+    output.status.success().then_some(output.stdout)
+}
+
+fn read_working_tree_bytes(repo_path: &Path, file_path: &str) -> Option<Vec<u8>> {
+    let full_path = repo_path.join(file_path);
+    fs::read(full_path).ok()
+}
+
+fn bytes_to_data_url(bytes: &[u8], mime: &str) -> String {
+    format!("data:{mime};base64,{}", STANDARD.encode(bytes))
+}
+
+fn optional_data_url(bytes: Option<Vec<u8>>, mime: &str) -> Option<String> {
+    bytes.map(|data| bytes_to_data_url(&data, mime))
+}
+
+#[tauri::command]
+fn file_image_preview(
+    path: String,
+    file_path: String,
+    commit: Option<String>,
+    section: Option<String>,
+) -> Result<FileImagePreview, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    if !is_image_path(&file_path) {
+        return Err(format!("{file_path} is not a supported image file."));
+    }
+
+    let mime = image_mime_type(&file_path);
+
+    if let Some(commit) = commit.filter(|value| !value.is_empty()) {
+        let old = git_show_bytes(repo_path, &format!("{commit}^:{file_path}"));
+        let new = git_show_bytes(repo_path, &format!("{commit}:{file_path}"));
+        return Ok(FileImagePreview {
+            old_data_url: optional_data_url(old, mime),
+            new_data_url: optional_data_url(new, mime),
+        });
+    }
+
+    let (old, new) = match section.as_deref() {
+        Some("staged") => (
+            git_show_bytes(repo_path, &format!("HEAD:{file_path}")),
+            git_show_bytes(repo_path, &format!(":{file_path}")),
+        ),
+        Some("unstaged") => {
+            let index = git_show_bytes(repo_path, &format!(":{file_path}"));
+            let head = git_show_bytes(repo_path, &format!("HEAD:{file_path}"));
+            (
+                index.or(head),
+                read_working_tree_bytes(repo_path, &file_path),
+            )
+        }
+        _ => (
+            git_show_bytes(repo_path, &format!("HEAD:{file_path}")),
+            read_working_tree_bytes(repo_path, &file_path)
+                .or_else(|| git_show_bytes(repo_path, &format!(":{file_path}"))),
+        ),
+    };
+
+    Ok(FileImagePreview {
+        old_data_url: optional_data_url(old, mime),
+        new_data_url: optional_data_url(new, mime),
+    })
+}
+
 #[tauri::command]
 fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<String, String> {
     let repo = normalize_repo(&path)?;
@@ -895,6 +1017,7 @@ pub fn run() {
             commit_files_command,
             commit_diff,
             file_diff,
+            file_image_preview,
             checkout_branch,
             merge_branch,
             stage_files,

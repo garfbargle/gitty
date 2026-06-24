@@ -1439,6 +1439,61 @@ button:focus-visible {
   text-align: center;
 }
 
+.image-diff-preview {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  min-height: 100%;
+  padding: 20px;
+}
+
+.image-diff-pane {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  max-width: min(100%, 520px);
+  min-width: min(100%, 240px);
+  overflow: hidden;
+  padding: 12px;
+}
+
+.image-diff-pane figcaption {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.image-diff-pane img {
+  background:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(127, 127, 127, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.12) 75%);
+  background-color: var(--bg-elevated);
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
+  background-size: 20px 20px;
+  border-radius: 6px;
+  display: block;
+  height: auto;
+  max-height: min(60vh, 640px);
+  max-width: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+
 /* Commit panel */
 .commit-panel {
   background: var(--bg-panel);

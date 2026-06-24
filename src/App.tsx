@@ -37,7 +37,20 @@ import {
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
-const MAX_DISCOVERED = 48;
+
+function sortDiscoveredRepos(repos: DiscoveredRepoEntry[]): DiscoveredRepoEntry[] {
+  return [...repos].sort((left, right) => right.discoveredAt - left.discoveredAt);
+}
+
+function upsertDiscoveredRepo(
+  current: DiscoveredRepoEntry[],
+  repo: DiscoveredRepoEntry,
+): DiscoveredRepoEntry[] {
+  if (current.some((item) => item.path === repo.path)) {
+    return current;
+  }
+  return sortDiscoveredRepos([...current, repo]);
+}
 
 type ViewMode = "working" | "history";
 type NavZone = "timeline" | "files";
@@ -172,11 +185,7 @@ function App() {
     let active = true;
     const unlistenFound = listen<DiscoveredRepoEntry>("repo-discovery-found", (event) => {
       if (!active) return;
-      const repo = event.payload;
-      setDiscoveredRepos((current) => {
-        const next = [repo, ...current.filter((item) => item.path !== repo.path)];
-        return next.slice(0, MAX_DISCOVERED);
-      });
+      setDiscoveredRepos((current) => upsertDiscoveredRepo(current, event.payload));
     });
     const unlistenStarted = listen("repo-discovery-started", () => {
       if (active) setDiscovering(true);
@@ -1106,6 +1115,9 @@ function App() {
                   <DiffViewer
                     raw={diff}
                     file={selectedFile}
+                    repoPath={selectedPath}
+                    section={focus?.kind === "file" ? focus.section : undefined}
+                    commit={focus?.kind === "commit" ? focus.commit.hash : viewingCommit?.hash}
                     showWorkingTreeBadges={!viewingCommit}
                     emptyMessage={emptyDiff}
                     onUnstage={(path) => void unstageFiles([path])}
@@ -1168,7 +1180,14 @@ function App() {
                       onDoubleClick={(commit) => void checkoutFromCommit(commit)}
                     />
                   }
-                  secondary={<DiffViewer raw={diff} emptyMessage={emptyDiff} />}
+                  secondary={
+                    <DiffViewer
+                      raw={diff}
+                      repoPath={selectedPath}
+                      commit={selectedCommit?.hash}
+                      emptyMessage={emptyDiff}
+                    />
+                  }
                 />
               </div>
             )}

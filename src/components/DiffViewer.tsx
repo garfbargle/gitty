@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
 import { displayPath, parseUnifiedDiff, type DiffFile } from "../lib/diff";
+import { type FileImagePreview, isImagePath } from "../lib/images";
 import { tokenizeLine } from "../lib/syntax";
-import type { FileChange } from "../types";
+import type { ChangeSection, FileChange } from "../types";
 import { isStaged as isFileStaged } from "../lib/git";
 
 type DiffViewerProps = {
   raw: string;
   file?: FileChange | null;
+  repoPath?: string;
+  section?: ChangeSection;
+  commit?: string;
   showWorkingTreeBadges?: boolean;
   emptyMessage?: string;
   onUnstage?: (path: string) => void;
@@ -33,12 +38,18 @@ function HighlightedLine({ text }: { text: string }) {
 export function DiffViewer({
   raw,
   file,
+  repoPath,
+  section,
+  commit,
   showWorkingTreeBadges = true,
   emptyMessage,
   onUnstage,
 }: DiffViewerProps) {
   const files = useMemo(() => parseUnifiedDiff(raw), [raw]);
   const [hunkIndex, setHunkIndex] = useState(0);
+  const [imagePreview, setImagePreview] = useState<FileImagePreview | null>(null);
+  const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
+  const [imagePreviewError, setImagePreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     setHunkIndex(0);
@@ -49,6 +60,53 @@ export function DiffViewer({
   const currentHunk = hunks[hunkIndex] ?? hunks[0];
   const filePath = file?.path ?? (activeFile ? displayPath(activeFile) : "");
   const staged = file ? isFileStaged(file) : false;
+  const showImagePreview =
+    !!repoPath &&
+    !!filePath &&
+    !!activeFile?.isBinary &&
+    isImagePath(filePath);
+
+  useEffect(() => {
+    if (!showImagePreview) {
+      setImagePreview(null);
+      setImagePreviewLoading(false);
+      setImagePreviewError(null);
+      return;
+    }
+
+    let active = true;
+    setImagePreview(null);
+    setImagePreviewLoading(true);
+    setImagePreviewError(null);
+
+    void invoke<FileImagePreview>("file_image_preview", {
+      path: repoPath,
+      filePath,
+      commit: commit ?? null,
+      section: section ?? null,
+    })
+      .then((preview) => {
+        if (!active) return;
+        if (!preview.oldDataUrl && !preview.newDataUrl) {
+          setImagePreviewError("Could not load image preview for this file.");
+          setImagePreview(null);
+          return;
+        }
+        setImagePreview(preview);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setImagePreview(null);
+        setImagePreviewError(String(err));
+      })
+      .finally(() => {
+        if (active) setImagePreviewLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [showImagePreview, repoPath, filePath, commit, section]);
 
   if (!raw.trim() || !activeFile) {
     return (
@@ -85,7 +143,32 @@ export function DiffViewer({
 
       <div className="diff-scroll">
         {activeFile.isBinary ? (
-          <div className="diff-empty">Binary file — no text diff available.</div>
+          showImagePreview ? (
+            imagePreviewLoading ? (
+              <div className="diff-empty">Loading image preview…</div>
+            ) : imagePreview ? (
+              <div className="image-diff-preview">
+                {imagePreview.oldDataUrl ? (
+                  <figure className="image-diff-pane">
+                    <figcaption>Previous</figcaption>
+                    <img src={imagePreview.oldDataUrl} alt="Previous version" />
+                  </figure>
+                ) : null}
+                {imagePreview.newDataUrl ? (
+                  <figure className="image-diff-pane">
+                    <figcaption>Current</figcaption>
+                    <img src={imagePreview.newDataUrl} alt="Current version" />
+                  </figure>
+                ) : null}
+              </div>
+            ) : (
+              <div className="diff-empty">
+                {imagePreviewError ?? "Binary file — no text diff available."}
+              </div>
+            )
+          ) : (
+            <div className="diff-empty">Binary file — no text diff available.</div>
+          )
         ) : (
           <div className="diff-hunk-view">
             {currentHunk?.header ? (
