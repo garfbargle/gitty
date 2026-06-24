@@ -12,6 +12,7 @@ import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
 import type {
   ActionResult,
+  ChangeSection,
   CommitEntry,
   DiffFocus,
   FileChange,
@@ -45,6 +46,8 @@ function App() {
 
   const selectedCommit = focus?.kind === "commit" ? focus.commit : null;
   const selectedFile = focus?.kind === "file" ? focus.file : null;
+  const selectedFileKey =
+    focus?.kind === "file" ? `${focus.section}:${focus.file.path}` : undefined;
 
   const branchNames = useMemo(() => {
     const branches = snapshot?.branches ?? [];
@@ -59,8 +62,11 @@ function App() {
 
   useEffect(() => {
     if (!snapshot || viewMode !== "working") return;
-    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes[0];
-    if (first) void inspectFile(first, snapshot.repo.path);
+    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
+    if (first) {
+      const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
+      void inspectFile(first, section, snapshot.repo.path);
+    }
   }, [snapshot?.repo.path]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
@@ -137,8 +143,8 @@ function App() {
     if (result !== null) setDiff(result || "This commit has no patch output.");
   }
 
-  async function inspectFile(file: FileChange, path = selectedPath) {
-    setFocus({ kind: "file", file });
+  async function inspectFile(file: FileChange, section: ChangeSection, path = selectedPath) {
+    setFocus({ kind: "file", file, section });
     const result = await run(() =>
       invoke<string>("file_diff", { path, filePath: file.path }),
     );
@@ -331,16 +337,19 @@ function App() {
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => {
                     setViewMode("working");
-                    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes[0];
-                    if (first) void inspectFile(first);
+                    const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
+                    if (first) {
+                      const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
+                      void inspectFile(first, section);
+                    }
                   }}
                 />
 
                 <div className="workspace-grid">
                   <ChangesList
                     changes={snapshot.changes}
-                    selectedPath={selectedFile?.path}
-                    onSelect={(file) => void inspectFile(file)}
+                    selectedKey={selectedFileKey}
+                    onSelect={(file, section) => void inspectFile(file, section)}
                     onStage={(files) => void stageFiles(files)}
                     onUnstage={(files) => void unstageFiles(files)}
                     disabled={loading}

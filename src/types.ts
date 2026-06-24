@@ -51,7 +51,9 @@ export type ActionResult = {
   output: string;
 };
 
+export type ChangeSection = "unstaged" | "staged";
+
 export type DiffFocus =
   | { kind: "commit"; commit: CommitEntry }
-  | { kind: "file"; file: FileChange }
+  | { kind: "file"; file: FileChange; section: ChangeSection }
   | null;
