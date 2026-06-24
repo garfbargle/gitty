@@ -5,7 +5,7 @@ export type RepoEntry = {
 };
 
 export type DiscoveredRepoEntry = RepoEntry & {
-  discoveredAt: number;
+  lastEditedAt: number;
 };
 
 export type CommitEntry = {

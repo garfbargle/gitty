@@ -8,7 +8,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -48,7 +48,7 @@ pub struct DiscoveredRepoEntry {
     pub id: String,
     pub name: String,
     pub path: String,
-    pub discovered_at: u64,
+    pub last_edited_at: u64,
 }
 
 pub struct RepoDiscovery {
@@ -63,10 +63,19 @@ impl Default for RepoDiscovery {
     }
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+fn modified_millis(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as u64)
+}
+
+/// Best-effort "last worked on" signal using at most two stat calls.
+fn repo_last_edited_at(path: &Path) -> u64 {
+    modified_millis(&path.join(".git/logs/HEAD"))
+        .or_else(|| modified_millis(&path.join(".git")))
+        .or_else(|| modified_millis(path))
         .unwrap_or(0)
 }
 
@@ -180,7 +189,7 @@ fn scan_roots(
                                 id: repo.id,
                                 name: repo.name,
                                 path: repo.path,
-                                discovered_at: now_millis(),
+                                last_edited_at: repo_last_edited_at(&dir),
                             },
                         );
                     }

@@ -39,18 +39,41 @@ import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
 
-function sortDiscoveredRepos(repos: DiscoveredRepoEntry[]): DiscoveredRepoEntry[] {
-  return [...repos].sort((left, right) => right.discoveredAt - left.discoveredAt);
+function discoveredInsertIndex(repos: DiscoveredRepoEntry[], lastEditedAt: number): number {
+  let lo = 0;
+  let hi = repos.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (repos[mid].lastEditedAt > lastEditedAt) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
 }
 
 function upsertDiscoveredRepo(
   current: DiscoveredRepoEntry[],
   repo: DiscoveredRepoEntry,
 ): DiscoveredRepoEntry[] {
-  if (current.some((item) => item.path === repo.path)) {
-    return current;
+  const existingIndex = current.findIndex((item) => item.path === repo.path);
+  if (existingIndex !== -1) {
+    const existing = current[existingIndex];
+    if (existing.lastEditedAt === repo.lastEditedAt) {
+      return current;
+    }
+    const without = current.slice(0, existingIndex).concat(current.slice(existingIndex + 1));
+    const insertAt = discoveredInsertIndex(without, repo.lastEditedAt);
+    const next = without.slice();
+    next.splice(insertAt, 0, { ...existing, lastEditedAt: repo.lastEditedAt });
+    return next;
   }
-  return sortDiscoveredRepos([...current, repo]);
+
+  const insertAt = discoveredInsertIndex(current, repo.lastEditedAt);
+  const next = current.slice();
+  next.splice(insertAt, 0, repo);
+  return next;
 }
 
 type ViewMode = "working" | "history";
