@@ -67,19 +67,22 @@ export function HistoryTimeline({
     if (!container || !node) return;
     pinnedToEndRef.current = false;
     suppressScrollbarRef.current = true;
-    const nodeLeft = node.offsetLeft;
-    const nodeRight = nodeLeft + node.offsetWidth;
-    const viewLeft = container.scrollLeft;
-    const viewRight = viewLeft + container.clientWidth;
-    if (nodeLeft < viewLeft) {
-      container.scrollLeft = nodeLeft - 16;
-    } else if (nodeRight > viewRight) {
-      container.scrollLeft = nodeRight - container.clientWidth + 16;
+
+    const padding = 16;
+    const containerRect = container.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+
+    if (nodeRect.left < containerRect.left + padding) {
+      container.scrollLeft -= containerRect.left + padding - nodeRect.left;
+    } else if (nodeRect.right > containerRect.right - padding) {
+      container.scrollLeft += nodeRect.right - (containerRect.right - padding);
     }
+
+    revealScrollbar();
     requestAnimationFrame(() => {
       suppressScrollbarRef.current = false;
     });
-  }, []);
+  }, [revealScrollbar]);
 
   const handleScroll = useCallback(() => {
     pinnedToEndRef.current = isScrolledToEnd();
@@ -131,13 +134,16 @@ export function HistoryTimeline({
   }, [scrollToEnd]);
 
   useLayoutEffect(() => {
-    if (workingTreeActive) {
-      scrollNodeIntoView(nodeRefs.current.get("working-tree"));
-      return;
-    }
-    if (selectedHash) {
-      scrollNodeIntoView(nodeRefs.current.get(selectedHash));
-    }
+    const nodeKey = workingTreeActive ? "working-tree" : selectedHash;
+    if (!nodeKey) return;
+
+    const scrollToSelected = () => {
+      scrollNodeIntoView(nodeRefs.current.get(nodeKey));
+    };
+
+    scrollToSelected();
+    const frame = requestAnimationFrame(scrollToSelected);
+    return () => cancelAnimationFrame(frame);
   }, [selectedHash, workingTreeActive, scrollNodeIntoView, visible.length]);
 
   function selectCommit(commit: CommitEntry) {

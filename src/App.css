@@ -275,12 +275,16 @@ button:focus-visible {
   }
 }
 
+.repo-item.saved,
+.repo-item.discovered {
+  padding: 4px 4px 4px 0;
+  position: relative;
+}
+
 .repo-item.discovered {
   background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
   border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
   opacity: 0.82;
-  padding: 4px 4px 4px 0;
-  position: relative;
 }
 
 .repo-item.discovered:hover {
@@ -337,6 +341,38 @@ button:focus-visible {
 .repo-save-btn:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg-sidebar));
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.repo-remove-btn {
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-sidebar) 70%, var(--danger) 6%);
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  display: flex;
+  height: 28px;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease, color 120ms ease;
+  width: 28px;
+  z-index: 1;
+}
+
+.repo-item.saved:hover .repo-remove-btn,
+.repo-item.saved:focus-within .repo-remove-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.repo-remove-btn:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-sidebar));
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  color: var(--danger);
 }
 
 .sidebar-footer {
@@ -1087,6 +1123,19 @@ button:focus-visible {
   width: calc(100% - 28px);
 }
 
+.timeline-node.active::before {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  border-radius: var(--radius-sm);
+  content: "";
+  inset: -5px 0 -3px;
+  position: absolute;
+  z-index: 0;
+}
+
+.timeline-node.working-tree.active::before {
+  background: color-mix(in srgb, var(--success-soft) 70%, transparent);
+}
+
 .timeline-node.active .node-hash {
   color: var(--accent);
 }
@@ -1113,14 +1162,18 @@ button:focus-visible {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
+  position: relative;
+  z-index: 1;
 }
 
 .node-subject {
   font-size: 11px;
   max-width: 120px;
   overflow: hidden;
+  position: relative;
   text-overflow: ellipsis;
   white-space: nowrap;
+  z-index: 1;
 }
 
 /* ── Workspace grid ── */

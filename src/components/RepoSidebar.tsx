@@ -1,4 +1,4 @@
-import { BookmarkPlus, FolderGit2, Plus, Radar, Settings } from "lucide-react";
+import { BookmarkMinus, BookmarkPlus, FolderGit2, Plus, Radar, Settings } from "lucide-react";
 import type { DiscoveredRepoEntry, RepoEntry } from "../types";
 import { shortenPath } from "../lib/git";
 
@@ -9,6 +9,7 @@ type RepoSidebarProps = {
   selectedPath: string;
   onSelect: (path: string) => void;
   onSaveDiscovered: (path: string) => void;
+  onRemoveRepo: (path: string) => void;
   onAddExisting: () => void;
   onOpenSettings: () => void;
 };
@@ -20,6 +21,7 @@ export function RepoSidebar({
   selectedPath,
   onSelect,
   onSaveDiscovered,
+  onRemoveRepo,
   onAddExisting,
   onOpenSettings,
 }: RepoSidebarProps) {
@@ -34,19 +36,35 @@ export function RepoSidebar({
 
       <div className="repo-list">
         {repos.map((repo) => (
-          <button
-            className={`repo-item ${repo.path === selectedPath ? "active" : ""}`}
+          <div
+            className={`repo-item saved ${repo.path === selectedPath ? "active" : ""}`}
             key={repo.id}
-            type="button"
-            onClick={() => onSelect(repo.path)}
             title={repo.path}
           >
-            <FolderGit2 size={16} className="repo-icon" />
-            <div className="repo-text">
-              <span className="repo-name">{repo.name}</span>
-              <small>{shortenPath(repo.path)}</small>
-            </div>
-          </button>
+            <button
+              className="repo-item-main"
+              type="button"
+              onClick={() => onSelect(repo.path)}
+            >
+              <FolderGit2 size={16} className="repo-icon" />
+              <div className="repo-text">
+                <span className="repo-name">{repo.name}</span>
+                <small>{shortenPath(repo.path)}</small>
+              </div>
+            </button>
+            <button
+              className="repo-remove-btn"
+              type="button"
+              title="Remove from Gitty"
+              aria-label={`Remove ${repo.name} from Gitty`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemoveRepo(repo.path);
+              }}
+            >
+              <BookmarkMinus size={15} />
+            </button>
+          </div>
         ))}
 
         {discoveredRepos.length > 0 || discovering ? (

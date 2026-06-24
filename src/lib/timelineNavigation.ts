@@ -31,5 +31,6 @@ export function moveTimelineSelection(
 ): TimelineItem | null {
   if (items.length === 0) return null;
   const next = Math.max(0, Math.min(items.length - 1, currentIndex + delta));
+  if (next === currentIndex) return null;
   return items[next];
 }

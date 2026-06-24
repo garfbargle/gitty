@@ -896,24 +896,30 @@ function App() {
     }
   }
 
-  async function removeSelectedRepo() {
-    if (!snapshot) return;
-    if (!window.confirm(`Remove ${snapshot.repo.name} from Gitty?`)) return;
-    const result = await run(() =>
-      invoke<RepoEntry[]>("remove_repo", { path: snapshot.repo.path }),
-    );
+  async function removeRepo(path: string) {
+    const repo = repos.find((item) => item.path === path);
+    if (!repo) return;
+    if (!window.confirm(`Remove ${repo.name} from Gitty?`)) return;
+    const result = await run(() => invoke<RepoEntry[]>("remove_repo", { path }));
     if (result) {
       setRepos(result);
       setSettingsOpen(false);
-      const next = result[0];
-      if (next) await selectRepo(next.path);
-      else {
-        setSelectedPath("");
-        setSnapshot(null);
-        setFocus(null);
-        setDiff(emptyDiff);
+      if (path === selectedPath) {
+        const next = result[0];
+        if (next) await selectRepo(next.path);
+        else {
+          setSelectedPath("");
+          setSnapshot(null);
+          setFocus(null);
+          setDiff(emptyDiff);
+        }
       }
     }
+  }
+
+  async function removeSelectedRepo() {
+    if (!snapshot) return;
+    await removeRepo(snapshot.repo.path);
   }
 
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
@@ -1080,6 +1086,7 @@ function App() {
         selectedPath={selectedPath}
         onSelect={(path) => void selectRepo(path)}
         onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
+        onRemoveRepo={(path) => void removeRepo(path)}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
       />
