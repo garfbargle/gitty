@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
-import { fetchRepoIcon, repoIconFallbackColor, repoIconInitial } from "../lib/repoIcons";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  fetchRepoIcon,
+  invalidateRepoIcon,
+  repoIconFallbackColor,
+  repoIconInitial,
+} from "../lib/repoIcons";
 
 type RepoIconProps = {
   path: string;
@@ -10,16 +15,32 @@ type RepoIconProps = {
 
 export function RepoIcon({ path, name, size = 16, className = "" }: RepoIconProps) {
   const [dataUrl, setDataUrl] = useState<string | null | undefined>(undefined);
+  const retriedRef = useRef(false);
+
+  const loadIcon = useCallback(
+    async (force = false) => {
+      const url = await fetchRepoIcon(path, { force });
+      setDataUrl(url);
+    },
+    [path],
+  );
 
   useEffect(() => {
-    let active = true;
-    void fetchRepoIcon(path).then((url) => {
-      if (active) setDataUrl(url);
-    });
-    return () => {
-      active = false;
-    };
-  }, [path]);
+    retriedRef.current = false;
+    setDataUrl(undefined);
+    void loadIcon(false);
+  }, [loadIcon]);
+
+  function handleImageError() {
+    if (retriedRef.current) {
+      setDataUrl(null);
+      return;
+    }
+
+    retriedRef.current = true;
+    invalidateRepoIcon(path);
+    void loadIcon(true);
+  }
 
   if (dataUrl) {
     return (
@@ -31,6 +52,7 @@ export function RepoIcon({ path, name, size = 16, className = "" }: RepoIconProp
         width={size}
         height={size}
         draggable={false}
+        onError={handleImageError}
       />
     );
   }

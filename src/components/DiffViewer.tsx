@@ -109,9 +109,13 @@ export function DiffViewer({
   }, [showImagePreview, repoPath, filePath, commit, section]);
 
   if (!raw.trim() || !activeFile) {
+    const message =
+      raw.trim() && !activeFile
+        ? raw.trim()
+        : (emptyMessage ?? "Select a file to view its diff.");
     return (
       <section className="diff-panel-center">
-        <div className="diff-empty">{emptyMessage ?? "Select a file to view its diff."}</div>
+        <div className="diff-empty">{message}</div>
       </section>
     );
   }

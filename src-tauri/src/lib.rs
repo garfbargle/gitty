@@ -395,9 +395,13 @@ fn remote_list(repo_path: &Path) -> Vec<RemoteEntry> {
 }
 
 #[tauri::command]
-fn resolve_repo_icon(path: String) -> Result<Option<String>, String> {
+fn resolve_repo_icon(
+    app: AppHandle,
+    path: String,
+    force_rescan: Option<bool>,
+) -> Result<Option<String>, String> {
     let repo = normalize_repo(&path)?;
-    Ok(repo_icon::resolve_repo_icon_data_url(Path::new(&repo.path)))
+    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), force_rescan.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -411,9 +415,10 @@ fn add_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     let mut repos = load_repos_from_disk(&app)?;
 
     if !repos.iter().any(|existing| existing.path == repo.path) {
-        repos.push(repo);
+        repos.push(repo.clone());
         repos.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         save_repos_to_disk(&app, &repos)?;
+        repo_icon::warm_repo_icon_cache(&app, &repo.path)?;
     }
 
     Ok(repos)
@@ -424,6 +429,7 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     let mut repos = load_repos_from_disk(&app)?;
     repos.retain(|repo| repo.path != path);
     save_repos_to_disk(&app, &repos)?;
+    repo_icon::clear_repo_icon_cache(&app, &path)?;
     Ok(repos)
 }
 
@@ -583,6 +589,42 @@ fn read_working_tree_bytes(repo_path: &Path, file_path: &str) -> Option<Vec<u8>>
     fs::read(full_path).ok()
 }
 
+fn untracked_file_diff(repo_path: &Path, file_path: &str) -> Result<Option<String>, String> {
+    let full_path = repo_path.join(file_path);
+    if !full_path.is_file() {
+        return Ok(None);
+    }
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args([
+            "--no-pager",
+            "diff",
+            "--no-index",
+            "--color=never",
+            "--",
+            "/dev/null",
+            file_path,
+        ])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|err| format!("Could not run git: {err}"))?;
+
+    // git diff exits 1 when differences exist.
+    let code = output.status.code();
+    if code == Some(0) || code == Some(1) {
+        let stdout = String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string();
+        if !stdout.is_empty() {
+            return Ok(Some(stdout));
+        }
+    }
+
+    Ok(None)
+}
+
 fn bytes_to_data_url(bytes: &[u8], mime: &str) -> String {
     format!("data:{mime};base64,{}", STANDARD.encode(bytes))
 }
@@ -692,6 +734,9 @@ fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<
         .join("\n\n");
 
     if combined.is_empty() {
+        if let Some(untracked) = untracked_file_diff(repo_path, &file_path)? {
+            return Ok(untracked);
+        }
         Ok(format!(
             "No tracked diff for {file_path}. This may be an untracked file."
         ))

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-const iconCache = new Map<string, string | null>();
+const iconCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string | null>>();
 
 export function repoIconFallbackColor(name: string): string {
@@ -19,30 +19,46 @@ export function repoIconInitial(name: string): string {
   return (first || trimmed.charAt(0)).toUpperCase();
 }
 
-export async function fetchRepoIcon(path: string): Promise<string | null> {
-  if (iconCache.has(path)) {
+export function invalidateRepoIcon(path: string) {
+  iconCache.delete(path);
+  inflight.delete(path);
+}
+
+export async function fetchRepoIcon(
+  path: string,
+  options?: { force?: boolean },
+): Promise<string | null> {
+  const force = options?.force ?? false;
+
+  if (!force && iconCache.has(path)) {
     return iconCache.get(path) ?? null;
   }
 
-  const pending = inflight.get(path);
+  const cacheKey = force ? `${path}:force:${Date.now()}` : path;
+  const pending = inflight.get(cacheKey);
   if (pending) return pending;
 
-  const task = invoke<string | null>("resolve_repo_icon", { path })
+  const task = invoke<string | null>("resolve_repo_icon", { path, forceRescan: force })
     .then((dataUrl) => {
-      iconCache.set(path, dataUrl);
-      inflight.delete(path);
+      inflight.delete(cacheKey);
+      if (dataUrl) {
+        iconCache.set(path, dataUrl);
+      } else {
+        iconCache.delete(path);
+      }
       return dataUrl;
     })
     .catch(() => {
-      iconCache.set(path, null);
-      inflight.delete(path);
+      inflight.delete(cacheKey);
+      iconCache.delete(path);
       return null;
     });
 
-  inflight.set(path, task);
+  inflight.set(cacheKey, task);
   return task;
 }
 
 export function primeRepoIcon(path: string, dataUrl: string | null) {
-  iconCache.set(path, dataUrl);
+  if (dataUrl) iconCache.set(path, dataUrl);
+  else iconCache.delete(path);
 }
