@@ -505,6 +505,7 @@ function App() {
             {viewMode === "working" ? (
               <>
                 <HistoryTimeline
+                  key={snapshot.repo.path}
                   commits={snapshot.commits}
                   changeCount={snapshot.changes.length}
                   selectedHash={selectedCommit?.hash}

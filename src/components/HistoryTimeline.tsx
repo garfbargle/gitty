@@ -1,5 +1,8 @@
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { CommitEntry } from "../types";
 import { laneColor } from "../lib/graph";
+
+const SCROLL_END_THRESHOLD = 24;
 
 type HistoryTimelineProps = {
   commits: CommitEntry[];
@@ -19,9 +22,52 @@ export function HistoryTimeline({
   workingTreeActive,
 }: HistoryTimelineProps) {
   const visible = [...commits].reverse().slice(-8);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pinnedToEndRef = useRef(true);
+  const headHash = commits[0]?.hash ?? "";
+
+  const isScrolledToEnd = useCallback((): boolean => {
+    const container = scrollRef.current;
+    if (!container) return true;
+    const remaining = container.scrollWidth - container.clientWidth - container.scrollLeft;
+    return remaining <= SCROLL_END_THRESHOLD;
+  }, []);
+
+  const scrollToEnd = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.scrollLeft = container.scrollWidth - container.clientWidth;
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    pinnedToEndRef.current = isScrolledToEnd();
+  }, [isScrolledToEnd]);
+
+  useLayoutEffect(() => {
+    if (pinnedToEndRef.current) {
+      scrollToEnd();
+    }
+  }, [headHash, scrollToEnd]);
+
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    const track = container?.querySelector(".timeline-track");
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      if (pinnedToEndRef.current) {
+        scrollToEnd();
+      }
+    });
+
+    observer.observe(container);
+    if (track) observer.observe(track);
+
+    return () => observer.disconnect();
+  }, [scrollToEnd]);
 
   return (
-    <div className="history-timeline">
+    <div className="history-timeline" onScroll={handleScroll} ref={scrollRef}>
       <div className="timeline-track">
         {visible.map((commit, index) => {
           const color = laneColor(index % 6);
