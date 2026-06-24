@@ -40,8 +40,7 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("working");
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
-  const [summary, setSummary] = useState("");
-  const [description, setDescription] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [remoteName, setRemoteName] = useState("origin");
@@ -65,6 +64,7 @@ function App() {
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const discoveryStarted = useRef(false);
+  const commitMessageRef = useRef<HTMLTextAreaElement>(null);
 
   const startDiscovery = useCallback((paths: string[]) => {
     void invoke("start_repo_discovery", { savedPaths: paths }).catch(() => {
@@ -153,8 +153,7 @@ function App() {
     setSelectedPath(path);
     setFocus(null);
     setDiff(emptyDiff);
-    setSummary("");
-    setDescription("");
+    setCommitMessage("");
     setAmend(false);
     setViewMode("working");
     await refreshRepo(path);
@@ -277,17 +276,14 @@ function App() {
   }
 
   async function commit() {
-    if (!summary.trim()) return;
-    const message = description.trim()
-      ? `${summary.trim()}\n\n${description.trim()}`
-      : summary.trim();
+    const message = commitMessage.trim();
+    if (!message) return;
     const result = await run(() =>
       invoke<ActionResult>("commit_repo", { path: selectedPath, message, amend }),
     );
     if (result) {
       setMessage(result.message);
-      setSummary("");
-      setDescription("");
+      setCommitMessage("");
       setAmend(false);
       await refreshRepo();
     }
@@ -376,6 +372,25 @@ function App() {
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
   const unstagedCount = snapshot?.changes.filter(isUnstaged).length ?? 0;
 
+  useEffect(() => {
+    if (viewMode !== "working") return;
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      const target = event.target as HTMLElement;
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+      if (target.isContentEditable) return;
+      event.preventDefault();
+      commitMessageRef.current?.focus();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewMode]);
+
   return (
     <main className="app-shell">
       <RepoSidebar
@@ -450,8 +465,8 @@ function App() {
                   />
 
                   <CommitPanel
-                    summary={summary}
-                    description={description}
+                    message={commitMessage}
+                    messageInputRef={commitMessageRef}
                     branch={snapshot.branch}
                     branches={snapshot.branches ?? []}
                     amend={amend}
@@ -459,8 +474,7 @@ function App() {
                     selectedCommit={selectedCommit}
                     stagedCount={stagedCount}
                     unstagedCount={unstagedCount}
-                    onSummaryChange={setSummary}
-                    onDescriptionChange={setDescription}
+                    onMessageChange={setCommitMessage}
                     onAmendChange={setAmend}
                     onResetModeChange={setResetMode}
                     onCommit={() => void commit()}

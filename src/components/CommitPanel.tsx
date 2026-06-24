@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 import {
   AlertTriangle,
   GitCommitHorizontal,
@@ -8,8 +8,8 @@ import {
 import type { BranchEntry, CommitEntry } from "../types";
 
 type CommitPanelProps = {
-  summary: string;
-  description: string;
+  message: string;
+  messageInputRef: RefObject<HTMLTextAreaElement | null>;
   branch: string;
   branches: BranchEntry[];
   amend: boolean;
@@ -17,8 +17,7 @@ type CommitPanelProps = {
   selectedCommit?: CommitEntry | null;
   stagedCount: number;
   unstagedCount: number;
-  onSummaryChange: (value: string) => void;
-  onDescriptionChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
   onAmendChange: (value: boolean) => void;
   onResetModeChange: (mode: "soft" | "hard") => void;
   onCommit: () => void;
@@ -29,8 +28,8 @@ type CommitPanelProps = {
 };
 
 export function CommitPanel({
-  summary,
-  description,
+  message,
+  messageInputRef,
   branch,
   branches,
   amend,
@@ -38,8 +37,7 @@ export function CommitPanel({
   selectedCommit,
   stagedCount,
   unstagedCount,
-  onSummaryChange,
-  onDescriptionChange,
+  onMessageChange,
   onAmendChange,
   onResetModeChange,
   onCommit,
@@ -48,7 +46,7 @@ export function CommitPanel({
   onReset,
   disabled,
 }: CommitPanelProps) {
-  const canCommit = (stagedCount > 0 || amend) && summary.trim().length > 0;
+  const canCommit = (stagedCount > 0 || amend) && message.trim().length > 0;
   const localBranches = branches.filter((b) => !b.isRemote);
 
   useEffect(() => {
@@ -70,21 +68,16 @@ export function CommitPanel({
           <span>Commit</span>
         </header>
 
-        <label className="field-label">Summary</label>
-        <input
-          className="summary-input"
-          value={summary}
-          onChange={(event) => onSummaryChange(event.currentTarget.value)}
-          placeholder="Short commit message"
-          disabled={disabled}
-        />
-
-        <label className="field-label">Description</label>
+        <label className="field-label" htmlFor="commit-message">
+          Message
+        </label>
         <textarea
-          className="desc-input"
-          value={description}
-          onChange={(event) => onDescriptionChange(event.currentTarget.value)}
-          placeholder="Optional longer description…"
+          id="commit-message"
+          ref={messageInputRef}
+          className="commit-message-input"
+          value={message}
+          onChange={(event) => onMessageChange(event.currentTarget.value)}
+          placeholder="Commit message"
           rows={4}
           disabled={disabled}
         />

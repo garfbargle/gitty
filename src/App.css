@@ -952,13 +952,12 @@ button:focus-visible {
   font-weight: 600;
 }
 
-.summary-input,
-.desc-input,
+.commit-message-input,
 .branch-select {
   width: 100%;
 }
 
-.desc-input {
+.commit-message-input {
   min-height: 80px;
   resize: vertical;
 }
