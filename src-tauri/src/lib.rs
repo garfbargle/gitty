@@ -605,6 +605,15 @@ fn stage_all(path: String, stage: bool) -> Result<ActionResult, String> {
 }
 
 #[tauri::command]
+fn head_commit_message(path: String) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let Ok(message) = git(Path::new(&repo.path), &["log", "-1", "--format=%B"]) else {
+        return Ok(String::new());
+    };
+    Ok(message.trim_end().to_string())
+}
+
+#[tauri::command]
 fn commit_repo(path: String, message: String, amend: Option<bool>) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let message = message.trim().to_string();
@@ -754,6 +763,7 @@ pub fn run() {
             stage_files,
             stage_all,
             commit_repo,
+            head_commit_message,
             fetch_repo,
             remove_remote,
             push_repo,

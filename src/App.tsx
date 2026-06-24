@@ -331,6 +331,21 @@ function App() {
     else await refreshRepo();
   }
 
+  async function handleAmendChange(checked: boolean) {
+    setAmend(checked);
+    if (!checked || !selectedPath) return;
+    if (commitMessage.trim()) return;
+
+    try {
+      const message = await invoke<string>("head_commit_message", { path: selectedPath });
+      if (message) {
+        setCommitMessage((current) => (current.trim() ? current : message));
+      }
+    } catch {
+      // No commits yet or repo unavailable — leave message empty.
+    }
+  }
+
   async function commit() {
     const message = commitMessage.trim();
     if (!message) return;
@@ -534,7 +549,7 @@ function App() {
                     stagedCount={stagedCount}
                     unstagedCount={unstagedCount}
                     onMessageChange={setCommitMessage}
-                    onAmendChange={setAmend}
+                    onAmendChange={(checked) => void handleAmendChange(checked)}
                     onResetModeChange={setResetMode}
                     onCommit={() => void commit()}
                     onPush={() => void push(false)}
