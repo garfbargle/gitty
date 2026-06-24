@@ -1,8 +1,9 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { CommitEntry } from "../types";
 import { laneColor } from "../lib/graph";
 
 const SCROLL_END_THRESHOLD = 24;
+const SCROLLBAR_HIDE_DELAY_MS = 800;
 
 type HistoryTimelineProps = {
   commits: CommitEntry[];
@@ -27,7 +28,22 @@ export function HistoryTimeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
+  const suppressScrollbarRef = useRef(false);
+  const scrollbarTimeoutRef = useRef<number | null>(null);
   const headHash = commits[0]?.hash ?? "";
+
+  const revealScrollbar = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    container.classList.add("is-scrolling");
+    if (scrollbarTimeoutRef.current !== null) {
+      window.clearTimeout(scrollbarTimeoutRef.current);
+    }
+    scrollbarTimeoutRef.current = window.setTimeout(() => {
+      container.classList.remove("is-scrolling");
+      scrollbarTimeoutRef.current = null;
+    }, SCROLLBAR_HIDE_DELAY_MS);
+  }, []);
 
   const isScrolledToEnd = useCallback((): boolean => {
     const container = scrollRef.current;
@@ -39,13 +55,18 @@ export function HistoryTimeline({
   const scrollToEnd = useCallback(() => {
     const container = scrollRef.current;
     if (!container) return;
+    suppressScrollbarRef.current = true;
     container.scrollLeft = container.scrollWidth - container.clientWidth;
+    requestAnimationFrame(() => {
+      suppressScrollbarRef.current = false;
+    });
   }, []);
 
   const scrollNodeIntoView = useCallback((node: HTMLButtonElement | undefined) => {
     const container = scrollRef.current;
     if (!container || !node) return;
     pinnedToEndRef.current = false;
+    suppressScrollbarRef.current = true;
     const nodeLeft = node.offsetLeft;
     const nodeRight = nodeLeft + node.offsetWidth;
     const viewLeft = container.scrollLeft;
@@ -55,11 +76,36 @@ export function HistoryTimeline({
     } else if (nodeRight > viewRight) {
       container.scrollLeft = nodeRight - container.clientWidth + 16;
     }
+    requestAnimationFrame(() => {
+      suppressScrollbarRef.current = false;
+    });
   }, []);
 
   const handleScroll = useCallback(() => {
     pinnedToEndRef.current = isScrolledToEnd();
-  }, [isScrolledToEnd]);
+    if (!suppressScrollbarRef.current) {
+      revealScrollbar();
+    }
+  }, [isScrolledToEnd, revealScrollbar]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      container.scrollLeft += event.deltaY;
+    };
+
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      if (scrollbarTimeoutRef.current !== null) {
+        window.clearTimeout(scrollbarTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (pinnedToEndRef.current) {

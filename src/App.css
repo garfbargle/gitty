@@ -1022,13 +1022,42 @@ button:focus-visible {
 .history-timeline {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
   overflow-x: auto;
-  padding: 14px 16px;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: none;
+  padding: 14px 16px 4px;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.history-timeline::-webkit-scrollbar {
+  height: 6px;
+}
+
+.history-timeline::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history-timeline::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.history-timeline.is-scrolling {
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+}
+
+.history-timeline.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
 }
 
 .timeline-track {
   align-items: flex-start;
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
   min-width: min-content;
 }
@@ -1040,6 +1069,7 @@ button:focus-visible {
   color: var(--text-muted);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 4px;
   min-width: 100px;
   padding: 0 12px;
