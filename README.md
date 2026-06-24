@@ -1,67 +1,31 @@
 # Gitty
 
-A lightweight desktop Git client for macOS, built with [Tauri](https://tauri.app/) and React. Gitty focuses on the day-to-day workflows you actually use: browse repos, review changes, commit, push, and inspect history — without the overhead of a full IDE or a heavyweight Git GUI.
+**Fast, keyboard-driven Git for macOS, Windows, and Linux.** Stage, review, commit, and push without leaving the keyboard. Gitty is a cross-platform native [Tauri](https://tauri.app/) app — lightweight, instant to open, and built to stay out of your way.
 
-Gitty shells out to your system `git` executable. It does not embed a Git library or poll repositories in the background; status refreshes when you select a repo, hit refresh, or complete an action.
+No Electron bloat. No background polling. No embedded Git library. Gitty calls your system `git` directly and refreshes only when you need it — select a repo, hit refresh, or finish an action. The result is a client that feels snappy on large repos and stays responsive all day.
 
-![Gitty working tree view showing repository sidebar, commit timeline, diff viewer, and commit panel](docs/screenshot.png)
+## Why Gitty
 
-## Features
+- **Keyboard-first** — The whole workflow is built around keybinds. Stage everything, write a message, commit, and push without touching the mouse.
+- **Blazing fast** — Native shell, on-demand refreshes, and zero idle overhead. Open a repo and you're looking at diffs immediately.
+- **Free AI commit summaries** — Bring your own [NVIDIA API key](https://build.nvidia.com/models) and get commit message suggestions at no extra cost from Gitty. NVIDIA's free tier covers typical usage; your key stays local.
+- **Dead simple** — Saved repo catalog, one-click discovery, syntax-highlighted diffs, push with `--force-with-lease`. Everything you need, nothing you don't.
 
-### Repository management
-- Maintain a saved catalog of local Git repositories
-- Scan common folders for recently edited repos and add them with one click
-- Per-repo icons derived from the repository contents
-- Switch repos from the sidebar or top bar
+## The keyboard workflow
 
-### Working tree
-- View staged and unstaged changes in a split file list
-- Stage and unstage individual files or everything at once
-- Syntax-highlighted unified diffs for working tree and commit changes
-- Discard all local changes (tracked and untracked)
-- Amend the previous commit
+Gitty is designed to be driven from the keyboard. Most of your day looks like this:
 
-### History
-- Browse recent commits in a graph timeline or tabular history view
-- Inspect any commit's file list and full diff
-- Soft or hard reset to a selected commit
-- See ahead/behind counts relative to upstream
+1. `Enter` — jump to the commit message
+2. `Mod A` — stage all changes
+3. `Mod Enter` — commit (or apply an AI summary and commit in one shot)
+4. `Mod Shift Enter` — push
 
-### Remotes and push
-- Add, update, or remove remotes from repo settings
-- Push with a single action
-- Force push with `--force-with-lease` when the remote has diverged
-
-### AI commit summaries (optional)
-- Generate concise commit message suggestions from staged changes
-- Powered by [NVIDIA NIM](https://build.nvidia.com/models) (Llama 3.1 8B Instruct)
-- Enable auto-summarize in app settings, or trigger summaries manually from the commit panel
-- Requires an NVIDIA API key; stored locally in the app config directory
-
-## Requirements
-
-- **macOS 11+** (primary target; Tauri can build for other platforms)
-- **Git** installed and available on `PATH`
-- For development:
-  - [Node.js](https://nodejs.org/) 18+
-  - [Rust](https://www.rust-lang.org/tools/install) (stable)
-  - Xcode Command Line Tools (`xcode-select --install`)
-
-## Development
-
-```bash
-npm install
-npm run tauri dev
-```
-
-The Vite dev server runs on port 1420; Tauri opens a native window pointed at it.
-
-## Keyboard shortcuts
+Navigate the timeline and file list with arrow keys. Switch repos, branches, and views from the top bar when you need to — but the core loop never requires a mouse.
 
 | Shortcut | Action |
 | --- | --- |
-| `Enter` | Focus the commit message field (working tree view) |
-| `⌘ Enter` | Commit staged changes, or apply an AI summary and commit |
+| `Enter` | Focus the commit message field |
+| `⌘ Enter` | Commit staged changes, or apply AI summary and commit |
 | `⌘ ⇧ Enter` | Push |
 | `⌘ A` | Stage all changes |
 | `↑` / `↓` | Move selection in the timeline or file list |
@@ -69,14 +33,53 @@ The Vite dev server runs on port 1420; Tauri opens a native window pointed at it
 
 Shortcuts use `⌘` on macOS and `Ctrl` on other platforms.
 
-## AI summarization setup
+## Free commit summarization
 
-1. Open **Settings** from the sidebar gear icon.
-2. Toggle **Auto summarize** if you want suggestions whenever staged changes change.
-3. Paste an [NVIDIA API key](https://build.nvidia.com/models) and save.
-4. Use **Test key** to verify connectivity before committing.
+Gitty can draft commit messages from your staged changes using [NVIDIA NIM](https://build.nvidia.com/models) (Llama 3.1 8B Instruct). It's **free to use** — just bring your own NVIDIA API key:
 
-Summaries are generated from staged diff content sent to NVIDIA's API. Only enable this if you are comfortable with that data leaving your machine.
+1. Get a free key at [build.nvidia.com/models](https://build.nvidia.com/models)
+2. Open **Settings** (sidebar gear icon) and paste it in
+3. Toggle **Auto summarize** to get suggestions as you stage, or trigger them manually from the commit panel
+4. Hit `⌘ Enter` to accept a suggestion and commit in one step
+
+No Gitty subscription. No usage fees from us. Your key is stored locally in the app config directory.
+
+Summaries are generated from staged diff content sent to NVIDIA's API — only enable this if you're comfortable with that.
+
+## Features
+
+### Repository management
+- Saved catalog of local Git repositories
+- Scan common folders for recently edited repos and add them in one click
+- Per-repo icons, sidebar switching, branch picker in the top bar
+
+### Working tree
+- Staged and unstaged file lists with syntax-highlighted unified diffs
+- Stage, unstage, or discard all changes
+- Amend the previous commit
+
+### History
+- Graph timeline and tabular history view
+- Inspect any commit's files and full diff
+- Soft or hard reset to a selected commit
+- Ahead/behind counts relative to upstream
+
+### Remotes and push
+- Add, update, or remove remotes from repo settings
+- Push in one action; force push with `--force-with-lease` when needed
+
+## Requirements
+
+- **macOS 11+** (primary target; Tauri can build for other platforms)
+- **Git** on `PATH`
+- For development: [Node.js](https://nodejs.org/) 18+, [Rust](https://www.rust-lang.org/tools/install), Xcode Command Line Tools
+
+## Development
+
+```bash
+npm install
+npm run tauri dev
+```
 
 ## Project structure
 
