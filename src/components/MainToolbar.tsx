@@ -1,14 +1,29 @@
-import { Download, FolderGit2, RefreshCw, Search, X } from "lucide-react";
+import { Download, FolderGit2, Loader2, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { RemoteEntry } from "../types";
+
+const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 
 type SettingsDrawerProps = {
   open: boolean;
   remotes: RemoteEntry[];
   remoteName: string;
   remoteUrl: string;
+  autoSummarizeEnabled: boolean;
+  nvidiaApiKeyConfigured: boolean;
+  nvidiaApiKeyPreview?: string | null;
+  settingsNvidiaKey: string;
+  nvidiaKeyTesting?: boolean;
+  nvidiaKeyTestMessage?: string | null;
+  nvidiaKeyTestError?: boolean;
   onClose: () => void;
   onRemoteNameChange: (value: string) => void;
   onRemoteUrlChange: (value: string) => void;
+  onAutoSummarizeEnabledChange: (enabled: boolean) => void;
+  onSettingsNvidiaKeyChange: (value: string) => void;
+  onSaveNvidiaApiKey: () => void;
+  onDeleteNvidiaApiKey: () => void;
+  onTestNvidiaApiKey: () => void;
   onSaveRemote: () => void;
   onRemoveRemote: (name: string) => void;
   onFetch: () => void;
@@ -21,9 +36,21 @@ export function SettingsDrawer({
   remotes,
   remoteName,
   remoteUrl,
+  autoSummarizeEnabled,
+  nvidiaApiKeyConfigured,
+  nvidiaApiKeyPreview,
+  settingsNvidiaKey,
+  nvidiaKeyTesting = false,
+  nvidiaKeyTestMessage = null,
+  nvidiaKeyTestError = false,
   onClose,
   onRemoteNameChange,
   onRemoteUrlChange,
+  onAutoSummarizeEnabledChange,
+  onSettingsNvidiaKeyChange,
+  onSaveNvidiaApiKey,
+  onDeleteNvidiaApiKey,
+  onTestNvidiaApiKey,
   onSaveRemote,
   onRemoveRemote,
   onFetch,
@@ -41,6 +68,11 @@ export function SettingsDrawer({
     }
   });
 
+  async function openNvidiaLink(event: React.MouseEvent) {
+    event.preventDefault();
+    await openUrl(NVIDIA_MODELS_URL);
+  }
+
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-drawer" onClick={(event) => event.stopPropagation()}>
@@ -50,6 +82,92 @@ export function SettingsDrawer({
             <X size={16} />
           </button>
         </header>
+
+        <section className="settings-section">
+          <h3>
+            <Sparkles size={14} />
+            Auto Summarize
+          </h3>
+          <p className="muted settings-hint">
+            Summarize staged changes when you focus the commit message. Get a free key from{" "}
+            <a
+              href={NVIDIA_MODELS_URL}
+              className="change-summary-link"
+              onClick={(event) => void openNvidiaLink(event)}
+            >
+              NVIDIA
+            </a>{" "}
+            (sign in, pick a model, accept terms, then generate a key).
+          </p>
+
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={autoSummarizeEnabled}
+              onChange={(event) => onAutoSummarizeEnabledChange(event.currentTarget.checked)}
+              disabled={disabled}
+            />
+            Enable AI auto summarize
+          </label>
+
+          {nvidiaApiKeyConfigured && nvidiaApiKeyPreview ? (
+            <p className="settings-key-preview">
+              Saved key: <code>{nvidiaApiKeyPreview}</code>
+            </p>
+          ) : null}
+
+          <form
+            className="remote-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSaveNvidiaApiKey();
+            }}
+          >
+            <input
+              type="password"
+              value={settingsNvidiaKey}
+              onChange={(event) => onSettingsNvidiaKeyChange(event.currentTarget.value)}
+              placeholder={nvidiaApiKeyConfigured ? "Paste a new key to replace…" : "Paste NVIDIA API key (nvapi-…)"}
+              aria-label="NVIDIA API key"
+              autoComplete="off"
+              disabled={disabled}
+            />
+            <div className="settings-actions">
+              <button
+                type="submit"
+                className="action-btn"
+                disabled={disabled || !settingsNvidiaKey.trim()}
+              >
+                Save key
+              </button>
+              <button
+                type="button"
+                className="action-btn"
+                disabled={disabled || nvidiaKeyTesting || (!settingsNvidiaKey.trim() && !nvidiaApiKeyConfigured)}
+                onClick={() => onTestNvidiaApiKey()}
+              >
+                {nvidiaKeyTesting ? <Loader2 size={14} className="spin" /> : null}
+                Test key
+              </button>
+              {nvidiaApiKeyConfigured ? (
+                <button
+                  type="button"
+                  className="action-btn danger"
+                  disabled={disabled}
+                  onClick={() => onDeleteNvidiaApiKey()}
+                >
+                  Delete key
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          {nvidiaKeyTestMessage ? (
+            <p className={`settings-test-result ${nvidiaKeyTestError ? "error" : "success"}`}>
+              {nvidiaKeyTestMessage}
+            </p>
+          ) : null}
+        </section>
 
         <section className="settings-section">
           <h3>Remotes</h3>

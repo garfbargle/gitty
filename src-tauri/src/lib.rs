@@ -1,4 +1,6 @@
 mod discovery;
+mod settings;
+mod summarize;
 
 use discovery::{start_repo_discovery, RepoDiscovery};
 use serde::{Deserialize, Serialize};
@@ -804,6 +806,63 @@ fn set_remote(path: String, name: String, url: String) -> Result<ActionResult, S
     })
 }
 
+#[tauri::command]
+fn get_app_settings(app: AppHandle) -> Result<settings::AppSettingsView, String> {
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
+fn set_auto_summarize_enabled(app: AppHandle, enabled: bool) -> Result<settings::AppSettingsView, String> {
+    let mut current = settings::load_settings(&app)?;
+    current.auto_summarize_enabled = enabled;
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
+fn set_nvidia_api_key(app: AppHandle, api_key: String) -> Result<settings::AppSettingsView, String> {
+    let mut current = settings::load_settings(&app)?;
+    let normalized = settings::normalize_nvidia_api_key(&api_key);
+    if normalized.is_empty() {
+        return Err("API key is required.".to_string());
+    }
+
+    summarize::verify_nvidia_api_key(&normalized)?;
+    current.nvidia_api_key = Some(normalized);
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
+fn delete_nvidia_api_key(app: AppHandle) -> Result<settings::AppSettingsView, String> {
+    let mut current = settings::load_settings(&app)?;
+    current.nvidia_api_key = None;
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
+fn test_nvidia_api_key(app: AppHandle, api_key: Option<String>) -> Result<ActionResult, String> {
+    let key = match api_key.as_deref() {
+        Some(value) if !settings::normalize_nvidia_api_key(value).is_empty() => {
+            settings::normalize_nvidia_api_key(value)
+        }
+        _ => settings::nvidia_api_key(&app)?,
+    };
+
+    summarize::verify_nvidia_api_key(&key)?;
+    Ok(ActionResult {
+        message: "NVIDIA API key is valid.".to_string(),
+        output: String::new(),
+    })
+}
+
+#[tauri::command]
+fn summarize_changes(app: AppHandle, path: String) -> Result<summarize::ChangeSummary, String> {
+    let repo = normalize_repo(&path)?;
+    summarize::summarize_changes(&app, Path::new(&repo.path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -830,7 +889,13 @@ pub fn run() {
             remove_remote,
             push_repo,
             reset_to_commit,
-            set_remote
+            set_remote,
+            get_app_settings,
+            set_auto_summarize_enabled,
+            set_nvidia_api_key,
+            delete_nvidia_api_key,
+            test_nvidia_api_key,
+            summarize_changes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

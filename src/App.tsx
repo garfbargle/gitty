@@ -16,7 +16,9 @@ import { TopBar } from "./components/TopBar";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
+  AppSettingsView,
   ChangeSection,
+  ChangeSummary,
   CommitEntry,
   DiffFocus,
   DiscoveredRepoEntry,
@@ -57,6 +59,13 @@ function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
   return (event.target as HTMLElement).tagName === "BUTTON";
 }
 
+function changesFingerprint(changes: FileChange[]): string {
+  return changes
+    .map((change) => `${change.status}:${change.path}`)
+    .sort()
+    .join("|");
+}
+
 function waitForPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -83,6 +92,18 @@ function App() {
   const [remoteName, setRemoteName] = useState("origin");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
+  const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
+  const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
+  const [nvidiaApiKey, setNvidiaApiKey] = useState("");
+  const [settingsNvidiaKey, setSettingsNvidiaKey] = useState("");
+  const [nvidiaKeyTesting, setNvidiaKeyTesting] = useState(false);
+  const [nvidiaKeyTestMessage, setNvidiaKeyTestMessage] = useState<string | null>(null);
+  const [nvidiaKeyTestError, setNvidiaKeyTestError] = useState(false);
+  const [changeSummary, setChangeSummary] = useState<string | null>(null);
+  const [changeSummaryLoading, setChangeSummaryLoading] = useState(false);
+  const [changeSummaryError, setChangeSummaryError] = useState<string | null>(null);
+  const [changeSummaryVisible, setChangeSummaryVisible] = useState(false);
   const [historySplit, setHistorySplit] = useState(0.55);
   const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [loading, setLoading] = useState(false);
@@ -117,6 +138,8 @@ function App() {
   const changesListRef = useRef<ChangesListHandle>(null);
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
+  const summaryCacheRef = useRef<{ fingerprint: string; summary: ChangeSummary } | null>(null);
+  const summarizeRequestRef = useRef(0);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
     [snapshot?.commits],
@@ -130,6 +153,7 @@ function App() {
 
   useEffect(() => {
     void loadRepos();
+    void loadAppSettings();
   }, []);
 
   useEffect(() => {
@@ -194,6 +218,123 @@ function App() {
     }
   }
 
+  async function loadAppSettings() {
+    try {
+      const settings = await invoke<AppSettingsView>("get_app_settings");
+      applyAppSettings(settings);
+    } catch {
+      setNvidiaApiKeyConfigured(false);
+      setNvidiaApiKeyPreview(null);
+      setAutoSummarizeEnabled(true);
+    }
+  }
+
+  function applyAppSettings(settings: AppSettingsView) {
+    setNvidiaApiKeyConfigured(settings.nvidiaApiKeyConfigured);
+    setNvidiaApiKeyPreview(settings.nvidiaApiKeyPreview ?? null);
+    setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
+  }
+
+  useEffect(() => {
+    if (settingsOpen) {
+      void loadAppSettings();
+      setNvidiaKeyTestMessage(null);
+      setNvidiaKeyTestError(false);
+    }
+  }, [settingsOpen]);
+
+  async function saveNvidiaApiKeyFromPanel() {
+    setChangeSummaryError(null);
+    try {
+      const settings = await invoke<AppSettingsView>("set_nvidia_api_key", {
+        apiKey: nvidiaApiKey,
+      });
+      applyAppSettings(settings);
+      setNvidiaApiKey("");
+      summaryCacheRef.current = null;
+      setChangeSummary(null);
+      if (settings.nvidiaApiKeyConfigured) {
+        setChangeSummaryVisible(true);
+        void summarizeChangesForCommit();
+      }
+    } catch (err) {
+      setChangeSummaryError(String(err));
+    }
+  }
+
+  async function saveNvidiaApiKeyFromSettings() {
+    setNvidiaKeyTestMessage(null);
+    setNvidiaKeyTestError(false);
+    try {
+      const settings = await invoke<AppSettingsView>("set_nvidia_api_key", {
+        apiKey: settingsNvidiaKey,
+      });
+      applyAppSettings(settings);
+      setSettingsNvidiaKey("");
+      summaryCacheRef.current = null;
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+      setNvidiaKeyTestMessage("API key saved.");
+      setNvidiaKeyTestError(false);
+    } catch (err) {
+      setNvidiaKeyTestMessage(String(err));
+      setNvidiaKeyTestError(true);
+    }
+  }
+
+  async function deleteNvidiaApiKey() {
+    if (!window.confirm("Remove your saved NVIDIA API key?")) return;
+    setNvidiaKeyTestMessage(null);
+    setNvidiaKeyTestError(false);
+    try {
+      const settings = await invoke<AppSettingsView>("delete_nvidia_api_key");
+      applyAppSettings(settings);
+      setSettingsNvidiaKey("");
+      setNvidiaApiKey("");
+      summaryCacheRef.current = null;
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+      setChangeSummaryVisible(false);
+      setNvidiaKeyTestMessage("API key deleted.");
+      setNvidiaKeyTestError(false);
+    } catch (err) {
+      setNvidiaKeyTestMessage(String(err));
+      setNvidiaKeyTestError(true);
+    }
+  }
+
+  async function testNvidiaApiKey() {
+    setNvidiaKeyTesting(true);
+    setNvidiaKeyTestMessage(null);
+    setNvidiaKeyTestError(false);
+    try {
+      const draft = settingsNvidiaKey.trim();
+      const result = await invoke<ActionResult>("test_nvidia_api_key", {
+        apiKey: draft || null,
+      });
+      setNvidiaKeyTestMessage(result.message);
+      setNvidiaKeyTestError(false);
+    } catch (err) {
+      setNvidiaKeyTestMessage(String(err));
+      setNvidiaKeyTestError(true);
+    } finally {
+      setNvidiaKeyTesting(false);
+    }
+  }
+
+  async function setAutoSummarizeEnabledSetting(enabled: boolean) {
+    try {
+      const settings = await invoke<AppSettingsView>("set_auto_summarize_enabled", { enabled });
+      applyAppSettings(settings);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  function dismissChangeSummary() {
+    setChangeSummaryVisible(false);
+  }
+
   async function loadRepos() {
     const result = await run(() => invoke<RepoEntry[]>("list_repos"));
     if (result) {
@@ -213,6 +354,10 @@ function App() {
     setDiff(emptyDiff);
     setCommitMessage("");
     setAmend(false);
+    setChangeSummary(null);
+    setChangeSummaryError(null);
+    setChangeSummaryVisible(false);
+    summaryCacheRef.current = null;
     setViewMode("working");
     setNavZone("files");
     await refreshRepo(path);
@@ -454,8 +599,73 @@ function App() {
       setMessage(result.message);
       setCommitMessage("");
       setAmend(false);
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+      setChangeSummaryVisible(false);
+      summaryCacheRef.current = null;
       await refreshRepo();
     }
+  }
+
+  async function summarizeChangesForCommit() {
+    if (!selectedPath || !snapshot) return;
+
+    const fingerprint = changesFingerprint(snapshot.changes);
+    if (!fingerprint) {
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+      return;
+    }
+
+    if (!nvidiaApiKeyConfigured || !autoSummarizeEnabled) {
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+      return;
+    }
+
+    const cached = summaryCacheRef.current;
+    if (cached?.fingerprint === fingerprint) {
+      setChangeSummary(cached.summary.summary);
+      setChangeSummaryError(null);
+      return;
+    }
+
+    const requestId = ++summarizeRequestRef.current;
+    setChangeSummaryLoading(true);
+    setChangeSummaryError(null);
+
+    try {
+      const result = await invoke<ChangeSummary>("summarize_changes", { path: selectedPath });
+      if (requestId !== summarizeRequestRef.current) return;
+      summaryCacheRef.current = { fingerprint, summary: result };
+      setChangeSummary(result.summary);
+    } catch (err) {
+      if (requestId !== summarizeRequestRef.current) return;
+      setChangeSummary(null);
+      setChangeSummaryError(String(err));
+    } finally {
+      if (requestId === summarizeRequestRef.current) {
+        setChangeSummaryLoading(false);
+      }
+    }
+  }
+
+  function handleCommitMessageFocus() {
+    if (!snapshot || snapshot.changes.length === 0) return;
+    if (autoSummarizeEnabled && nvidiaApiKeyConfigured) {
+      setChangeSummaryVisible(true);
+      void summarizeChangesForCommit();
+      return;
+    }
+    if (!nvidiaApiKeyConfigured) {
+      setChangeSummaryVisible(true);
+    }
+  }
+
+  function useChangeSummary() {
+    if (!changeSummary) return;
+    setCommitMessage(changeSummary);
+    commitMessageRef.current?.focus();
   }
 
   async function fetchRepo() {
@@ -572,6 +782,16 @@ function App() {
 
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
   const unstagedCount = snapshot?.changes.filter(isUnstaged).length ?? 0;
+  const changeCount = snapshot?.changes.length ?? 0;
+  useEffect(() => {
+    if (!snapshot) return;
+    const fingerprint = changesFingerprint(snapshot.changes);
+    if (summaryCacheRef.current && summaryCacheRef.current.fingerprint !== fingerprint) {
+      summaryCacheRef.current = null;
+      setChangeSummary(null);
+      setChangeSummaryError(null);
+    }
+  }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
   const showCommitSection = workingTreeActive;
   const showResetSection = !!viewingCommit;
@@ -791,10 +1011,22 @@ function App() {
                     selectedCommit={selectedCommit}
                     stagedCount={stagedCount}
                     unstagedCount={unstagedCount}
+                    changeCount={changeCount}
                     showCommitSection={showCommitSection}
                     showResetSection={showResetSection}
                     showSetupRemote={showSetupRemote}
+                    nvidiaApiKey={nvidiaApiKey}
+                    nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
+                    changeSummary={changeSummary}
+                    changeSummaryLoading={changeSummaryLoading}
+                    changeSummaryError={changeSummaryError}
+                    changeSummaryVisible={changeSummaryVisible}
                     onMessageChange={setCommitMessage}
+                    onMessageFocus={handleCommitMessageFocus}
+                    onUseSummary={useChangeSummary}
+                    onDismissSummary={dismissChangeSummary}
+                    onNvidiaApiKeyChange={setNvidiaApiKey}
+                    onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}
                     onAmendChange={(checked) => void handleAmendChange(checked)}
                     onResetModeChange={setResetMode}
                     onCommit={() => void commit()}
@@ -850,9 +1082,21 @@ function App() {
           remotes={snapshot.remotes}
           remoteName={remoteName}
           remoteUrl={remoteUrl}
+          autoSummarizeEnabled={autoSummarizeEnabled}
+          nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
+          nvidiaApiKeyPreview={nvidiaApiKeyPreview}
+          settingsNvidiaKey={settingsNvidiaKey}
+          nvidiaKeyTesting={nvidiaKeyTesting}
+          nvidiaKeyTestMessage={nvidiaKeyTestMessage}
+          nvidiaKeyTestError={nvidiaKeyTestError}
           onClose={() => setSettingsOpen(false)}
           onRemoteNameChange={setRemoteName}
           onRemoteUrlChange={setRemoteUrl}
+          onAutoSummarizeEnabledChange={(enabled) => void setAutoSummarizeEnabledSetting(enabled)}
+          onSettingsNvidiaKeyChange={setSettingsNvidiaKey}
+          onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromSettings()}
+          onDeleteNvidiaApiKey={() => void deleteNvidiaApiKey()}
+          onTestNvidiaApiKey={() => void testNvidiaApiKey()}
           onSaveRemote={() => void saveRemote()}
           onRemoveRemote={(name) => void removeRemote(name)}
           onFetch={() => void fetchRepo()}

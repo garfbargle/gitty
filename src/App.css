@@ -1473,6 +1473,110 @@ button:focus-visible {
   resize: vertical;
 }
 
+.change-summary-panel {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+}
+
+.change-summary-header {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.change-summary-title {
+  flex: 1;
+}
+
+.change-summary-icon-btn {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.change-summary-icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.change-summary-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.change-summary-dismiss {
+  margin-left: auto;
+}
+
+.change-summary-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.change-summary-link:hover {
+  text-decoration: underline;
+}
+
+.change-summary-inline-icon {
+  display: inline;
+  vertical-align: -2px;
+}
+
+.change-summary-key-form {
+  display: grid;
+  gap: 8px;
+}
+
+.change-summary-hint {
+  font-size: 11px;
+  margin: 0;
+}
+
+.change-summary-body {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.change-summary-body.error {
+  color: var(--danger);
+}
+
+.change-summary-use {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.change-summary-use:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.settings-hint {
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
 .amend-check {
   align-items: center;
   color: var(--text-muted);
@@ -1890,8 +1994,54 @@ button:focus-visible {
 }
 
 .settings-section h3 {
+  align-items: center;
+  display: flex;
   font-size: 13px;
+  gap: 6px;
   margin: 0 0 10px;
+}
+
+.settings-toggle {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.settings-key-preview {
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-key-preview code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-test-result {
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-test-result.success {
+  color: var(--success);
+}
+
+.settings-test-result.error {
+  color: var(--danger);
+}
+
+.settings-hint {
+  font-size: 12px;
+  margin: 0 0 8px;
 }
 
 .remote-form {

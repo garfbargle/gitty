@@ -55,6 +55,19 @@ export type ActionResult = {
   output: string;
 };
 
+export type AppSettingsView = {
+  autoSummarizeEnabled: boolean;
+  nvidiaApiKeyConfigured: boolean;
+  nvidiaApiKeyPreview?: string | null;
+};
+
+export type ChangeSummary = {
+  summary: string;
+  fingerprint: string;
+  filesIncluded: number;
+  filesSkipped: number;
+};
+
 export type ChangeSection = "unstaged" | "staged" | "commit";
 
 export type SelectionAnchor = {
