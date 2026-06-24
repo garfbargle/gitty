@@ -192,8 +192,8 @@ function App() {
   const summarizeRequestRef = useRef(0);
   const summaryHiddenUntilNewRef = useRef(false);
   const timelineItems = useMemo(
-    () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
-    [snapshot?.commits],
+    () => (snapshot ? buildTimelineItems(snapshot.commits, snapshot.aheadCommits ?? []) : []),
+    [snapshot?.commits, snapshot?.aheadCommits],
   );
 
   const startDiscovery = useCallback((paths: string[]) => {
@@ -617,20 +617,60 @@ function App() {
   }
 
   async function checkoutBranch(branch: string) {
-    if (!selectedPath || !branch || branch === snapshot?.branch) return;
+    if (!selectedPath || !branch) return;
+    const isDetached = snapshot?.branch.includes("detached");
+    if (!isDetached && branch === snapshot?.branch) return;
     const result = await run(() =>
       invoke<ActionResult>("checkout_branch", { path: selectedPath, branch }),
     );
     if (result) {
       setMessage(result.message);
+      setViewingCommit(null);
+      setCommitFiles([]);
+      setFocus(null);
+      setDiff(emptyDiff);
       await refreshRepo();
     }
+  }
+
+  async function resumeBranch() {
+    const branch = snapshot?.aheadBranch;
+    const tip = snapshot?.aheadCommits?.[0];
+    if (!selectedPath || !branch || !tip) return;
+
+    const isDetached = snapshot.branch.includes("detached");
+    if (isDetached) {
+      await checkoutBranch(branch);
+    } else {
+      if (
+        snapshot.changes.length > 0 &&
+        !window.confirm(`Hard reset to latest commit on ${branch}? Uncommitted changes will be lost.`)
+      ) {
+        return;
+      }
+      const result = await run(() =>
+        invoke<ActionResult>("reset_to_commit", {
+          path: selectedPath,
+          commit: tip.hash,
+          mode: "hard",
+        }),
+      );
+      if (!result) return;
+      setMessage(result.message);
+      setViewingCommit(null);
+      setCommitFiles([]);
+      setFocus(null);
+      setDiff(emptyDiff);
+      await refreshRepo();
+    }
+    await selectWorkingTree();
   }
 
   async function checkoutFromCommit(commit: CommitEntry) {
     const ref = primaryRef(commit.refs) || parseRefs(commit.refs)[0];
     if (ref && !ref.startsWith("tag:")) {
       await checkoutBranch(ref.replace(/^origin\//, "") || ref);
+      await selectWorkingTree();
       return;
     }
     if (!window.confirm(`Check out detached commit ${commit.shortHash}?`)) return;
@@ -639,7 +679,12 @@ function App() {
     );
     if (result) {
       setMessage(result.message);
+      setViewingCommit(null);
+      setCommitFiles([]);
+      setFocus(null);
+      setDiff(emptyDiff);
       await refreshRepo();
+      await selectWorkingTree();
     }
   }
 
@@ -1142,6 +1187,8 @@ function App() {
               branch={snapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [snapshot.branch]}
               commits={snapshot.commits}
+              aheadCommits={snapshot.aheadCommits ?? []}
+              aheadBranch={snapshot.aheadBranch}
               changeCount={snapshot.changes.length}
               viewMode={viewMode}
               loading={loading}
@@ -1153,6 +1200,7 @@ function App() {
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
               onSelectCommit={(commit) => void inspectCommit(commit)}
+              onResumeBranch={() => void resumeBranch()}
               onToggleView={() => {
                 if (viewMode === "history") {
                   setFocus(null);
@@ -1176,6 +1224,7 @@ function App() {
                 <HistoryTimeline
                   key={snapshot.repo.path}
                   commits={snapshot.commits}
+                  aheadCommits={snapshot.aheadCommits ?? []}
                   changeCount={snapshot.changes.length}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}

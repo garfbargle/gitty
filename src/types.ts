@@ -46,6 +46,8 @@ export type RepoSnapshot = {
   isClean: boolean;
   changes: FileChange[];
   commits: CommitEntry[];
+  aheadCommits: CommitEntry[];
+  aheadBranch?: string | null;
   remotes: RemoteEntry[];
   branches: BranchEntry[];
 };

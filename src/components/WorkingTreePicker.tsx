@@ -1,25 +1,37 @@
 import { ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { aheadCommitHashes, pickerCommits } from "../lib/commitDisplay";
 import { formatDate } from "../lib/git";
 import type { CommitEntry } from "../types";
 
 type WorkingTreePickerProps = {
   commits: CommitEntry[];
+  aheadCommits?: CommitEntry[];
+  aheadBranch?: string | null;
   viewingCommit?: CommitEntry | null;
   changeCount: number;
   onSelectWorkingTree: () => void;
   onSelectCommit: (commit: CommitEntry) => void;
+  onResumeBranch?: () => void;
 };
 
 export function WorkingTreePicker({
   commits,
+  aheadCommits = [],
+  aheadBranch,
   viewingCommit,
   changeCount,
   onSelectWorkingTree,
   onSelectCommit,
+  onResumeBranch,
 }: WorkingTreePickerProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const visibleCommits = useMemo(
+    () => pickerCommits(commits, aheadCommits),
+    [commits, aheadCommits],
+  );
+  const aheadHashes = useMemo(() => aheadCommitHashes(aheadCommits), [aheadCommits]);
 
   useEffect(() => {
     if (!open) return;
@@ -95,24 +107,52 @@ export function WorkingTreePicker({
             </span>
           </button>
 
-          {commits.length > 0 ? <div className="working-tree-menu-divider" aria-hidden="true" /> : null}
+          {visibleCommits.length > 0 ? <div className="working-tree-menu-divider" aria-hidden="true" /> : null}
+
+          {aheadCommits.length > 0 ? (
+            <div className="working-tree-menu-section">
+              <div className="working-tree-menu-heading">
+                <span>
+                  {aheadBranch
+                    ? `${aheadCommits.length} commit${aheadCommits.length === 1 ? "" : "s"} ahead on ${aheadBranch}`
+                    : `${aheadCommits.length} unreachable commit${aheadCommits.length === 1 ? "" : "s"}`}
+                </span>
+                {aheadBranch && onResumeBranch ? (
+                  <button
+                    type="button"
+                    className="working-tree-resume-btn"
+                    onClick={() => {
+                      setOpen(false);
+                      onResumeBranch();
+                    }}
+                  >
+                    Go to {aheadBranch}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <div className="working-tree-commit-list">
-            {commits.map((commit) => {
+            {visibleCommits.map((commit) => {
               const active = viewingCommit?.hash === commit.hash;
+              const isAhead = aheadHashes.has(commit.hash);
               return (
                 <button
                   type="button"
                   role="option"
                   aria-selected={active}
-                  className={`working-tree-option commit ${active ? "active" : ""}`}
+                  className={`working-tree-option commit ${active ? "active" : ""} ${isAhead ? "ahead" : ""}`}
                   key={commit.hash}
                   onClick={() => selectCommit(commit)}
-                  title={`${commit.subject} · ${formatDate(commit.date)}`}
+                  title={`${commit.subject} · ${formatDate(commit.date)}${isAhead ? " · ahead on branch" : ""}`}
                 >
                   <code>{commit.shortHash}</code>
                   <span className="option-body">
-                    <span className="option-label">{commit.subject}</span>
+                    <span className="option-label">
+                      {commit.subject}
+                      {isAhead ? <span className="option-ahead-badge">ahead</span> : null}
+                    </span>
                     <span className="option-meta">{formatDate(commit.date)}</span>
                   </span>
                 </button>

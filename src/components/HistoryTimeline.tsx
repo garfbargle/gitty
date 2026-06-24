@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { CommitEntry } from "../types";
+import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { laneColor } from "../lib/graph";
 
 const SCROLL_END_THRESHOLD = 24;
@@ -7,6 +8,7 @@ const SCROLLBAR_HIDE_DELAY_MS = 800;
 
 type HistoryTimelineProps = {
   commits: CommitEntry[];
+  aheadCommits?: CommitEntry[];
   changeCount: number;
   selectedHash?: string;
   onSelect: (commit: CommitEntry) => void;
@@ -17,6 +19,7 @@ type HistoryTimelineProps = {
 
 export function HistoryTimeline({
   commits,
+  aheadCommits = [],
   changeCount,
   selectedHash,
   onSelect,
@@ -24,7 +27,8 @@ export function HistoryTimeline({
   onInteract,
   workingTreeActive,
 }: HistoryTimelineProps) {
-  const visible = [...commits].reverse();
+  const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
+  const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
@@ -140,7 +144,7 @@ export function HistoryTimeline({
 
   useLayoutEffect(() => {
     scheduleApplyScrollPosition();
-  }, [headHash, selectedHash, workingTreeActive, visible.length, scheduleApplyScrollPosition]);
+  }, [headHash, selectedHash, workingTreeActive, ancestry.length, ahead.length, scheduleApplyScrollPosition]);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
@@ -167,49 +171,77 @@ export function HistoryTimeline({
     onSelectWorkingTree();
   }
 
+  function renderCommitNode(
+    commit: CommitEntry,
+    index: number,
+    showConnector: boolean,
+    isAhead: boolean,
+  ) {
+    const color = laneColor(index % 6);
+    const active = commit.hash === selectedHash && !workingTreeActive;
+    return (
+      <button
+        className={`timeline-node ${active ? "active" : ""} ${isAhead ? "ahead" : ""}`}
+        key={`${isAhead ? "ahead" : "ancestry"}-${commit.hash}`}
+        type="button"
+        ref={(node) => {
+          if (node) nodeRefs.current.set(commit.hash, node);
+          else nodeRefs.current.delete(commit.hash);
+        }}
+        onClick={() => selectCommit(commit)}
+        title={`${commit.shortHash} · ${commit.subject}${isAhead ? " · ahead on branch" : ""}`}
+      >
+        <span
+          className="node-dot"
+          style={{
+            background: isAhead ? "transparent" : color,
+            boxShadow: isAhead ? undefined : `0 0 12px ${color}55`,
+            outline: isAhead ? `2px dashed ${color}` : undefined,
+            outlineOffset: isAhead ? 1 : undefined,
+          }}
+        />
+        <span className="node-hash">{commit.shortHash}</span>
+        <span className="node-subject">{commit.subject}</span>
+        {isAhead ? <span className="node-ahead-label">ahead</span> : null}
+        {showConnector ? <span className="node-connector" style={{ background: color }} /> : null}
+      </button>
+    );
+  }
+
+  const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
+
   return (
     <div className="history-timeline">
       <div className="timeline-scroller" onScroll={handleScroll} ref={scrollRef}>
         <div className="timeline-track">
-        {visible.map((commit, index) => {
-          const color = laneColor(index % 6);
-          const active = commit.hash === selectedHash && !workingTreeActive;
-          return (
-            <button
-              className={`timeline-node ${active ? "active" : ""}`}
-              key={commit.hash}
-              type="button"
-              ref={(node) => {
-                if (node) nodeRefs.current.set(commit.hash, node);
-                else nodeRefs.current.delete(commit.hash);
-              }}
-              onClick={() => selectCommit(commit)}
-              title={`${commit.shortHash} · ${commit.subject}`}
-            >
-              <span className="node-dot" style={{ background: color, boxShadow: `0 0 12px ${color}55` }} />
-              <span className="node-hash">{commit.shortHash}</span>
-              <span className="node-subject">{commit.subject}</span>
-              {index < visible.length - 1 || changeCount > 0 ? (
-                <span className="node-connector" style={{ background: color }} />
-              ) : null}
-            </button>
-          );
-        })}
+          {ancestry.map((commit, index) =>
+            renderCommitNode(
+              commit,
+              index,
+              index < ancestry.length - 1 || hasMoreAfterAncestry,
+              false,
+            ),
+          )}
 
-        <button
-          className={`timeline-node working-tree ${workingTreeActive ? "active" : ""}`}
-          type="button"
-          ref={(node) => {
-            if (node) nodeRefs.current.set("working-tree", node);
-            else nodeRefs.current.delete("working-tree");
-          }}
-          onClick={selectWorkingTree}
-        >
-          <span className="node-dot working" />
-          <span className="node-hash">Working Tree</span>
-          <span className="node-subject">{changeCount} change{changeCount === 1 ? "" : "s"}</span>
-        </button>
-      </div>
+          <button
+            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""}`}
+            type="button"
+            ref={(node) => {
+              if (node) nodeRefs.current.set("working-tree", node);
+              else nodeRefs.current.delete("working-tree");
+            }}
+            onClick={selectWorkingTree}
+          >
+            <span className="node-dot working" />
+            <span className="node-hash">Working Tree</span>
+            <span className="node-subject">{changeCount} change{changeCount === 1 ? "" : "s"}</span>
+            {ahead.length > 0 ? <span className="node-connector ahead-bridge" /> : null}
+          </button>
+
+          {ahead.map((commit, index) =>
+            renderCommitNode(commit, ancestry.length + index, index < ahead.length - 1, true),
+          )}
+        </div>
       </div>
     </div>
   );

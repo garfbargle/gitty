@@ -1,13 +1,27 @@
 import type { CommitEntry } from "../types";
+import { aheadTimelineCommits, ancestryTimelineCommits } from "./commitDisplay";
 
 export type TimelineItem =
-  | { kind: "commit"; commit: CommitEntry }
+  | { kind: "commit"; commit: CommitEntry; ahead?: boolean }
   | { kind: "working-tree" };
 
-export function buildTimelineItems(commits: CommitEntry[]): TimelineItem[] {
+export function buildTimelineItems(
+  commits: CommitEntry[],
+  aheadCommits: CommitEntry[] = [],
+): TimelineItem[] {
+  const aheadHashes = new Set(aheadCommits.map((commit) => commit.hash));
   return [
-    ...[...commits].reverse().map((commit) => ({ kind: "commit" as const, commit })),
+    ...ancestryTimelineCommits(commits).map((commit) => ({
+      kind: "commit" as const,
+      commit,
+      ahead: false,
+    })),
     { kind: "working-tree" as const },
+    ...aheadTimelineCommits(aheadCommits).map((commit) => ({
+      kind: "commit" as const,
+      commit,
+      ahead: aheadHashes.has(commit.hash),
+    })),
   ];
 }
 

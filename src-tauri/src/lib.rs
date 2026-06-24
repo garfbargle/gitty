@@ -7,6 +7,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use discovery::{start_repo_discovery, RepoDiscovery};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -69,6 +70,8 @@ struct RepoSnapshot {
     is_clean: bool,
     changes: Vec<FileChange>,
     commits: Vec<CommitEntry>,
+    ahead_commits: Vec<CommitEntry>,
+    ahead_branch: Option<String>,
     remotes: Vec<RemoteEntry>,
     branches: Vec<BranchEntry>,
 }
@@ -289,22 +292,9 @@ fn changed_files(repo_path: &Path) -> Vec<FileChange> {
         .collect()
 }
 
-fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
-    let limit = limit.clamp(25, 400).to_string();
-    let Ok(output) = git(
-        repo_path,
-        &[
-            "log",
-            "--date=iso-strict",
-            "--decorate=short",
-            "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e",
-            "-n",
-            &limit,
-        ],
-    ) else {
-        return Vec::new();
-    };
+const COMMIT_LOG_PRETTY: &str = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e";
 
+fn parse_commit_log_output(output: &str) -> Vec<CommitEntry> {
     output
         .split('\x1e')
         .filter_map(|record| {
@@ -330,6 +320,172 @@ fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
             })
         })
         .collect()
+}
+
+fn commit_log_with_args(repo_path: &Path, extra_args: &[&str]) -> Vec<CommitEntry> {
+    let mut args = vec![
+        "log",
+        "--date=iso-strict",
+        "--decorate=short",
+        COMMIT_LOG_PRETTY,
+    ];
+    args.extend(extra_args);
+    let Ok(output) = git(repo_path, &args) else {
+        return Vec::new();
+    };
+    parse_commit_log_output(&output)
+}
+
+fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
+    let limit = limit.clamp(25, 400).to_string();
+    commit_log_with_args(repo_path, &["-n", &limit])
+}
+
+fn is_ancestor(repo_path: &Path, ancestor: &str, descendant: &str) -> bool {
+    git(
+        repo_path,
+        &["merge-base", "--is-ancestor", ancestor, descendant],
+    )
+    .is_ok()
+}
+
+fn branches_containing(repo_path: &Path, commit: &str) -> Vec<String> {
+    git(
+        repo_path,
+        &["branch", "--contains", commit, "--format=%(refname:short)"],
+    )
+    .unwrap_or_default()
+    .lines()
+    .filter(|name| !name.is_empty())
+    .map(str::to_string)
+    .collect()
+}
+
+fn append_unique_commits(
+    target: &mut Vec<CommitEntry>,
+    seen: &mut HashSet<String>,
+    commits: Vec<CommitEntry>,
+) {
+    for commit in commits {
+        if seen.insert(commit.hash.clone()) {
+            target.push(commit);
+        }
+    }
+}
+
+fn branch_ahead_commits(
+    repo_path: &Path,
+    head: &str,
+    branch: &str,
+    limit: u32,
+) -> Vec<CommitEntry> {
+    let Ok(tip) = git(repo_path, &["rev-parse", branch]) else {
+        return Vec::new();
+    };
+    if tip == head || !is_ancestor(repo_path, head, &tip) {
+        return Vec::new();
+    }
+    let range = format!("{head}..{tip}");
+    let limit_str = limit.to_string();
+    commit_log_with_args(repo_path, &[&range, "-n", &limit_str])
+}
+
+fn branch_descendant_commits_from_reflog(
+    repo_path: &Path,
+    head: &str,
+    branch: &str,
+    limit: u32,
+    seen: &mut HashSet<String>,
+) -> Vec<CommitEntry> {
+    let limit_str = limit.to_string();
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "reflog",
+            "show",
+            &format!("refs/heads/{branch}"),
+            "--format=%H",
+            "-n",
+            &limit_str,
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    let mut result = Vec::new();
+    for hash in output.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if hash == head || !is_ancestor(repo_path, head, hash) {
+            continue;
+        }
+        let range = format!("{head}..{hash}");
+        let range_commits = commit_log_with_args(repo_path, &[&range, "-n", &limit_str]);
+        append_unique_commits(&mut result, seen, range_commits);
+    }
+    result
+}
+
+fn ahead_commits(
+    repo_path: &Path,
+    head_commits: &[CommitEntry],
+    limit: u32,
+) -> (Vec<CommitEntry>, Option<String>) {
+    let head = match git(repo_path, &["rev-parse", "HEAD"]) {
+        Ok(hash) if !hash.is_empty() => hash,
+        _ => return (Vec::new(), None),
+    };
+
+    let limit = limit.clamp(1, 400);
+    let mut seen: HashSet<String> = head_commits.iter().map(|commit| commit.hash.clone()).collect();
+    let mut collected = Vec::new();
+    let mut resume_branch: Option<String> = None;
+    let mut best_count = 0usize;
+
+    let current_branch = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
+    let relevant_branches: Vec<String> = if current_branch.is_empty() {
+        branches_containing(repo_path, &head)
+    } else {
+        vec![current_branch.clone()]
+    };
+
+    for branch in &relevant_branches {
+        let branch_commits = branch_ahead_commits(repo_path, &head, branch, limit);
+        let count = branch_commits.len();
+        if count > best_count {
+            best_count = count;
+            resume_branch = Some(branch.clone());
+        }
+        append_unique_commits(&mut collected, &mut seen, branch_commits);
+    }
+
+    if collected.is_empty() {
+        for branch in &relevant_branches {
+            let reflog_commits =
+                branch_descendant_commits_from_reflog(repo_path, &head, branch, limit, &mut seen);
+            let count = reflog_commits.len();
+            if count > best_count {
+                best_count = count;
+                resume_branch = Some(branch.clone());
+            }
+            append_unique_commits(&mut collected, &mut seen, reflog_commits);
+        }
+    }
+
+    collected.sort_by(|left, right| right.date.cmp(&left.date));
+    collected.truncate(limit as usize);
+
+    let resume = if collected.is_empty() {
+        None
+    } else {
+        resume_branch.or_else(|| {
+            if current_branch.is_empty() {
+                None
+            } else {
+                Some(current_branch)
+            }
+        })
+    };
+
+    (collected, resume)
 }
 
 fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
@@ -441,6 +597,9 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
     let upstream = upstream(&repo_path);
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
     let changes = changed_files(&repo_path);
+    let log_limit = limit.unwrap_or(120);
+    let commits = commit_log(&repo_path, log_limit);
+    let (ahead_commits, ahead_branch) = ahead_commits(&repo_path, &commits, log_limit);
 
     Ok(RepoSnapshot {
         repo,
@@ -450,7 +609,9 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
         behind,
         is_clean: changes.is_empty(),
         changes,
-        commits: commit_log(&repo_path, limit.unwrap_or(120)),
+        commits,
+        ahead_commits,
+        ahead_branch,
         remotes: remote_list(&repo_path),
         branches: branch_list(&repo_path),
     })

@@ -835,6 +835,80 @@ button:focus-visible {
   white-space: nowrap;
 }
 
+.working-tree-menu-section {
+  padding: 8px 10px 4px;
+}
+
+.working-tree-menu-heading {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.working-tree-resume-btn {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0;
+}
+
+.working-tree-resume-btn:hover {
+  text-decoration: underline;
+}
+
+.working-tree-option.commit.ahead code,
+.working-tree-option.commit.ahead .option-label {
+  color: var(--accent);
+}
+
+.option-ahead-badge {
+  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+  padding: 1px 6px;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.resume-branch-btn {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.resume-branch-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-soft) 90%, transparent);
+}
+
+.resume-branch-btn em {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  min-width: 18px;
+  padding: 1px 6px;
+  text-align: center;
+}
+
 .commit-crumb {
   align-items: center;
   color: var(--text-secondary);
@@ -1359,6 +1433,43 @@ button:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   z-index: 1;
+}
+
+.timeline-node.ahead .node-hash,
+.timeline-node.ahead .node-subject {
+  color: var(--accent);
+}
+
+.node-ahead-label {
+  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.node-connector {
+  background: var(--border);
+  height: 2px;
+  left: calc(50% + 14px);
+  position: absolute;
+  top: 9px;
+  width: calc(100% - 28px);
+  z-index: 0;
+}
+
+.node-connector.ahead-bridge {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--accent) 0,
+    var(--accent) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  opacity: 0.55;
 }
 
 /* ── Workspace grid ── */

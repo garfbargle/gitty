@@ -10,6 +10,8 @@ type TopBarProps = {
   branch: string;
   branches: string[];
   commits: CommitEntry[];
+  aheadCommits?: CommitEntry[];
+  aheadBranch?: string | null;
   changeCount: number;
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
@@ -23,6 +25,7 @@ type TopBarProps = {
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
   onSelectCommit: (commit: CommitEntry) => void;
+  onResumeBranch?: () => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
@@ -36,6 +39,8 @@ export function TopBar({
   branch,
   branches,
   commits,
+  aheadCommits = [],
+  aheadBranch,
   changeCount,
   viewMode,
   viewingCommit,
@@ -49,6 +54,7 @@ export function TopBar({
   onToggleView,
   onReturnToWorkingTree,
   onSelectCommit,
+  onResumeBranch,
   onRefresh,
   onPush,
   onForcePush,
@@ -83,16 +89,32 @@ export function TopBar({
             <span className="breadcrumb-sep">›</span>
             <WorkingTreePicker
               commits={commits}
+              aheadCommits={aheadCommits}
+              aheadBranch={aheadBranch}
               viewingCommit={viewingCommit}
               changeCount={changeCount}
               onSelectWorkingTree={onReturnToWorkingTree}
               onSelectCommit={onSelectCommit}
+              onResumeBranch={onResumeBranch}
             />
           </>
         ) : null}
       </div>
 
       <div className="top-bar-right">
+        {viewMode === "working" && aheadCommits.length > 0 && aheadBranch && onResumeBranch ? (
+          <button
+            type="button"
+            className="resume-branch-btn"
+            title={`Return to latest commit on ${aheadBranch}`}
+            disabled={loading}
+            onClick={onResumeBranch}
+          >
+            <GitBranch size={14} />
+            Return to {aheadBranch}
+            <em>{aheadCommits.length}</em>
+          </button>
+        ) : null}
         {viewMode === "working" && viewingCommit ? (
           <button
             type="button"
