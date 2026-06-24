@@ -164,6 +164,14 @@ fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
     }
 }
 
+fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
+    if git(repo_path, &["rev-parse", "--show-toplevel"]).is_ok() {
+        return Ok(());
+    }
+    git(repo_path, &["init"])?;
+    Ok(())
+}
+
 fn normalize_repo(path: &str) -> Result<RepoEntry, String> {
     let repo_path = PathBuf::from(path);
     if !repo_path.exists() {
@@ -713,7 +721,15 @@ fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
 
 #[tauri::command]
 fn add_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
-    let repo = normalize_repo(&path)?;
+    let path_buf = PathBuf::from(path.trim());
+    if path_buf.as_os_str().is_empty() {
+        return Err("Repository path is required.".to_string());
+    }
+    if !path_buf.exists() {
+        return Err(format!("{} does not exist", path_buf.display()));
+    }
+    ensure_git_repo(&path_buf)?;
+    let repo = normalize_repo(&path_buf.to_string_lossy())?;
     let mut repos = load_repos_from_disk(&app)?;
 
     if !repos.iter().any(|existing| existing.path == repo.path) {
@@ -1343,7 +1359,6 @@ fn init_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
         fs::create_dir_all(&path_buf)
             .map_err(|err| format!("Could not create {}: {err}", path_buf.display()))?;
     }
-    git(&path_buf, &["init"])?;
     add_repo(app, path_buf.to_string_lossy().to_string())
 }
 
