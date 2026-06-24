@@ -125,14 +125,16 @@ npm run build:windows
 
 Installers are written to `src-tauri/target/release/bundle/` — an NSIS `.exe` setup and an `.msi`.
 
-To publish a GitHub release from CI, push a version tag:
+To publish a GitHub release from CI, push a version tag. The tag becomes the GitHub release name, and CI syncs it into `package.json`, `tauri.conf.json`, and `Cargo.toml` before building:
 
 ```bash
-git tag v0.1.0
-git push github v0.1.0
+git tag v0.1.1
+git push github v0.1.1
 ```
 
-Or run the **Release Windows** workflow manually from the Actions tab.
+Or run the **Release Windows** workflow manually from the Actions tab and enter the tag (for example `v0.1.1`).
+
+The git tag and the app version should match. If you tag `v0.1.1` but leave the app version at `0.1.0`, older workflow versions would rebuild installers and attach them to the wrong release.
 
 ### Signed + notarized macOS release
 
