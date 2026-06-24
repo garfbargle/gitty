@@ -44,6 +44,15 @@ struct RemoteEntry {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct BranchEntry {
+    name: String,
+    is_remote: bool,
+    is_current: bool,
+    upstream: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RepoSnapshot {
     repo: RepoEntry,
     branch: String,
@@ -54,6 +63,7 @@ struct RepoSnapshot {
     changes: Vec<FileChange>,
     commits: Vec<CommitEntry>,
     remotes: Vec<RemoteEntry>,
+    branches: Vec<BranchEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -267,6 +277,46 @@ fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
         .collect()
 }
 
+fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
+    let current = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "refs/heads/",
+            "refs/remotes/",
+            "--format=%(refname:short)\x1f%(upstream:short)\x1f%(refname)",
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\x1f');
+            let name = parts.next()?.to_string();
+            if name.is_empty() || name.ends_with("/HEAD") {
+                return None;
+            }
+            let upstream = parts
+                .next()
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string());
+            let full_ref = parts.next().unwrap_or_default();
+            let is_remote = full_ref.starts_with("refs/remotes/");
+            let is_current = !current.is_empty() && name == current;
+            Some(BranchEntry {
+                name,
+                is_remote,
+                is_current,
+                upstream,
+            })
+        })
+        .collect()
+}
+
 fn remote_list(repo_path: &Path) -> Vec<RemoteEntry> {
     let Ok(output) = git(repo_path, &["remote", "-v"]) else {
         return Vec::new();
@@ -334,6 +384,7 @@ fn repo_snapshot(path: String, limit: Option<u32>) -> Result<RepoSnapshot, Strin
         changes,
         commits: commit_log(&repo_path, limit.unwrap_or(120)),
         remotes: remote_list(&repo_path),
+        branches: branch_list(&repo_path),
     })
 }
 
@@ -414,6 +465,150 @@ fn file_diff(path: String, file_path: String, commit: Option<String>) -> Result<
 }
 
 #[tauri::command]
+fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let branch = branch.trim().to_string();
+    if branch.is_empty() {
+        return Err("Branch name is required.".to_string());
+    }
+    let repo_path = Path::new(&repo.path);
+    let output = if branch.contains('/') {
+        git(repo_path, &["switch", "--track", &branch]).or_else(|_| {
+            git(repo_path, &["checkout", "--track", &branch])
+                .or_else(|_| git(repo_path, &["checkout", &branch]))
+        })?
+    } else {
+        git(repo_path, &["switch", &branch])
+            .or_else(|_| git(repo_path, &["checkout", &branch]))?
+    };
+
+    Ok(ActionResult {
+        message: format!("Checked out {branch}."),
+        output,
+    })
+}
+
+#[tauri::command]
+fn merge_branch(path: String, branch: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let branch = branch.trim().to_string();
+    if branch.is_empty() {
+        return Err("Branch name is required.".to_string());
+    }
+    let output = git(Path::new(&repo.path), &["merge", &branch])?;
+    Ok(ActionResult {
+        message: format!("Merged {branch}."),
+        output,
+    })
+}
+
+#[tauri::command]
+fn stage_files(path: String, files: Vec<String>, stage: bool) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    if files.is_empty() {
+        return Err("Select at least one file.".to_string());
+    }
+
+    let mut args = if stage {
+        vec!["add".to_string(), "--".to_string()]
+    } else {
+        vec!["restore".to_string(), "--staged".to_string(), "--".to_string()]
+    };
+    args.extend(files.iter().cloned());
+    let output = git_owned(repo_path, args)?;
+
+    Ok(ActionResult {
+        message: if stage {
+            "Files staged.".to_string()
+        } else {
+            "Files unstaged.".to_string()
+        },
+        output,
+    })
+}
+
+#[tauri::command]
+fn stage_all(path: String, stage: bool) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let output = if stage {
+        git(repo_path, &["add", "-A"])?
+    } else {
+        git(repo_path, &["restore", "--staged", "."])?
+    };
+
+    Ok(ActionResult {
+        message: if stage {
+            "All changes staged.".to_string()
+        } else {
+            "All changes unstaged.".to_string()
+        },
+        output,
+    })
+}
+
+#[tauri::command]
+fn commit_repo(path: String, message: String, amend: Option<bool>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        return Err("Commit message is required.".to_string());
+    }
+    let mut args = vec!["commit".to_string(), "-m".to_string(), message.clone()];
+    if amend.unwrap_or(false) {
+        args.push("--amend".to_string());
+    }
+    let output = git_owned(Path::new(&repo.path), args)?;
+    Ok(ActionResult {
+        message: if amend.unwrap_or(false) {
+            format!("Amended commit: {message}")
+        } else {
+            format!("Committed: {message}")
+        },
+        output,
+    })
+}
+
+#[tauri::command]
+fn init_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
+    let path_buf = PathBuf::from(path.trim());
+    if path_buf.as_os_str().is_empty() {
+        return Err("Repository path is required.".to_string());
+    }
+    if !path_buf.exists() {
+        fs::create_dir_all(&path_buf)
+            .map_err(|err| format!("Could not create {}: {err}", path_buf.display()))?;
+    }
+    git(&path_buf, &["init"])?;
+    add_repo(app, path_buf.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn fetch_repo(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let output = git(Path::new(&repo.path), &["fetch", "--all", "--prune"])?;
+    Ok(ActionResult {
+        message: "Fetch completed.".to_string(),
+        output,
+    })
+}
+
+#[tauri::command]
+fn remove_remote(path: String, name: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Remote name is required.".to_string());
+    }
+    let output = git(Path::new(&repo.path), &["remote", "remove", &name])?;
+    Ok(ActionResult {
+        message: format!("Remote {name} removed."),
+        output,
+    })
+}
+
+#[tauri::command]
 fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let args = if force {
@@ -488,12 +683,20 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            init_repo,
             list_repos,
             add_repo,
             remove_repo,
             repo_snapshot,
             commit_diff,
             file_diff,
+            checkout_branch,
+            merge_branch,
+            stage_files,
+            stage_all,
+            commit_repo,
+            fetch_repo,
+            remove_remote,
             push_repo,
             reset_to_commit,
             set_remote
