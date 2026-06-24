@@ -1055,38 +1055,49 @@ button:focus-visible {
 }
 
 /* ── Timeline ── */
+.working-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .history-timeline {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  padding: 14px 16px 6px;
+}
+
+.timeline-scroller {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior: none;
-  padding: 14px 16px 4px;
   scroll-behavior: auto;
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;
   touch-action: pan-x;
 }
 
-.history-timeline::-webkit-scrollbar {
+.timeline-scroller::-webkit-scrollbar {
   height: 6px;
 }
 
-.history-timeline::-webkit-scrollbar-track {
+.timeline-scroller::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.history-timeline::-webkit-scrollbar-thumb {
+.timeline-scroller::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 999px;
 }
 
-.history-timeline.is-scrolling {
+.timeline-scroller.is-scrolling {
   scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
 }
 
-.history-timeline.is-scrolling::-webkit-scrollbar-thumb {
+.timeline-scroller.is-scrolling::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-muted) 45%, transparent);
 }
 

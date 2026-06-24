@@ -168,8 +168,9 @@ export function HistoryTimeline({
   }
 
   return (
-    <div className="history-timeline" onScroll={handleScroll} ref={scrollRef}>
-      <div className="timeline-track">
+    <div className="history-timeline">
+      <div className="timeline-scroller" onScroll={handleScroll} ref={scrollRef}>
+        <div className="timeline-track">
         {visible.map((commit, index) => {
           const color = laneColor(index % 6);
           const active = commit.hash === selectedHash && !workingTreeActive;
@@ -208,6 +209,7 @@ export function HistoryTimeline({
           <span className="node-hash">Working Tree</span>
           <span className="node-subject">{changeCount} change{changeCount === 1 ? "" : "s"}</span>
         </button>
+      </div>
       </div>
     </div>
   );

@@ -1130,7 +1130,7 @@ function App() {
             />
 
             {viewMode === "working" ? (
-              <>
+              <div className="working-view">
                 <HistoryTimeline
                   key={snapshot.repo.path}
                   commits={snapshot.commits}
@@ -1224,7 +1224,7 @@ function App() {
                     />
                   </div>
                 )}
-              </>
+              </div>
             ) : (
               <div className="history-full">
                 <SplitPane
