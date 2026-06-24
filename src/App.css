@@ -1435,6 +1435,15 @@ button:focus-visible {
   z-index: 1;
 }
 
+.node-time {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+  opacity: 0.85;
+  position: relative;
+  z-index: 1;
+}
+
 .node-subject {
   font-size: 11px;
   max-width: 120px;

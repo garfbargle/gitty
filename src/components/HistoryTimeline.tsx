@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CommitEntry } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { laneColor } from "../lib/graph";
+import { formatDate, formatRelativeTime, relativeTimeRefreshMs } from "../lib/git";
 
 const SCROLL_END_THRESHOLD = 24;
 const SCROLLBAR_HIDE_DELAY_MS = 800;
@@ -29,6 +30,32 @@ export function HistoryTimeline({
 }: HistoryTimelineProps) {
   const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
   const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
+  const commitDates = useMemo(
+    () => [...ancestry, ...ahead].map((commit) => commit.date),
+    [ancestry, ahead],
+  );
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    let timeoutId: number | null = null;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      const currentNow = Date.now();
+      setNow(currentNow);
+      const next = relativeTimeRefreshMs(commitDates, currentNow);
+      if (next !== null) {
+        timeoutId = window.setTimeout(tick, next);
+      }
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [commitDates]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
@@ -189,7 +216,7 @@ export function HistoryTimeline({
           else nodeRefs.current.delete(commit.hash);
         }}
         onClick={() => selectCommit(commit)}
-        title={`${commit.shortHash} · ${commit.subject}${isAhead ? " · ahead on branch" : ""}`}
+        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${isAhead ? " · ahead on branch" : ""}`}
       >
         <span
           className="node-dot"
@@ -201,6 +228,7 @@ export function HistoryTimeline({
           }}
         />
         <span className="node-hash">{commit.shortHash}</span>
+        <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
         <span className="node-subject">{commit.subject}</span>
         {isAhead ? <span className="node-ahead-label">ahead</span> : null}
         {showConnector ? <span className="node-connector" style={{ background: color }} /> : null}

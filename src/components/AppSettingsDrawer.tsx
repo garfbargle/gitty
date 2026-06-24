@@ -51,7 +51,7 @@ export function AppSettingsDrawer({
       <label className="settings-row">
         <span className="settings-row-copy">
           <strong>Auto summarize</strong>
-          <span>Suggest commit messages from staged changes</span>
+          <span>Suggest commit messages from your uncommitted changes</span>
         </span>
         <input
           type="checkbox"

@@ -12,36 +12,14 @@ const MAX_TOTAL_CONTEXT: usize = 96_000;
 const MAX_FILES: usize = 40;
 const NVIDIA_API_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_MODEL: &str = "meta/llama-3.1-8b-instruct";
-const COMMIT_MESSAGE_SYSTEM_PROMPT: &str = r#"You write concise Git commit messages from code changes.
+const COMMIT_MESSAGE_SYSTEM_PROMPT: &str =
+    "Write git commit messages. Reply with only the message text—no labels, quotes, or preamble.";
 
-Default to a single imperative title line. Add a body line only when it adds new detail the title cannot carry (scope, rationale, breaking change, migration step).
+const FEW_SHOT_DIFF: &str = r#"--- config.ts ---
+-export const TIMEOUT = 30
++export const TIMEOUT = 60"#;
 
-Rules:
-- Do not mention "this commit" unless necessary.
-- Never restate or paraphrase the title in the body.
-- If the title fully describes the change, output only the title with no body.
-- Focus on user-facing behavior and developer intent, not implementation trivia.
-- Do not include marketing language.
-- Do not include headings like "Here's a summary" or "Draft commit message."
-- Do not mention APIs, libraries, or internal tools unless they are central to the change.
-- Keep the whole response under 2 sentences.
-
-Output format:
-<title only, OR title plus one additive body sentence>
-
-Examples:
-
-Fix summarize scope for unstaged changes
-
-Add keyboard shortcut for commit panel
-
-Remove deprecated OAuth callback route
-
-Requires users to re-authenticate after deploy.
-
-Rename settings drawer to AppSettingsDrawer
-
-Across commit panel, top bar, and history table."#;
+const FEW_SHOT_MESSAGE: &str = "Increase request timeout to 60 seconds";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -192,11 +170,6 @@ fn build_diff_context(
     let mut context = String::new();
     let mut files_included = 0;
     let mut files_skipped = 0;
-    let scope_label = match scope {
-        SummarizeScope::All => "all uncommitted",
-        SummarizeScope::Staged => "staged",
-    };
-    context.push_str(&format!("Scope: {scope_label} changes\n\n"));
 
     for path in paths.iter().take(MAX_FILES) {
         if context.len() >= MAX_TOTAL_CONTEXT {
@@ -373,30 +346,68 @@ fn looks_like_tabular_data(diff: &str) -> bool {
 
 fn call_nvidia_api(api_key: &str, context: &str, files_skipped: usize) -> Result<String, String> {
     let skipped_note = if files_skipped > 0 {
-        format!("\n\nNote: {files_skipped} file(s) were omitted from the diff (binaries, lockfiles, or large data).")
+        format!("\n\n({files_skipped} file(s) omitted: binaries, lockfiles, or large data.)")
     } else {
         String::new()
     };
 
-    let user_prompt = format!(
-        "Write a commit message for these changes:{skipped_note}\n\n{context}"
-    );
+    let diff_context = format!("{context}{skipped_note}");
 
-    chat_completion(
+    let raw = chat_completion(
         api_key,
-        vec![
+        commit_message_prompt(&diff_context, false),
+        96,
+        0.15,
+    )?;
+
+    if let Some(summary) = extract_commit_message(&raw) {
+        return Ok(summary);
+    }
+
+    let raw = chat_completion(
+        api_key,
+        commit_message_prompt(&diff_context, true),
+        96,
+        0.1,
+    )?;
+
+    extract_commit_message(&raw)
+        .ok_or_else(|| "Could not produce a valid commit message. Try again.".to_string())
+}
+
+fn commit_message_prompt(context: &str, minimal: bool) -> Vec<ChatMessage<'static>> {
+    if minimal {
+        return vec![
             ChatMessage {
                 role: "system",
-                content: COMMIT_MESSAGE_SYSTEM_PROMPT.to_string(),
+                content: "Write one git commit message from the diff. Output only the message."
+                    .to_string(),
             },
             ChatMessage {
                 role: "user",
-                content: user_prompt,
+                content: format!("Diff:\n\n{context}"),
             },
-        ],
-        96,
-        0.15,
-    )
+        ];
+    }
+
+    vec![
+        ChatMessage {
+            role: "system",
+            content: COMMIT_MESSAGE_SYSTEM_PROMPT.to_string(),
+        },
+        ChatMessage {
+            role: "user",
+            content: format!("Diff:\n\n{FEW_SHOT_DIFF}"),
+        },
+        ChatMessage {
+            role: "assistant",
+            content: FEW_SHOT_MESSAGE.to_string(),
+        },
+        ChatMessage {
+            role: "user",
+            content: format!("Diff:\n\n{context}"),
+        },
+    ]
 }
 
 pub fn verify_nvidia_api_key(api_key: &str) -> Result<(), String> {
@@ -457,9 +468,120 @@ fn chat_completion(
         .choices
         .into_iter()
         .next()
-        .map(|choice| choice.message.content.trim().to_string())
+        .map(|choice| normalize_summary(&choice.message.content))
         .filter(|content| !content.is_empty())
         .ok_or_else(|| "NVIDIA API returned an empty summary.".to_string())
+}
+
+fn normalize_summary(raw: &str) -> String {
+    let mut summary = raw.trim().trim_matches('"').to_string();
+
+    for prefix in [
+        "Commit message:",
+        "Suggested commit message:",
+        "Here's a summary:",
+        "Here's the commit message:",
+        "Draft commit message:",
+    ] {
+        if let Some(rest) = summary.strip_prefix(prefix) {
+            summary = rest.trim().to_string();
+        }
+    }
+
+    summary
+}
+
+fn extract_commit_message(raw: &str) -> Option<String> {
+    let normalized = normalize_summary(raw);
+
+    if is_plausible_commit_message(&normalized) {
+        return Some(normalized);
+    }
+
+    for block in normalized.split("\n\n") {
+        let block = block.trim();
+        if is_plausible_commit_message(block) {
+            return Some(block.to_string());
+        }
+    }
+
+    for line in normalized.lines() {
+        let line = line.trim();
+        if is_plausible_commit_message(line) {
+            return Some(line.to_string());
+        }
+    }
+
+    None
+}
+
+fn is_plausible_commit_message(text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 300 {
+        return false;
+    }
+    if looks_like_prompt_leakage(text) {
+        return false;
+    }
+    if text.contains("\n- ") || text.starts_with("- ") {
+        return false;
+    }
+    if text.lines().count() > 4 {
+        return false;
+    }
+    true
+}
+
+fn looks_like_prompt_leakage(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    const MARKERS: &[&str] = &[
+        "never copy",
+        "never adapt",
+        "base the message",
+        "code diffs",
+        "output format",
+        "illustrative only",
+        "do not mention",
+        "you write",
+        "suggest commit",
+        "imperative title",
+        "additive body",
+        "rules:",
+        "examples below",
+        "reply with only",
+        "write git commit",
+        "from the diffs",
+        "from the user message",
+        "marketing language",
+        "implementation trivia",
+        "no labels, quotes",
+    ];
+    MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_prompt_leakage() {
+        let leaked = "Suggest commit messages from code diffs.\n\nBase the message only on the diffs.";
+        assert!(looks_like_prompt_leakage(leaked));
+        assert!(extract_commit_message(leaked).is_none());
+    }
+
+    #[test]
+    fn accepts_plain_commit_message() {
+        let message = "Fix combat damage calculation in CombatService";
+        assert!(extract_commit_message(message).is_some());
+    }
+
+    #[test]
+    fn extracts_message_from_preamble() {
+        let raw = "Here's the commit message:\n\nFix null pointer in parser";
+        let extracted = extract_commit_message(raw).unwrap();
+        assert_eq!(extracted, "Fix null pointer in parser");
+    }
 }
 
 fn format_nvidia_error(status: u16, body: &str) -> String {
