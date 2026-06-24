@@ -2383,7 +2383,7 @@ button:focus-visible {
   border-radius: 20px;
   display: block;
   height: auto;
-  image-rendering: pixelated;
+  image-rendering: auto;
   width: 120px;
 }
 
