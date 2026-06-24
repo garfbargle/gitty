@@ -7,7 +7,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use discovery::{start_repo_discovery, RepoDiscovery};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -249,16 +249,56 @@ fn validate_tag_name(name: &str) -> Result<String, String> {
     Ok(name)
 }
 
-fn local_tags(repo_path: &Path) -> Vec<String> {
-    let Ok(output) = git(repo_path, &["tag", "-l"]) else {
-        return Vec::new();
+fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "refs/tags",
+            "--format=%(refname:short)\x1f%(objectname)",
+        ],
+    ) else {
+        return HashMap::new();
     };
+
     output
         .lines()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
+        .filter_map(|line| {
+            let mut parts = line.split('\x1f');
+            let name = parts.next()?.to_string();
+            let hash = parts.next()?.to_string();
+            if name.is_empty() || hash.is_empty() {
+                return None;
+            }
+            Some((name, hash))
+        })
         .collect()
+}
+
+fn remote_tag_hashes(repo_path: &Path, remote: &str) -> HashMap<String, String> {
+    let Ok(output) = git(repo_path, &["ls-remote", "--tags", remote]) else {
+        return HashMap::new();
+    };
+
+    let mut map = HashMap::new();
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(hash) = parts.next() else {
+            continue;
+        };
+        let Some(refname) = parts.next() else {
+            continue;
+        };
+        let Some(name) = refname.strip_prefix("refs/tags/") else {
+            continue;
+        };
+        if let Some(base) = name.strip_suffix("^{}") {
+            map.insert(base.to_string(), hash.to_string());
+        } else {
+            map.entry(name.to_string()).or_insert_with(|| hash.to_string());
+        }
+    }
+    map
 }
 
 fn unpushed_tags(repo_path: &Path) -> Vec<String> {
@@ -266,23 +306,20 @@ fn unpushed_tags(repo_path: &Path) -> Vec<String> {
         return Vec::new();
     };
 
-    local_tags(repo_path)
+    let local = local_tag_hashes(repo_path);
+    if local.is_empty() {
+        return Vec::new();
+    }
+
+    let remote = remote_tag_hashes(repo_path, &remote);
+    local
         .into_iter()
-        .filter(|tag| {
-            let local_ref = format!("refs/tags/{tag}");
-            let Ok(local_hash) = git(repo_path, &["rev-parse", &local_ref]) else {
-                return false;
-            };
-            let remote_ref = format!("refs/tags/{tag}");
-            let remote_output = git(repo_path, &["ls-remote", &remote, &remote_ref]).unwrap_or_default();
-            let remote_hash = remote_output.split_whitespace().next().unwrap_or("");
-            remote_hash != local_hash
-        })
+        .filter(|(name, hash)| remote.get(name).map_or(true, |remote_hash| remote_hash != hash))
+        .map(|(name, _)| name)
         .collect()
 }
 
-fn tag_list(repo_path: &Path) -> Vec<TagEntry> {
-    let unpushed: HashSet<String> = unpushed_tags(repo_path).into_iter().collect();
+fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
     let Ok(output) = git(
         repo_path,
         &[
@@ -693,7 +730,11 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     Ok(repos)
 }
 
-fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapshot, String> {
+fn repo_snapshot_blocking(
+    path: String,
+    limit: Option<u32>,
+    lite: bool,
+) -> Result<RepoSnapshot, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let log_limit = limit.unwrap_or(120);
@@ -720,10 +761,34 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
     });
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
-    let (ahead_commits, ahead_branch) =
-        ahead_commits(&repo_path, &commits, log_limit, &branch);
-    let unpushed_tags = unpushed_tags(&repo_path);
-    let tags = tag_list(&repo_path);
+
+    let (ahead_commits, ahead_branch, tags, unpushed_tag_names) = if lite {
+        (Vec::new(), None, Vec::new(), Vec::new())
+    } else {
+        let repo_path_ahead = repo_path.clone();
+        let repo_path_tags = repo_path.clone();
+        let commits_for_ahead = commits.clone();
+        let branch_for_ahead = branch.clone();
+        std::thread::scope(|scope| {
+            let ahead_handle = scope.spawn(move || {
+                ahead_commits(
+                    &repo_path_ahead,
+                    &commits_for_ahead,
+                    log_limit,
+                    &branch_for_ahead,
+                )
+            });
+            let tags_handle = scope.spawn(move || {
+                let unpushed = unpushed_tags(&repo_path_tags);
+                let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
+                let tags = tag_list(&repo_path_tags, &unpushed_set);
+                (tags, unpushed)
+            });
+            let (ahead_commits, ahead_branch) = ahead_handle.join().unwrap();
+            let (tags, unpushed) = tags_handle.join().unwrap();
+            (ahead_commits, ahead_branch, tags, unpushed)
+        })
+    };
 
     Ok(RepoSnapshot {
         repo,
@@ -739,7 +804,7 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
         remotes,
         branches,
         tags,
-        unpushed_tags,
+        unpushed_tags: unpushed_tag_names,
     })
 }
 
@@ -769,7 +834,9 @@ async fn repo_snapshot(
     path: String,
     limit: Option<u32>,
     generation: Option<u64>,
+    lite: Option<bool>,
 ) -> Result<RepoSnapshot, String> {
+    let lite = lite.unwrap_or(false);
     if let Some(g) = generation {
         SNAPSHOT_GENERATION.store(g, Ordering::SeqCst);
     }
@@ -777,7 +844,7 @@ async fn repo_snapshot(
         if snapshot_was_superseded(generation) {
             return Err(SNAPSHOT_SUPERSEDED.to_string());
         }
-        let result = repo_snapshot_blocking(path, limit)?;
+        let result = repo_snapshot_blocking(path, limit, lite)?;
         if snapshot_was_superseded(generation) {
             return Err(SNAPSHOT_SUPERSEDED.to_string());
         }

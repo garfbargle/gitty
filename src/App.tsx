@@ -471,11 +471,14 @@ function App() {
     const result = await refreshRepoQuiet(path, {
       updateState: false,
       generation: requestId,
+      lite: true,
+      limit: 80,
     });
     if (requestId !== selectRepoRequestRef.current) return;
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      void enrichRepoSnapshot(path, requestId);
       return;
     }
 
@@ -501,10 +504,21 @@ function App() {
     setRepoSettingsOpen(false);
   }
 
+  async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
+    const result = await refreshRepoQuiet(path, {
+      updateState: false,
+      limit: 200,
+    });
+    if (switchGeneration !== selectRepoRequestRef.current) return;
+    if (result) {
+      setSnapshot(result);
+    }
+  }
+
   async function refreshRepo(path = selectedPath): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const result = await run(() =>
-      invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200 }),
+      invoke<RepoSnapshot>("repo_snapshot", { path, limit: 200, lite: false }),
     );
     if (result) {
       setSnapshot(result);
@@ -516,7 +530,7 @@ function App() {
 
   async function refreshRepoQuiet(
     path = selectedPath,
-    options?: { updateState?: boolean; generation?: number },
+    options?: { updateState?: boolean; generation?: number; lite?: boolean; limit?: number },
   ): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const updateState = options?.updateState !== false;
@@ -524,8 +538,9 @@ function App() {
     try {
       const result = await invoke<RepoSnapshot>("repo_snapshot", {
         path,
-        limit: 200,
+        limit: options?.limit ?? 200,
         generation: options?.generation ?? null,
+        lite: options?.lite ?? false,
       });
       if (updateState && stateGeneration === snapshotGenerationRef.current) {
         setSnapshot(result);
