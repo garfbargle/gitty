@@ -4,6 +4,8 @@
 
 No Electron bloat. No background polling. No embedded Git library. Gitty calls your system `git` directly and refreshes only when you need it — select a repo, hit refresh, or finish an action. The result is a client that feels snappy on large repos and stays responsive all day.
 
+![Gitty showing the repo sidebar, commit timeline, diff viewer, and commit panel](docs/screenshot.png)
+
 ## Why Gitty
 
 - **Keyboard-first** — The whole workflow is built around keybinds. Stage everything, write a message, commit, and push without touching the mouse.
