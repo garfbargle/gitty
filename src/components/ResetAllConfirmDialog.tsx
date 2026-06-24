@@ -40,7 +40,12 @@ export function ResetAllConfirmDialog({
   const [confirmText, setConfirmText] = useState("");
   const [includeUntracked, setIncludeUntracked] = useState(untrackedCount > 0);
 
-  const confirmed = confirmText === confirmPhrase;
+  const confirmed = confirmText.trim().toLowerCase() === confirmPhrase.toLowerCase();
+
+  function submitReset() {
+    if (!confirmed || loading) return;
+    onConfirm(includeUntracked);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -138,6 +143,12 @@ export function ResetAllConfirmDialog({
               type="text"
               value={confirmText}
               onChange={(event) => setConfirmText(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitReset();
+                }
+              }}
               autoComplete="off"
               spellCheck={false}
               disabled={loading}
@@ -154,7 +165,7 @@ export function ResetAllConfirmDialog({
             type="button"
             className="action-btn danger"
             disabled={!confirmed || loading}
-            onClick={() => onConfirm(includeUntracked)}
+            onClick={submitReset}
           >
             Reset all changes
           </button>
