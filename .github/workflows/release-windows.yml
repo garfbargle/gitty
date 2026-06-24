@@ -1,0 +1,51 @@
+name: Release Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Gitty v__VERSION__
+          releaseBody: |
+            Windows release for Gitty v__VERSION__.
+
+            **Installers**
+            - `Gitty_*_x64-setup.exe` — NSIS installer (recommended)
+            - `Gitty_*_x64_en-US.msi` — MSI installer
+
+            Git must be installed and available on your PATH.
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis,msi

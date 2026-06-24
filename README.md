@@ -114,6 +114,26 @@ npm run tauri build
 
 Tauri writes bundles under `src-tauri/target/release/bundle/` — for example `.app` / `.dmg` on macOS, `.msi` / `.exe` on Windows, and `.deb` / `.AppImage` on Linux (exact formats depend on your OS and Tauri config).
 
+### Windows release
+
+Build on a Windows machine:
+
+```powershell
+npm install
+npm run build:windows
+```
+
+Installers are written to `src-tauri/target/release/bundle/` — an NSIS `.exe` setup and an `.msi`.
+
+To publish a GitHub release from CI, push a version tag:
+
+```bash
+git tag v0.1.0
+git push github v0.1.0
+```
+
+Or run the **Release Windows** workflow manually from the Actions tab.
+
 ### Signed + notarized macOS release
 
 For distribution outside the App Store, use a **Developer ID Application** certificate (not the App Store "Apple Distribution" cert).
