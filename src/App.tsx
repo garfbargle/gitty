@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
@@ -96,6 +97,13 @@ function App() {
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const discoveryStarted = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
+  const focusRefreshContextRef = useRef({
+    selectedPath,
+    viewMode,
+    viewingCommit,
+    focus,
+  });
+  focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
   const timelineItems = useMemo(
     () => (snapshot ? buildTimelineItems(snapshot.commits) : []),
@@ -210,6 +218,53 @@ function App() {
     }
     return null;
   }
+
+  async function refreshWorkingTree() {
+    const snap = await refreshRepo();
+    if (!snap) return;
+
+    const currentFocus = focusRefreshContextRef.current.focus;
+    if (currentFocus?.kind === "file" && currentFocus.section !== "commit") {
+      const list =
+        currentFocus.section === "unstaged"
+          ? snap.changes.filter(isUnstaged)
+          : snap.changes.filter(isStaged);
+      const match = list.find((file) => file.path === currentFocus.file.path);
+      if (match) {
+        await inspectFile(match, currentFocus.section);
+      } else if (list.length > 0) {
+        await inspectFile(list[0], currentFocus.section);
+      } else {
+        setFocus(null);
+        setDiff(emptyDiff);
+      }
+    }
+  }
+
+  const refreshWorkingTreeRef = useRef(refreshWorkingTree);
+  refreshWorkingTreeRef.current = refreshWorkingTree;
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (!focused || !active) return;
+        const { selectedPath, viewMode, viewingCommit } = focusRefreshContextRef.current;
+        if (!selectedPath || viewMode !== "working" || viewingCommit) return;
+        void refreshWorkingTreeRef.current();
+      })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      });
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   async function selectAfterToggle(anchor: SelectionAnchor) {
     const snap = await refreshRepo();
@@ -607,6 +662,9 @@ function App() {
                     variant={viewingCommit ? "commit" : "working"}
                     selectedKey={selectedFileKey}
                     onFocusZone={() => setNavZone("files")}
+                    onExitToTimeline={
+                      viewingCommit ? () => setNavZone("timeline") : undefined
+                    }
                     onSelect={(file, section) => {
                       if (section === "commit" && viewingCommit) {
                         void inspectCommitFile(file, viewingCommit);

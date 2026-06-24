@@ -15,6 +15,7 @@ type ChangesListProps = {
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
   onFocusZone?: () => void;
+  onExitToTimeline?: () => void;
   disabled?: boolean;
 };
 
@@ -32,6 +33,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   onStage,
   onUnstage,
   onFocusZone,
+  onExitToTimeline,
   disabled,
   },
   ref,
@@ -93,6 +95,11 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
       moveSelection(1);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
+      if (isCommitView && activeIndex <= 0) {
+        onExitToTimeline?.();
+        listRef.current?.blur();
+        return;
+      }
       moveSelection(-1);
     } else if (!isCommitView && (event.key === " " || event.code === "Space")) {
       event.preventDefault();
