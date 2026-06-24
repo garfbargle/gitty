@@ -432,7 +432,6 @@ fn ahead_commits(
     head_commits: &[CommitEntry],
     limit: u32,
     current_branch: &str,
-    include_reflog: bool,
 ) -> (Vec<CommitEntry>, Option<String>) {
     let head = match git(repo_path, &["rev-parse", "HEAD"]) {
         Ok(hash) if !hash.is_empty() => hash,
@@ -463,7 +462,9 @@ fn ahead_commits(
         append_unique_commits(&mut collected, &mut seen, branch_commits);
     }
 
-    if collected.is_empty() && include_reflog {
+    // After a hard reset the branch tip matches HEAD, so branch_ahead_commits finds
+    // nothing. Fall back to the branch reflog to surface commits that were left behind.
+    if collected.is_empty() {
         for branch in &relevant_branches {
             let reflog_commits =
                 branch_descendant_commits_from_reflog(repo_path, &head, branch, limit, &mut seen);
@@ -622,9 +623,8 @@ fn repo_snapshot_blocking(path: String, limit: Option<u32>) -> Result<RepoSnapsh
     });
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
-    let is_detached = is_detached_branch(&branch);
     let (ahead_commits, ahead_branch) =
-        ahead_commits(&repo_path, &commits, log_limit, &branch, is_detached);
+        ahead_commits(&repo_path, &commits, log_limit, &branch);
 
     Ok(RepoSnapshot {
         repo,

@@ -91,6 +91,7 @@ export function TopBar({
               commits={commits}
               aheadCommits={aheadCommits}
               aheadBranch={aheadBranch}
+              branch={branch}
               viewingCommit={viewingCommit}
               changeCount={changeCount}
               onSelectWorkingTree={onReturnToWorkingTree}
@@ -102,7 +103,7 @@ export function TopBar({
       </div>
 
       <div className="top-bar-right">
-        {(aheadCommits.length > 0 && aheadBranch && onResumeBranch && branch.includes("detached")) ? (
+        {(aheadCommits.length > 0 && aheadBranch && onResumeBranch) ? (
           <button
             type="button"
             className="resume-branch-btn"

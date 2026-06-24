@@ -8,6 +8,7 @@ type WorkingTreePickerProps = {
   commits: CommitEntry[];
   aheadCommits?: CommitEntry[];
   aheadBranch?: string | null;
+  branch?: string;
   viewingCommit?: CommitEntry | null;
   changeCount: number;
   onSelectWorkingTree: () => void;
@@ -19,6 +20,7 @@ export function WorkingTreePicker({
   commits,
   aheadCommits = [],
   aheadBranch,
+  branch,
   viewingCommit,
   changeCount,
   onSelectWorkingTree,
@@ -32,6 +34,9 @@ export function WorkingTreePicker({
     [commits, aheadCommits],
   );
   const aheadHashes = useMemo(() => aheadCommitHashes(aheadCommits), [aheadCommits]);
+  const onCurrentBranch = Boolean(
+    aheadBranch && branch && !branch.includes("detached") && branch === aheadBranch,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -114,7 +119,9 @@ export function WorkingTreePicker({
               <div className="working-tree-menu-heading">
                 <span>
                   {aheadBranch
-                    ? `${aheadCommits.length} commit${aheadCommits.length === 1 ? "" : "s"} ahead on ${aheadBranch}`
+                    ? onCurrentBranch
+                      ? `${aheadCommits.length} later commit${aheadCommits.length === 1 ? "" : "s"} on ${aheadBranch}`
+                      : `${aheadCommits.length} commit${aheadCommits.length === 1 ? "" : "s"} ahead on ${aheadBranch}`
                     : `${aheadCommits.length} unreachable commit${aheadCommits.length === 1 ? "" : "s"}`}
                 </span>
                 {aheadBranch && onResumeBranch ? (
