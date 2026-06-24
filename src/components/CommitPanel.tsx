@@ -72,7 +72,7 @@ export function CommitPanel({
   changeSummaryLoading = false,
   changeSummaryError = null,
   changeSummaryVisible = false,
-  changeSummaryScope = "all",
+  changeSummaryScope: _changeSummaryScope = "all",
   showResummarizeStaged = false,
   showAllChangesSummary = false,
   onMessageChange,
