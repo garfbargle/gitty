@@ -123,7 +123,7 @@ type SummaryCache = {
 };
 
 function emptySummaryCache(): SummaryCache {
-  return { all: null, staged: null, displayScope: "all" };
+  return { all: null, staged: null, displayScope: "staged" };
 }
 
 const SNAPSHOT_SUPERSEDED = "__superseded__";
@@ -173,7 +173,7 @@ function App() {
   const [nvidiaKeyTesting, setNvidiaKeyTesting] = useState(false);
   const [nvidiaKeyTestMessage, setNvidiaKeyTestMessage] = useState<string | null>(null);
   const [nvidiaKeyTestError, setNvidiaKeyTestError] = useState(false);
-  const [changeSummaryScope, setChangeSummaryScope] = useState<SummaryScope>("all");
+  const [changeSummaryScope, setChangeSummaryScope] = useState<SummaryScope>("staged");
   const [changeSummary, setChangeSummary] = useState<string | null>(null);
   const [changeSummaryLoading, setChangeSummaryLoading] = useState(false);
   const [changeSummaryError, setChangeSummaryError] = useState<string | null>(null);
@@ -389,10 +389,10 @@ function App() {
       setNvidiaApiKey("");
       summaryCacheRef.current = emptySummaryCache();
       setChangeSummary(null);
-      setChangeSummaryScope("all");
+      setChangeSummaryScope("staged");
       if (settings.nvidiaApiKeyConfigured) {
         setChangeSummaryVisible(true);
-        void summarizeChanges("all", true);
+        void summarizeChanges("staged", true);
       }
     } catch (err) {
       setChangeSummaryError(String(err));
@@ -1083,7 +1083,7 @@ function App() {
     summaryCacheRef.current = emptySummaryCache();
     setChangeSummary(null);
     setChangeSummaryError(null);
-    setChangeSummaryScope("all");
+    setChangeSummaryScope("staged");
     summaryHiddenUntilNewRef.current = false;
   }
 
@@ -1159,12 +1159,17 @@ function App() {
 
   async function summarizeChangesForCommit() {
     if (!autoSummarizeEnabled) return;
-    await summarizeChanges("all", false);
+    await summarizeChanges("staged", false);
   }
 
   async function resummarizeStagedChanges() {
     summaryHiddenUntilNewRef.current = false;
     await summarizeChanges("staged", true);
+  }
+
+  async function summarizeAllChanges() {
+    summaryHiddenUntilNewRef.current = false;
+    await summarizeChanges("all", true);
   }
 
   function restoreAllChangesSummary() {
@@ -1360,11 +1365,11 @@ function App() {
     !!snapshot &&
     summaryCacheRef.current.all?.pathsKey === allPathsKey &&
     allPathsKey.length > 0;
+  const hasMixedChanges = stagedCount > 0 && stagedCount < changeCount;
   const showResummarizeStaged =
-    !!changeSummary &&
-    stagedCount > 0 &&
-    stagedCount < changeCount &&
-    changeSummaryScope === "all";
+    !!changeSummary && hasMixedChanges && changeSummaryScope === "all";
+  const showSummarizeAllChanges =
+    !!changeSummary && hasMixedChanges && changeSummaryScope === "staged" && !allSummaryAvailable;
   const canShowAllChangesSummary = changeSummaryScope === "staged" && allSummaryAvailable;
 
   useEffect(() => {
@@ -1374,20 +1379,28 @@ function App() {
     const cache = summaryCacheRef.current;
 
     if (cache.all && cache.all.pathsKey !== pathsKey) {
-      resetSummaryCache();
-      return;
+      summaryCacheRef.current = { ...cache, all: null };
+      if (cache.displayScope === "all") {
+        if (cache.staged && cache.staged.pathsKey === stagedKey) {
+          setChangeSummary(cache.staged.summary.summary);
+          setChangeSummaryScope("staged");
+          summaryCacheRef.current = { ...summaryCacheRef.current, displayScope: "staged" };
+        } else {
+          setChangeSummary(null);
+          setChangeSummaryScope("staged");
+        }
+      }
     }
 
     if (cache.staged && cache.staged.pathsKey !== stagedKey) {
       summaryHiddenUntilNewRef.current = false;
       summaryCacheRef.current = {
-        ...cache,
+        ...summaryCacheRef.current,
         staged: null,
-        displayScope: cache.displayScope === "staged" ? "all" : cache.displayScope,
       };
-      if (cache.displayScope === "staged" && cache.all) {
-        setChangeSummary(cache.all.summary.summary);
-        setChangeSummaryScope("all");
+      if (summaryCacheRef.current.displayScope === "staged") {
+        setChangeSummary(null);
+        setChangeSummaryScope("staged");
       }
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
@@ -1712,6 +1725,7 @@ function App() {
                       changeSummaryVisible={changeSummaryVisible}
                       changeSummaryScope={changeSummaryScope}
                       showResummarizeStaged={showResummarizeStaged}
+                      showSummarizeAllChanges={showSummarizeAllChanges}
                       showAllChangesSummary={canShowAllChangesSummary}
                       onMessageChange={setCommitMessage}
                       onMessageFocus={handleCommitMessageFocus}
@@ -1719,6 +1733,7 @@ function App() {
                       onUseSummaryAndCommit={useChangeSummaryAndCommit}
                       onDismissSummary={dismissChangeSummary}
                       onResummarizeStaged={() => void resummarizeStagedChanges()}
+                      onSummarizeAllChanges={() => void summarizeAllChanges()}
                       onShowAllChangesSummary={restoreAllChangesSummary}
                       onNvidiaApiKeyChange={setNvidiaApiKey}
                       onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}

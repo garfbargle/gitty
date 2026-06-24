@@ -1639,7 +1639,7 @@ button:focus-visible {
 }
 
 .change-path {
-  align-items: center;
+  align-items: flex-start;
   background: transparent;
   border: 0;
   display: flex;
@@ -1651,7 +1651,28 @@ button:focus-visible {
   width: 100%;
 }
 
-.change-path span:last-child {
+.change-path .status-chip {
+  margin-top: 2px;
+}
+
+.file-path-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.file-path-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-path-dir {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1720,13 +1741,17 @@ button:focus-visible {
   min-width: 0;
 }
 
-.diff-path {
+.diff-path.file-path-label {
   font-family: var(--font-mono);
+}
+
+.diff-path .file-path-name {
   font-size: 12px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.diff-path .file-path-dir {
+  font-family: var(--font-mono);
 }
 
 .badge {

@@ -4,6 +4,7 @@ import { buildChangeEntries, moveChangeSelection, type ChangeEntry } from "../li
 import { joinRepoPath, revealInFinder } from "../lib/finder";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { FilePathLabel } from "./FilePathLabel";
 
 export type ChangesListHandle = {
   focus: () => void;
@@ -171,7 +172,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
           <span className={`status-chip ${statusClass(entry.file.status)}`}>
             {statusCode(entry.file.status)}
           </span>
-          <span>{entry.file.path}</span>
+          <FilePathLabel path={entry.file.path} />
         </button>
       </div>
     );

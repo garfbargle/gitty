@@ -37,6 +37,7 @@ type CommitPanelProps = {
   changeSummaryVisible?: boolean;
   changeSummaryScope?: "all" | "staged";
   showResummarizeStaged?: boolean;
+  showSummarizeAllChanges?: boolean;
   showAllChangesSummary?: boolean;
   onMessageChange: (value: string) => void;
   onMessageFocus: () => void;
@@ -44,6 +45,7 @@ type CommitPanelProps = {
   onUseSummaryAndCommit: () => void;
   onDismissSummary: () => void;
   onResummarizeStaged: () => void;
+  onSummarizeAllChanges: () => void;
   onShowAllChangesSummary: () => void;
   onNvidiaApiKeyChange: (value: string) => void;
   onSaveNvidiaApiKey: () => void;
@@ -79,8 +81,9 @@ export function CommitPanel({
   changeSummaryLoading = false,
   changeSummaryError = null,
   changeSummaryVisible = false,
-  changeSummaryScope: _changeSummaryScope = "all",
+  changeSummaryScope: _changeSummaryScope = "staged",
   showResummarizeStaged = false,
+  showSummarizeAllChanges = false,
   showAllChangesSummary = false,
   onMessageChange,
   onMessageFocus,
@@ -88,6 +91,7 @@ export function CommitPanel({
   onUseSummaryAndCommit,
   onDismissSummary,
   onResummarizeStaged,
+  onSummarizeAllChanges,
   onShowAllChangesSummary,
   onNvidiaApiKeyChange,
   onSaveNvidiaApiKey,
@@ -316,6 +320,19 @@ export function CommitPanel({
                           }}
                         >
                           Summarize staged only ({stagedCount} file{stagedCount === 1 ? "" : "s"})
+                        </button>
+                      ) : null}
+                      {showSummarizeAllChanges ? (
+                        <button
+                          type="button"
+                          className="change-summary-resummarize"
+                          disabled={disabled || changeSummaryLoading}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSummarizeAllChanges();
+                          }}
+                        >
+                          Summarize all changes ({changeCount} file{changeCount === 1 ? "" : "s"})
                         </button>
                       ) : null}
                       {showAllChangesSummary ? (

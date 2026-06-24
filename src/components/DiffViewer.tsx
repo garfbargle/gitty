@@ -6,6 +6,7 @@ import { type FileImagePreview, isImagePath } from "../lib/images";
 import { tokenizeLine } from "../lib/syntax";
 import type { ChangeSection, FileChange } from "../types";
 import { isStaged as isFileStaged } from "../lib/git";
+import { FilePathLabel } from "./FilePathLabel";
 
 type DiffViewerProps = {
   raw: string;
@@ -124,7 +125,7 @@ export function DiffViewer({
     <section className="diff-panel-center">
       <header className="diff-toolbar">
         <div className="diff-toolbar-left">
-          <span className="diff-path">{filePath}</span>
+          <FilePathLabel path={filePath} className="diff-path" />
           {showWorkingTreeBadges && file ? (
             staged ? (
               <span className="badge staged">Staged</span>
