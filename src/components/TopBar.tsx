@@ -151,21 +151,19 @@ export function TopBar({
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading} onClick={onRefresh}>
           <RefreshCw size={15} className={loading ? "spin" : ""} />
         </button>
-        {viewMode === "working" && !viewingCommit ? (
-          onPush && onForcePush ? (
-            <PushButton
-              ahead={ahead}
-              behind={behind}
-              unpushedTags={unpushedTags}
-              hasRemotes={hasRemotes}
-              pushPhase={pushPhase}
-              loading={loading}
-              onPush={onPush}
-              onForcePush={onForcePush}
-            />
-          ) : null
+        {onPush && onForcePush ? (
+          <PushButton
+            ahead={ahead}
+            behind={behind}
+            unpushedTags={unpushedTags}
+            hasRemotes={hasRemotes}
+            pushPhase={pushPhase}
+            loading={loading}
+            onPush={onPush}
+            onForcePush={onForcePush}
+          />
         ) : null}
-        {viewMode === "working" && !viewingCommit && !hasRemotes && onSetupRemote ? (
+        {!hasRemotes && onSetupRemote ? (
           <button
             type="button"
             className="setup-remote-btn"

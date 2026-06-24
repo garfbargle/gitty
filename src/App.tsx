@@ -699,17 +699,27 @@ function App() {
     if (result !== null) setDiff(result || "This file has no patch in this commit.");
   }
 
-  async function selectWorkingTree() {
+  async function selectWorkingTree(options?: {
+    snapshot?: RepoSnapshot | null;
+    refresh?: boolean;
+  }) {
     setViewingCommit(null);
     setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
-    const snap = await refreshRepo();
+
+    let snap = options?.snapshot ?? null;
+    if (options?.refresh || !snap || snap.repo.path !== selectedPath) {
+      snap = await refreshRepoQuiet(selectedPath);
+    } else {
+      void refreshChangesQuiet(selectedPath);
+    }
     if (!snap) return;
+
     const first = snap.changes.find(isUnstaged) ?? snap.changes.find(isStaged);
     if (first) {
       const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
-      await inspectFile(first, section);
+      await inspectFileQuiet(first, section);
     }
   }
 
@@ -760,29 +770,31 @@ function App() {
     const isDetached = snapshot.branch.includes("detached");
     if (isDetached) {
       await checkoutBranch(branch);
-    } else {
-      if (
-        snapshot.changes.length > 0 &&
-        !window.confirm(`Hard reset to latest commit on ${branch}? Uncommitted changes will be lost.`)
-      ) {
-        return;
-      }
-      const result = await run(() =>
-        invoke<ActionResult>("reset_to_commit", {
-          path: selectedPath,
-          commit: tip.hash,
-          mode: "hard",
-        }),
-      );
-      if (!result) return;
-      setMessage(result.message);
-      setViewingCommit(null);
-      setCommitFiles([]);
-      setFocus(null);
-      setDiff(emptyDiff);
-      await refreshRepo();
+      await selectWorkingTree({ refresh: true });
+      return;
     }
-    await selectWorkingTree();
+
+    if (
+      snapshot.changes.length > 0 &&
+      !window.confirm(`Hard reset to latest commit on ${branch}? Uncommitted changes will be lost.`)
+    ) {
+      return;
+    }
+    const result = await run(() =>
+      invoke<ActionResult>("reset_to_commit", {
+        path: selectedPath,
+        commit: tip.hash,
+        mode: "hard",
+      }),
+    );
+    if (!result) return;
+    setMessage(result.message);
+    setViewingCommit(null);
+    setCommitFiles([]);
+    setFocus(null);
+    setDiff(emptyDiff);
+    const snap = await refreshRepo();
+    if (snap) await selectWorkingTree({ snapshot: snap });
   }
 
   async function checkoutFromCommit(commit: CommitEntry) {
@@ -791,12 +803,12 @@ function App() {
       const name = tagName(ref);
       if (!window.confirm(`Check out tag ${name}?`)) return;
       await checkoutBranch(name);
-      await selectWorkingTree();
+      await selectWorkingTree({ refresh: true });
       return;
     }
     if (ref && !ref.startsWith("tag:")) {
       await checkoutBranch(ref.replace(/^origin\//, "") || ref);
-      await selectWorkingTree();
+      await selectWorkingTree({ refresh: true });
       return;
     }
     if (!window.confirm(`Check out detached commit ${commit.shortHash}?`)) return;
@@ -809,8 +821,7 @@ function App() {
       setCommitFiles([]);
       setFocus(null);
       setDiff(emptyDiff);
-      await refreshRepo();
-      await selectWorkingTree();
+      await selectWorkingTree({ refresh: true });
     }
   }
 
@@ -1323,7 +1334,7 @@ function App() {
   );
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || !canPush || pushPhase !== "idle") return;
+    if (!canPush || pushPhase !== "idle") return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return;
@@ -1334,7 +1345,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, canPush, pushPhase]);
+  }, [canPush, pushPhase]);
 
   useEffect(() => {
     return () => {
@@ -1462,9 +1473,10 @@ function App() {
               onResumeBranch={() => void resumeBranch()}
               onToggleView={() => {
                 if (viewMode === "history") {
+                  setViewingCommit(null);
+                  setCommitFiles([]);
                   setFocus(null);
                   setDiff(emptyDiff);
-                  void selectWorkingTree();
                 } else {
                   setViewingCommit(null);
                   setCommitFiles([]);
