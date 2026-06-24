@@ -155,6 +155,7 @@ function App() {
   const [diff, setDiff] = useState(emptyDiff);
   const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
+  const [pushOnCommit, setPushOnCommit] = useState(false);
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
@@ -1060,7 +1061,10 @@ function App() {
       setAmend(false);
       setChangeSummaryVisible(false);
       resetSummaryCache();
-      await refreshRepo();
+      const snap = await refreshRepo();
+      if (pushOnCommit && snap && snap.remotes.length > 0) {
+        await push(false);
+      }
     }
   }
 
@@ -1678,6 +1682,8 @@ function App() {
                       branch={displaySnapshot.branch}
                       branches={displaySnapshot.branches ?? []}
                       amend={amend}
+                      pushOnCommit={pushOnCommit}
+                      hasRemotes={hasRemotes}
                       resetMode={resetMode}
                       selectedCommit={selectedCommit}
                       selectedCommitMessage={viewingCommitMessage}
@@ -1706,6 +1712,7 @@ function App() {
                       onNvidiaApiKeyChange={setNvidiaApiKey}
                       onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromPanel()}
                       onAmendChange={(checked) => void handleAmendChange(checked)}
+                      onPushOnCommitChange={setPushOnCommit}
                       onResetModeChange={setResetMode}
                       onCommit={() => void commit()}
                       onReset={() => void reset()}

@@ -18,6 +18,8 @@ type CommitPanelProps = {
   branch: string;
   branches: BranchEntry[];
   amend: boolean;
+  pushOnCommit: boolean;
+  hasRemotes: boolean;
   resetMode: "soft" | "hard";
   selectedCommit?: CommitEntry | null;
   selectedCommitMessage?: string;
@@ -46,6 +48,7 @@ type CommitPanelProps = {
   onNvidiaApiKeyChange: (value: string) => void;
   onSaveNvidiaApiKey: () => void;
   onAmendChange: (value: boolean) => void;
+  onPushOnCommitChange: (value: boolean) => void;
   onResetModeChange: (mode: "soft" | "hard") => void;
   onCommit: () => void;
   onReset: () => void;
@@ -59,6 +62,8 @@ export function CommitPanel({
   branch,
   branches,
   amend,
+  pushOnCommit,
+  hasRemotes,
   resetMode,
   selectedCommit,
   selectedCommitMessage = "",
@@ -87,6 +92,7 @@ export function CommitPanel({
   onNvidiaApiKeyChange,
   onSaveNvidiaApiKey,
   onAmendChange,
+  onPushOnCommitChange,
   onResetModeChange,
   onCommit,
   onReset,
@@ -163,6 +169,16 @@ export function CommitPanel({
             <GitCommitHorizontal size={14} />
             <span>Commit</span>
           </header>
+
+          <label className="amend-check">
+            <input
+              type="checkbox"
+              checked={amend}
+              onChange={(event) => onAmendChange(event.currentTarget.checked)}
+              disabled={disabled}
+            />
+            Amend last commit
+          </label>
 
           <label className="field-label" htmlFor="commit-message">
             Message
@@ -331,16 +347,6 @@ export function CommitPanel({
             ))}
           </select>
 
-          <label className="amend-check">
-            <input
-              type="checkbox"
-              checked={amend}
-              onChange={(event) => onAmendChange(event.currentTarget.checked)}
-              disabled={disabled}
-            />
-            Amend last commit
-          </label>
-
           <button
             type="button"
             className="commit-primary"
@@ -350,6 +356,18 @@ export function CommitPanel({
             Commit
             <kbd>⌘↵</kbd>
           </button>
+
+          {hasRemotes ? (
+            <label className="amend-check">
+              <input
+                type="checkbox"
+                checked={pushOnCommit}
+                onChange={(event) => onPushOnCommitChange(event.currentTarget.checked)}
+                disabled={disabled}
+              />
+              Push on commit
+            </label>
+          ) : null}
         </section>
       ) : null}
 
