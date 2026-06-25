@@ -4,20 +4,23 @@ import { Columns2, Rows2 } from "lucide-react";
 export type SplitOrientation = "vertical" | "horizontal";
 
 type SplitPaneProps = {
+  className?: string;
   orientation: SplitOrientation;
-  onOrientationChange: (orientation: SplitOrientation) => void;
+  onOrientationChange?: (orientation: SplitOrientation) => void;
   split: number;
   onSplitChange: (split: number) => void;
   primary: React.ReactNode;
   secondary: React.ReactNode;
   minSplit?: number;
   maxSplit?: number;
+  showLayoutToggle?: boolean;
 };
 
 const MIN_SPLIT = 0.15;
 const MAX_SPLIT = 0.85;
 
 export function SplitPane({
+  className,
   orientation,
   onOrientationChange,
   split,
@@ -26,6 +29,7 @@ export function SplitPane({
   secondary,
   minSplit = MIN_SPLIT,
   maxSplit = MAX_SPLIT,
+  showLayoutToggle = true,
 }: SplitPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -79,7 +83,7 @@ export function SplitPane({
 
   return (
     <div
-      className={`split-pane split-pane-${orientation}${dragging ? " dragging" : ""}`}
+      className={`split-pane split-pane-${orientation}${dragging ? " dragging" : ""}${className ? ` ${className}` : ""}`}
       ref={containerRef}
     >
       <div className="split-pane-primary" style={primaryStyle}>
@@ -100,18 +104,20 @@ export function SplitPane({
         }}
       >
         <span className="split-divider-grip" aria-hidden="true" />
-        <button
-          type="button"
-          className="split-layout-toggle icon-btn sm"
-          title={toggleLabel}
-          aria-label={toggleLabel}
-          onClick={() =>
-            onOrientationChange(orientation === "vertical" ? "horizontal" : "vertical")
-          }
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {orientation === "vertical" ? <Columns2 size={14} /> : <Rows2 size={14} />}
-        </button>
+        {showLayoutToggle ? (
+          <button
+            type="button"
+            className="split-layout-toggle icon-btn sm"
+            title={toggleLabel}
+            aria-label={toggleLabel}
+            onClick={() =>
+              onOrientationChange?.(orientation === "vertical" ? "horizontal" : "vertical")
+            }
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {orientation === "vertical" ? <Columns2 size={14} /> : <Rows2 size={14} />}
+          </button>
+        ) : null}
       </div>
 
       <div className="split-pane-secondary">{secondary}</div>

@@ -1678,8 +1678,22 @@ button:focus-visible {
 .workspace-grid {
   display: grid;
   flex: 1;
-  grid-template-columns: 240px minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) 260px;
   min-height: 0;
+}
+
+.workspace-split {
+  min-width: 0;
+}
+
+.workspace-split .changes-list {
+  border-right: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.workspace-split .split-pane-secondary .diff-panel-center {
+  height: 100%;
 }
 
 .panel-title {
@@ -3344,6 +3358,6 @@ button:focus-visible {
 
 @media (max-width: 1280px) {
   .workspace-grid {
-    grid-template-columns: 210px minmax(0, 1fr) 230px;
+    grid-template-columns: minmax(0, 1fr) 230px;
   }
 }

@@ -197,6 +197,7 @@ function App() {
   const [changeSummaryVisible, setChangeSummaryVisible] = useState(false);
   const [historySplit, setHistorySplit] = useState(0.55);
   const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
+  const [workspaceSplit, setWorkspaceSplit] = useState(0.3);
   const [loading, setLoading] = useState(false);
   const [loadingMoreCommits, setLoadingMoreCommits] = useState(false);
   const [commitsHasMore, setCommitsHasMore] = useState(false);
@@ -1836,42 +1837,56 @@ function App() {
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
-                    <ChangesList
-                      ref={changesListRef}
-                      changes={viewingCommit ? commitFiles : displaySnapshot.changes}
-                      repoPath={selectedPath}
-                      variant={viewingCommit ? "commit" : "working"}
-                      selectedKey={selectedFileKey}
-                      onFocusZone={() => setNavZone("files")}
-                      onExitToTimeline={
-                        viewingCommit ? () => setNavZone("timeline") : undefined
+                    <SplitPane
+                      className="workspace-split"
+                      orientation="horizontal"
+                      split={workspaceSplit}
+                      onSplitChange={setWorkspaceSplit}
+                      showLayoutToggle={false}
+                      minSplit={0.15}
+                      maxSplit={0.65}
+                      primary={
+                        <ChangesList
+                          ref={changesListRef}
+                          changes={viewingCommit ? commitFiles : displaySnapshot.changes}
+                          repoPath={selectedPath}
+                          variant={viewingCommit ? "commit" : "working"}
+                          selectedKey={selectedFileKey}
+                          onFocusZone={() => setNavZone("files")}
+                          onExitToTimeline={
+                            viewingCommit ? () => setNavZone("timeline") : undefined
+                          }
+                          onSelect={(file, section) => {
+                            if (section === "commit" && viewingCommit) {
+                              void inspectCommitFile(file, viewingCommit);
+                            } else {
+                              void inspectFile(file, section);
+                            }
+                          }}
+                          onStage={(files, anchor) => void stageFiles(files, anchor)}
+                          onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
+                          onResetAll={
+                            workingTreeActive && displaySnapshot.changes.length > 0
+                              ? () => setResetAllOpen(true)
+                              : undefined
+                          }
+                          disabled={loading}
+                        />
                       }
-                      onSelect={(file, section) => {
-                        if (section === "commit" && viewingCommit) {
-                          void inspectCommitFile(file, viewingCommit);
-                        } else {
-                          void inspectFile(file, section);
-                        }
-                      }}
-                      onStage={(files, anchor) => void stageFiles(files, anchor)}
-                      onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
-                      onResetAll={
-                        workingTreeActive && displaySnapshot.changes.length > 0
-                          ? () => setResetAllOpen(true)
-                          : undefined
+                      secondary={
+                        <DiffViewer
+                          raw={diff}
+                          file={selectedFile}
+                          repoPath={selectedPath}
+                          section={focus?.kind === "file" ? focus.section : undefined}
+                          commit={
+                            focus?.kind === "commit" ? focus.commit.hash : viewingCommit?.hash
+                          }
+                          showWorkingTreeBadges={!viewingCommit}
+                          emptyMessage={emptyDiff}
+                          onUnstage={(path) => void unstageFiles([path])}
+                        />
                       }
-                      disabled={loading}
-                    />
-
-                    <DiffViewer
-                      raw={diff}
-                      file={selectedFile}
-                      repoPath={selectedPath}
-                      section={focus?.kind === "file" ? focus.section : undefined}
-                      commit={focus?.kind === "commit" ? focus.commit.hash : viewingCommit?.hash}
-                      showWorkingTreeBadges={!viewingCommit}
-                      emptyMessage={emptyDiff}
-                      onUnstage={(path) => void unstageFiles([path])}
                     />
 
                     <CommitPanel
