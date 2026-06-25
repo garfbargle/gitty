@@ -24,6 +24,7 @@ type ChangesListProps = {
   changes: FileChange[];
   repoPath?: string;
   selectedKey?: string;
+  managedSelection?: ChangeSelectionEntry[];
   variant?: "working" | "commit";
   onSelect: (file: FileChange, section: ChangeSection) => void;
   onSelectionChange?: (selection: ChangeSelectionEntry[]) => void;
@@ -36,6 +37,46 @@ type ChangesListProps = {
   disabled?: boolean;
 };
 
+function entryPathFromKey(key: string) {
+  return key.slice(key.indexOf(":") + 1);
+}
+
+function remapSelectedKeys(current: Set<string>, entries: ChangeEntry[]): Set<string> {
+  const validKeys = new Set(entries.map((entry) => entry.key));
+  const kept = [...current].filter((key) => validKeys.has(key));
+  if (kept.length === current.size) return current;
+  if (kept.length > 0) return new Set(kept);
+
+  const remapped = new Set<string>();
+  for (const key of current) {
+    const path = entryPathFromKey(key);
+    const section = key.slice(0, key.indexOf(":"));
+    const matches = entries.filter((entry) => entry.file.path === path);
+    const preferred = matches.find((entry) => entry.section === section) ?? matches[0];
+    if (preferred) remapped.add(preferred.key);
+  }
+  return remapped;
+}
+
+function selectionToKeys(
+  selection: ChangeSelectionEntry[],
+  entries: ChangeEntry[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const item of selection) {
+    const exact = entries.find(
+      (entry) => entry.file.path === item.file.path && entry.section === item.section,
+    );
+    if (exact) {
+      keys.add(exact.key);
+      continue;
+    }
+    const fallback = entries.find((entry) => entry.file.path === item.file.path);
+    if (fallback) keys.add(fallback.key);
+  }
+  return keys;
+}
+
 function statusClass(status: string) {
   const code = statusCode(status).toLowerCase();
   return code === "?" ? "untracked" : code;
@@ -46,6 +87,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     changes,
     repoPath,
     selectedKey,
+    managedSelection,
     variant = "working",
     onSelect,
     onSelectionChange,
@@ -102,21 +144,40 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   const activeIndex = selectedKey ? entries.findIndex((entry) => entry.key === selectedKey) : -1;
 
   useEffect(() => {
-    setSelectedKeys((current) => {
-      const validKeys = new Set(entries.map((entry) => entry.key));
-      const next = new Set([...current].filter((key) => validKeys.has(key)));
-      return next.size === current.size ? current : next;
-    });
+    setSelectedKeys((current) => remapSelectedKeys(current, entries));
   }, [entries]);
+
+  useEffect(() => {
+    if (!managedSelection || managedSelection.length === 0 || isCommitView) return;
+    const keys = selectionToKeys(managedSelection, entries);
+    if (keys.size === 0) return;
+    setSelectedKeys((current) => {
+      if (current.size === keys.size && [...current].every((key) => keys.has(key))) {
+        return current;
+      }
+      return keys;
+    });
+  }, [managedSelection, entries, isCommitView]);
 
   useEffect(() => {
     if (!selectedKey) return;
     setSelectedKeys((current) => {
       if (current.has(selectedKey) && current.size > 1) return current;
       if (current.size === 1 && current.has(selectedKey)) return current;
-      return new Set([selectedKey]);
+
+      const validKeys = new Set(entries.map((entry) => entry.key));
+      if (validKeys.has(selectedKey)) {
+        return current.size === 0 ? new Set([selectedKey]) : current;
+      }
+
+      const path = entryPathFromKey(selectedKey);
+      const section = selectedKey.slice(0, selectedKey.indexOf(":"));
+      const matches = entries.filter((entry) => entry.file.path === path);
+      const preferred = matches.find((entry) => entry.section === section) ?? matches[0];
+      if (preferred) return new Set([preferred.key]);
+      return current;
     });
-  }, [selectedKey]);
+  }, [selectedKey, entries]);
 
   useEffect(() => {
     if (isCommitView || !onSelectionChange) return;

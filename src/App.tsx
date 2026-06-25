@@ -266,6 +266,7 @@ function App() {
   });
   focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
+  const selectionPreserveRef = useRef(0);
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
   const workingTreeRefreshInFlightRef = useRef(false);
@@ -917,30 +918,89 @@ function App() {
     }
   }
 
-  async function reloadWorkingDiff() {
-    if (diffSelection.length === 0) return;
-    await loadDiffForSelectionQuiet(diffSelection);
-    await refreshChangesQuiet();
+  function beginSelectionPreserve() {
+    selectionPreserveRef.current += 1;
+  }
+
+  function endSelectionPreserve() {
+    selectionPreserveRef.current = Math.max(0, selectionPreserveRef.current - 1);
+  }
+
+  async function reconcileWorkingSelection(affectedPaths: string[]) {
+    const changes = await refreshChangesQuiet();
+    if (!changes) return;
+
+    const pathsToKeep =
+      diffSelection.length > 0
+        ? [...new Set(diffSelection.map((entry) => entry.file.path))]
+        : focus?.kind === "file"
+          ? [focus.file.path]
+          : [...new Set(affectedPaths)];
+
+    const newSelection: ChangeSelectionEntry[] = [];
+    for (const path of pathsToKeep) {
+      const prior = diffSelection.find((entry) => entry.file.path === path);
+      const priorSection =
+        prior?.section ??
+        (focus?.kind === "file" && focus.file.path === path ? focus.section : undefined);
+      const unstaged = changes.find((file) => file.path === path && isUnstaged(file));
+      const staged = changes.find((file) => file.path === path && isStaged(file));
+
+      if (priorSection === "staged" && staged) {
+        newSelection.push({ file: staged, section: "staged" });
+      } else if (priorSection === "unstaged" && unstaged) {
+        newSelection.push({ file: unstaged, section: "unstaged" });
+      } else if (unstaged) {
+        newSelection.push({ file: unstaged, section: "unstaged" });
+      } else if (staged) {
+        newSelection.push({ file: staged, section: "staged" });
+      }
+    }
+
+    if (newSelection.length === 0) {
+      setFocus(null);
+      setDiff(emptyDiff);
+      setDiffSelection([]);
+      return;
+    }
+
+    const primaryPath =
+      affectedPaths.find((path) => pathsToKeep.includes(path)) ?? pathsToKeep[0];
+    const primary =
+      newSelection.find((entry) => entry.file.path === primaryPath) ??
+      newSelection[newSelection.length - 1];
+
+    setFocus({ kind: "file", file: primary.file, section: primary.section });
+    setDiffSelection(newSelection);
+    await loadDiffForSelectionQuiet(newSelection);
   }
 
   async function stageHunk(filePath: string, patch: string) {
     if (!selectedPath) return;
-    const result = await run(() =>
-      invoke<ActionResult>("stage_hunk", { path: selectedPath, filePath, patch }),
-    );
-    if (!result) return;
-    applyChangesOptimistic([filePath], true);
-    await reloadWorkingDiff();
+    beginSelectionPreserve();
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("stage_hunk", { path: selectedPath, filePath, patch }),
+      );
+      if (!result) return;
+      await reconcileWorkingSelection([filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
   }
 
   async function unstageHunk(filePath: string, patch: string) {
     if (!selectedPath) return;
-    const result = await run(() =>
-      invoke<ActionResult>("unstage_hunk", { path: selectedPath, filePath, patch }),
-    );
-    if (!result) return;
-    applyChangesOptimistic([filePath], false);
-    await reloadWorkingDiff();
+    beginSelectionPreserve();
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("unstage_hunk", { path: selectedPath, filePath, patch }),
+      );
+      if (!result) return;
+      await reconcileWorkingSelection([filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
   }
 
   async function inspectFile(file: FileChange, section: ChangeSection) {
@@ -959,6 +1019,7 @@ function App() {
   const handleChangesSelectionChange = useCallback(
     (selection: ChangeSelectionEntry[]) => {
       if (viewingCommit) return;
+      if (selection.length === 0 && selectionPreserveRef.current > 0) return;
       void loadDiffForSelectionQuiet(selection);
     },
     [selectedPath, viewingCommit],
@@ -1966,6 +2027,7 @@ function App() {
                           repoPath={selectedPath}
                           variant={viewingCommit ? "commit" : "working"}
                           selectedKey={selectedFileKey}
+                          managedSelection={workingTreeActive ? diffSelection : undefined}
                           onFocusZone={() => setNavZone("files")}
                           onExitToTimeline={
                             viewingCommit ? () => setNavZone("timeline") : undefined
