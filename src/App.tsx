@@ -1003,6 +1003,20 @@ function App() {
     }
   }
 
+  async function discardHunk(filePath: string, patch: string) {
+    if (!selectedPath) return;
+    beginSelectionPreserve();
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("discard_hunk", { path: selectedPath, filePath, patch }),
+      );
+      if (!result) return;
+      await reconcileWorkingSelection([filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
+  }
+
   async function inspectFile(file: FileChange, section: ChangeSection) {
     setViewingCommit(null);
     setCommitFiles([]);
@@ -2072,6 +2086,7 @@ function App() {
                           onUnstage={(path) => void unstageFiles([path])}
                           onStageHunk={(filePath, patch) => void stageHunk(filePath, patch)}
                           onUnstageHunk={(filePath, patch) => void unstageHunk(filePath, patch)}
+                          onDiscardHunk={(filePath, patch) => void discardHunk(filePath, patch)}
                         />
                       }
                     />

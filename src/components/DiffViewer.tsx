@@ -34,6 +34,7 @@ type DiffViewerProps = {
   onUnstage?: (path: string) => void;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
+  onDiscardHunk?: (filePath: string, patch: string) => void;
 };
 
 function HighlightedLine({ text }: { text: string }) {
@@ -60,6 +61,7 @@ function DiffHunkView({
   disabled,
   onStageHunk,
   onUnstageHunk,
+  onDiscardHunk,
 }: {
   scopedHunk: ScopedDiffHunk;
   filePath: string;
@@ -67,15 +69,23 @@ function DiffHunkView({
   disabled?: boolean;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
+  onDiscardHunk?: (filePath: string, patch: string) => void;
 }) {
   const { hunk, scope, file } = scopedHunk;
   const canStage = showActions && scope === "unstaged" && onStageHunk;
+  const canDiscard = showActions && scope === "unstaged" && onDiscardHunk;
   const canUnstage = showActions && scope === "staged" && onUnstageHunk;
 
-  function applyHunkAction() {
-    const patch = serializeHunkPatch(file, hunk);
-    if (scope === "unstaged") onStageHunk?.(filePath, patch);
-    else onUnstageHunk?.(filePath, patch);
+  function stageHunk() {
+    onStageHunk?.(filePath, serializeHunkPatch(file, hunk));
+  }
+
+  function discardHunk() {
+    onDiscardHunk?.(filePath, serializeHunkPatch(file, hunk));
+  }
+
+  function unstageHunk() {
+    onUnstageHunk?.(filePath, serializeHunkPatch(file, hunk));
   }
 
   return (
@@ -90,25 +100,39 @@ function DiffHunkView({
               </span>
             ) : null}
           </span>
-          {canStage ? (
-            <button
-              type="button"
-              className="ghost-btn sm diff-hunk-action"
-              disabled={disabled}
-              onClick={applyHunkAction}
-            >
-              Stage hunk
-            </button>
-          ) : null}
-          {canUnstage ? (
-            <button
-              type="button"
-              className="ghost-btn sm diff-hunk-action"
-              disabled={disabled}
-              onClick={applyHunkAction}
-            >
-              Unstage hunk
-            </button>
+          {canStage || canDiscard || canUnstage ? (
+            <div className="diff-hunk-actions">
+              {canDiscard ? (
+                <button
+                  type="button"
+                  className="ghost-btn sm diff-hunk-action danger"
+                  disabled={disabled}
+                  onClick={discardHunk}
+                >
+                  Discard hunk
+                </button>
+              ) : null}
+              {canStage ? (
+                <button
+                  type="button"
+                  className="ghost-btn sm diff-hunk-action"
+                  disabled={disabled}
+                  onClick={stageHunk}
+                >
+                  Stage hunk
+                </button>
+              ) : null}
+              {canUnstage ? (
+                <button
+                  type="button"
+                  className="ghost-btn sm diff-hunk-action"
+                  disabled={disabled}
+                  onClick={unstageHunk}
+                >
+                  Unstage hunk
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -144,6 +168,7 @@ function DiffFileSection({
   onUnstage,
   onStageHunk,
   onUnstageHunk,
+  onDiscardHunk,
 }: {
   bundle: DiffFileBundle;
   fileChange?: FileChange;
@@ -156,6 +181,7 @@ function DiffFileSection({
   onUnstage?: (path: string) => void;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
+  onDiscardHunk?: (filePath: string, patch: string) => void;
 }) {
   const [imagePreview, setImagePreview] = useState<FileImagePreview | null>(null);
   const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
@@ -265,6 +291,7 @@ function DiffFileSection({
             disabled={disabled}
             onStageHunk={onStageHunk}
             onUnstageHunk={onUnstageHunk}
+            onDiscardHunk={onDiscardHunk}
             key={`${scopedHunk.scope}-${scopedHunk.hunk.header}-${index}`}
           />
         ))
@@ -297,13 +324,16 @@ export function DiffViewer({
   onUnstage,
   onStageHunk,
   onUnstageHunk,
+  onDiscardHunk,
 }: DiffViewerProps) {
   const bundles = useMemo(
     () => diffBundles ?? (raw.trim() ? bundlesFromRaw(raw) : []),
     [diffBundles, raw],
   );
   const showHunkActions =
-    showWorkingTreeBadges && !commit && !!(onStageHunk || onUnstageHunk);
+    showWorkingTreeBadges &&
+    !commit &&
+    !!(onStageHunk || onUnstageHunk || onDiscardHunk);
 
   const metaByPath = useMemo(() => {
     const map = new Map<string, DiffSelectionEntry>();
@@ -387,6 +417,7 @@ export function DiffViewer({
               onUnstage={onUnstage}
               onStageHunk={onStageHunk}
               onUnstageHunk={onUnstageHunk}
+              onDiscardHunk={onDiscardHunk}
               key={bundle.path}
             />
           );

@@ -1158,12 +1158,16 @@ fn file_image_preview(
     })
 }
 
-fn git_apply_cached(repo_path: &Path, patch: &str, reverse: bool) -> Result<String, String> {
-    let mut args = vec![
-        "apply".to_string(),
-        "--cached".to_string(),
-        "--whitespace=nowarn".to_string(),
-    ];
+fn git_apply_patch(
+    repo_path: &Path,
+    patch: &str,
+    cached: bool,
+    reverse: bool,
+) -> Result<String, String> {
+    let mut args = vec!["apply".to_string(), "--whitespace=nowarn".to_string()];
+    if cached {
+        args.push("--cached".to_string());
+    }
     if reverse {
         args.push("--reverse".to_string());
     }
@@ -1210,6 +1214,10 @@ fn git_apply_cached(repo_path: &Path, patch: &str, reverse: bool) -> Result<Stri
             detail
         })
     }
+}
+
+fn git_apply_cached(repo_path: &Path, patch: &str, reverse: bool) -> Result<String, String> {
+    git_apply_patch(repo_path, patch, true, reverse)
 }
 
 fn file_diff_parts_blocking(path: String, file_path: String) -> Result<FileDiffParts, String> {
@@ -1303,6 +1311,25 @@ fn unstage_hunk(path: String, file_path: String, patch: String) -> Result<Action
     let output = git_apply_cached(repo_path, &patch, true)?;
     Ok(ActionResult {
         message: "Hunk unstaged.".to_string(),
+        output,
+    })
+}
+
+#[tauri::command]
+fn discard_hunk(path: String, file_path: String, patch: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("File path is required.".to_string());
+    }
+    if patch.trim().is_empty() {
+        return Err("Patch is required.".to_string());
+    }
+
+    let output = git_apply_patch(repo_path, &patch, false, true)?;
+    Ok(ActionResult {
+        message: "Hunk discarded.".to_string(),
         output,
     })
 }
@@ -1896,6 +1923,7 @@ pub fn run() {
             file_diff_parts,
             stage_hunk,
             unstage_hunk,
+            discard_hunk,
             file_image_preview,
             checkout_branch,
             merge_branch,

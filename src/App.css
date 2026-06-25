@@ -2067,8 +2067,19 @@ button:focus-visible {
   color: var(--warning);
 }
 
-.diff-hunk-action {
+.diff-hunk-actions {
+  display: flex;
   flex-shrink: 0;
+  gap: 6px;
+}
+
+.diff-hunk-action.danger {
+  color: var(--danger);
+}
+
+.diff-hunk-action.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .diff-lines {
