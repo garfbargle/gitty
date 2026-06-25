@@ -49,3 +49,13 @@ export function moveChangeSelection(
   const next = Math.max(0, Math.min(entries.length - 1, start + delta));
   return entries[next];
 }
+
+export function rangeSelectKeys(
+  entries: ChangeEntry[],
+  fromIndex: number,
+  toIndex: number,
+): string[] {
+  const start = Math.min(fromIndex, toIndex);
+  const end = Math.max(fromIndex, toIndex);
+  return entries.slice(start, end + 1).map((entry) => entry.key);
+}

@@ -1519,6 +1519,65 @@ fn stash_pop(path: String) -> Result<ActionResult, String> {
 }
 
 #[tauri::command]
+fn discard_files(path: String, files: Vec<String>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    if files.is_empty() {
+        return Err("Select at least one file.".to_string());
+    }
+
+    let changes = changed_files(repo_path);
+    let mut untracked = Vec::new();
+    let mut tracked = Vec::new();
+
+    for file in files {
+        let file = file.trim().to_string();
+        if file.is_empty() {
+            continue;
+        }
+        let change = changes.iter().find(|change| change.path == file);
+        if let Some(change) = change {
+            if change.status.starts_with('?') {
+                untracked.push(file);
+            } else {
+                tracked.push(file);
+            }
+        }
+    }
+
+    if tracked.is_empty() && untracked.is_empty() {
+        return Err("No matching changed files to discard.".to_string());
+    }
+
+    let count = tracked.len() + untracked.len();
+    let mut outputs = Vec::new();
+    if !tracked.is_empty() {
+        let mut args = vec![
+            "restore".to_string(),
+            "--staged".to_string(),
+            "--worktree".to_string(),
+            "--".to_string(),
+        ];
+        args.extend(tracked);
+        outputs.push(git_owned(repo_path, args)?);
+    }
+    if !untracked.is_empty() {
+        let mut args = vec!["clean".to_string(), "-fd".to_string(), "--".to_string()];
+        args.extend(untracked);
+        outputs.push(git_owned(repo_path, args)?);
+    }
+
+    Ok(ActionResult {
+        message: format!(
+            "Discarded changes in {} {}.",
+            count,
+            if count == 1 { "file" } else { "files" }
+        ),
+        output: outputs.join("\n\n"),
+    })
+}
+
+#[tauri::command]
 fn reset_working_tree(path: String, include_untracked: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -1697,6 +1756,7 @@ pub fn run() {
             push_repo,
             create_tag,
             delete_tag,
+            discard_files,
             reset_working_tree,
             rev_parse_head,
             stash_push,

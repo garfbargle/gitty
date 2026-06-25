@@ -1785,6 +1785,14 @@ button:focus-visible {
   background: var(--bg-active);
 }
 
+.change-item.multi-selected {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+}
+
+.change-item.selected.multi-selected {
+  background: var(--bg-active);
+}
+
 .change-item.commit-only {
   grid-template-columns: 1fr;
 }
@@ -3135,6 +3143,26 @@ button:focus-visible {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.confirm-dialog-actions .ghost-btn,
+.confirm-dialog-actions .confirm-dialog-primary {
+  width: auto;
+}
+
+.confirm-dialog-actions kbd {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+}
+
+.discard-files-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 0;
 }
 
 .reset-all-summary {

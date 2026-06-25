@@ -16,6 +16,7 @@ import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
 import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
+import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialog";
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
 import {
@@ -177,6 +178,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   const [resetAllOpen, setResetAllOpen] = useState(false);
+  const [discardFilesOpen, setDiscardFilesOpen] = useState(false);
+  const [discardFilesTarget, setDiscardFilesTarget] = useState<string[]>([]);
   const [tagCreateCommit, setTagCreateCommit] = useState<CommitEntry | null>(null);
   const [tagDeleteTarget, setTagDeleteTarget] = useState<{
     commit: CommitEntry;
@@ -1452,6 +1455,38 @@ function App() {
     await refreshRepo();
   }
 
+  async function discardSelectedFiles() {
+    if (!selectedPath || discardFilesTarget.length === 0) return;
+    const discardedPaths = [...discardFilesTarget];
+    const result = await run(() =>
+      invoke<ActionResult>("discard_files", {
+        path: selectedPath,
+        files: discardedPaths,
+      }),
+    );
+    if (!result) return;
+    setDiscardFilesOpen(false);
+    setDiscardFilesTarget([]);
+    if (
+      focus?.kind === "file" &&
+      discardedPaths.includes(focus.file.path)
+    ) {
+      setFocus(null);
+      setDiff(emptyDiff);
+    }
+    setChangeSummaryVisible(false);
+    resetSummaryCache();
+    setMessage([result.message, result.output].filter(Boolean).join("\n"));
+    await refreshRepo();
+  }
+
+  function openDiscardFilesDialog(paths: string[]) {
+    const uniquePaths = [...new Set(paths)];
+    if (uniquePaths.length === 0) return;
+    setDiscardFilesTarget(uniquePaths);
+    setDiscardFilesOpen(true);
+  }
+
   async function saveRemote(name: string, url: string): Promise<boolean> {
     const result = await run(() =>
       invoke<ActionResult>("set_remote", { path: selectedPath, name, url }),
@@ -1870,6 +1905,9 @@ function App() {
                               ? () => setResetAllOpen(true)
                               : undefined
                           }
+                          onRequestDiscard={
+                            workingTreeActive ? (paths) => openDiscardFilesDialog(paths) : undefined
+                          }
                           disabled={loading}
                         />
                       }
@@ -2011,6 +2049,17 @@ function App() {
             loading={loading}
             onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
             onCancel={() => setResetAllOpen(false)}
+          />
+          <DiscardFilesConfirmDialog
+            open={discardFilesOpen}
+            paths={discardFilesTarget}
+            changes={snapshot.changes}
+            loading={loading}
+            onConfirm={() => void discardSelectedFiles()}
+            onCancel={() => {
+              setDiscardFilesOpen(false);
+              setDiscardFilesTarget([]);
+            }}
           />
           <TagCreateDialog
             open={!!tagCreateCommit}

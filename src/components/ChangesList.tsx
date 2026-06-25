@@ -1,6 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { ChangeSection, FileChange, SelectionAnchor } from "../types";
-import { buildChangeEntries, moveChangeSelection, type ChangeEntry } from "../lib/changeEntries";
+import {
+  buildChangeEntries,
+  moveChangeSelection,
+  rangeSelectKeys,
+  type ChangeEntry,
+} from "../lib/changeEntries";
 import { joinRepoPath, revealInFinder } from "../lib/finder";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -18,6 +23,7 @@ type ChangesListProps = {
   onSelect: (file: FileChange, section: ChangeSection) => void;
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
+  onRequestDiscard?: (paths: string[]) => void;
   onResetAll?: () => void;
   onFocusZone?: () => void;
   onExitToTimeline?: () => void;
@@ -31,23 +37,26 @@ function statusClass(status: string) {
 
 export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(function ChangesList(
   {
-  changes,
-  repoPath,
-  selectedKey,
-  variant = "working",
-  onSelect,
-  onStage,
-  onUnstage,
-  onResetAll,
-  onFocusZone,
-  onExitToTimeline,
-  disabled,
+    changes,
+    repoPath,
+    selectedKey,
+    variant = "working",
+    onSelect,
+    onStage,
+    onUnstage,
+    onRequestDiscard,
+    onResetAll,
+    onFocusZone,
+    onExitToTimeline,
+    disabled,
   },
   ref,
 ) {
   const listRef = useRef<HTMLElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const selectionAnchorRef = useRef(-1);
   const isCommitView = variant === "commit";
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -86,15 +95,61 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   const activeIndex = selectedKey ? entries.findIndex((entry) => entry.key === selectedKey) : -1;
 
   useEffect(() => {
+    setSelectedKeys((current) => {
+      const validKeys = new Set(entries.map((entry) => entry.key));
+      const next = new Set([...current].filter((key) => validKeys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [entries]);
+
+  useEffect(() => {
     if (activeIndex < 0) return;
     const entry = entries[activeIndex];
     itemRefs.current.get(entry.key)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, entries]);
 
+  function syncSingleSelection(entry: ChangeEntry) {
+    setSelectedKeys(new Set([entry.key]));
+    selectionAnchorRef.current = entries.findIndex((item) => item.key === entry.key);
+  }
+
   function selectEntry(entry: ChangeEntry) {
     onFocusZone?.();
+    syncSingleSelection(entry);
     onSelect(entry.file, entry.section);
     listRef.current?.focus();
+  }
+
+  function handleRowClick(event: React.MouseEvent, entry: ChangeEntry) {
+    const index = entries.findIndex((item) => item.key === entry.key);
+    if (index < 0) return;
+
+    onFocusZone?.();
+    listRef.current?.focus();
+
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      setSelectedKeys((current) => {
+        const next = new Set(current.size > 0 ? current : selectedKey ? [selectedKey] : []);
+        if (next.has(entry.key)) next.delete(entry.key);
+        else next.add(entry.key);
+        if (next.size === 0) next.add(entry.key);
+        return next;
+      });
+      selectionAnchorRef.current = index;
+      onSelect(entry.file, entry.section);
+      return;
+    }
+
+    if (event.shiftKey && selectionAnchorRef.current >= 0) {
+      event.preventDefault();
+      const keys = rangeSelectKeys(entries, selectionAnchorRef.current, index);
+      setSelectedKeys(new Set(keys));
+      onSelect(entry.file, entry.section);
+      return;
+    }
+
+    selectEntry(entry);
   }
 
   function moveSelection(delta: number) {
@@ -119,6 +174,18 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     }
   }
 
+  function requestDiscardSelection() {
+    if (disabled || isCommitView || !onRequestDiscard) return;
+    const keys =
+      selectedKeys.size > 0 ? selectedKeys : selectedKey ? new Set([selectedKey]) : new Set<string>();
+    if (keys.size === 0) return;
+    const paths = [
+      ...new Set(entries.filter((entry) => keys.has(entry.key)).map((entry) => entry.file.path)),
+    ];
+    if (paths.length === 0) return;
+    onRequestDiscard(paths);
+  }
+
   function handleKeyDown(event: React.KeyboardEvent) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -136,16 +203,28 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
       if (activeIndex < 0) return;
       const entry = entries[activeIndex];
       toggleStage(entry, { section: entry.section, index: indexInSection(entry) });
+    } else if (!isCommitView && (event.key === "Delete" || event.key === "Backspace")) {
+      event.preventDefault();
+      requestDiscardSelection();
     }
   }
 
   function renderRow(entry: ChangeEntry) {
-    const selected = entry.key === selectedKey;
+    const focused = entry.key === selectedKey;
+    const highlighted = selectedKeys.has(entry.key);
+    const className = [
+      "change-item",
+      focused ? "selected" : "",
+      highlighted && !focused ? "multi-selected" : "",
+      isCommitView ? "commit-only" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     const isStagedRow = entry.section === "staged";
 
     return (
       <div
-        className={`change-item ${selected ? "selected" : ""}${isCommitView ? " commit-only" : ""}`}
+        className={className}
         key={entry.key}
         ref={(node) => {
           if (node) itemRefs.current.set(entry.key, node);
@@ -166,7 +245,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
         <button
           type="button"
           className="change-path"
-          onClick={() => selectEntry(entry)}
+          onClick={(event) => handleRowClick(event, entry)}
           title={entry.file.path}
         >
           <span className={`status-chip ${statusClass(entry.file.status)}`}>

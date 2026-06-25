@@ -160,14 +160,16 @@ export function ResetAllConfirmDialog({
         <footer className="confirm-dialog-actions">
           <button type="button" className="ghost-btn" onClick={onCancel} disabled={loading}>
             Cancel
+            <kbd>Esc</kbd>
           </button>
           <button
             type="button"
-            className="action-btn danger"
+            className="action-btn danger confirm-dialog-primary"
             disabled={!confirmed || loading}
             onClick={submitReset}
           >
             Reset all changes
+            <kbd>↵</kbd>
           </button>
         </footer>
       </div>

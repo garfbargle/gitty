@@ -106,6 +106,7 @@ export function VisitCommitDialog({
         <footer className="confirm-dialog-actions visit-commit-actions">
           <button type="button" className="ghost-btn" onClick={() => onAction("cancel")} disabled={loading}>
             Cancel
+            <kbd>Esc</kbd>
           </button>
           <button
             type="button"
@@ -117,7 +118,7 @@ export function VisitCommitDialog({
           </button>
           <button
             type="button"
-            className="action-btn danger"
+            className="action-btn danger confirm-dialog-primary"
             onClick={() => onAction("discard")}
             disabled={loading}
           >
@@ -125,7 +126,7 @@ export function VisitCommitDialog({
           </button>
           <button
             type="button"
-            className="action-btn"
+            className="action-btn confirm-dialog-primary"
             onClick={() => onAction("stash")}
             disabled={loading}
           >
