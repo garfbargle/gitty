@@ -3217,6 +3217,12 @@ button:focus-visible {
   width: 120px;
 }
 
+@media (prefers-color-scheme: dark) {
+  .gitty-mascot {
+    filter: invert(1) hue-rotate(180deg);
+  }
+}
+
 .gitty-speech-bubble {
   background: var(--bg-panel);
   border: 1px solid var(--border);
