@@ -18,6 +18,7 @@ type HistoryTimelineProps = {
   selectedHash?: string;
   onSelect: (commit: CommitEntry) => void;
   onSelectWorkingTree: () => void;
+  onVisitCommit?: (commit: CommitEntry) => void;
   onInteract?: () => void;
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
@@ -32,6 +33,7 @@ export function HistoryTimeline({
   selectedHash,
   onSelect,
   onSelectWorkingTree,
+  onVisitCommit,
   onInteract,
   onCreateTag,
   onDeleteTag,
@@ -220,12 +222,11 @@ export function HistoryTimeline({
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
-      items: buildCommitTagMenuItems(
-        commit,
-        tagActionsEnabled
-          ? { onCreateTag: onCreateTag!, onDeleteTag: onDeleteTag! }
-          : undefined,
-      ),
+      items: buildCommitTagMenuItems(commit, {
+        onVisitCommit,
+        onCreateTag: tagActionsEnabled ? onCreateTag : undefined,
+        onDeleteTag: tagActionsEnabled ? onDeleteTag : undefined,
+      }),
     });
   }
 

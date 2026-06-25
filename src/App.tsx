@@ -18,6 +18,10 @@ import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
+import {
+  VisitCommitDialog,
+  type VisitCommitDialogAction,
+} from "./components/VisitCommitDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
@@ -33,8 +37,9 @@ import type {
   RepoEnrichment,
   RepoSnapshot,
   SelectionAnchor,
+  VisitSession,
 } from "./types";
-import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, parseRefs, primaryRef, stagedPathsKey, tagName } from "./lib/git";
+import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import {
   appendUniqueCommits,
@@ -150,6 +155,9 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("working");
   const [viewingCommit, setViewingCommit] = useState<CommitEntry | null>(null);
   const [viewingCommitMessage, setViewingCommitMessage] = useState("");
+  const [visitSession, setVisitSession] = useState<VisitSession | null>(null);
+  const [visitCommitDialogOpen, setVisitCommitDialogOpen] = useState(false);
+  const [visitCommitTarget, setVisitCommitTarget] = useState<CommitEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
@@ -188,11 +196,14 @@ function App() {
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
 
-  const selectedCommit = viewingCommit ?? (focus?.kind === "commit" ? focus.commit : null);
+  const selectedCommit =
+    viewingCommit ??
+    visitSession?.visitedCommit ??
+    (focus?.kind === "commit" ? focus.commit : null);
   const selectedFile = focus?.kind === "file" ? focus.file : null;
   const selectedFileKey =
     focus?.kind === "file" ? `${focus.section}:${focus.file.path}` : undefined;
-  const workingTreeActive = !viewingCommit;
+  const workingTreeActive = !viewingCommit && !visitSession;
 
   const branchNames = useMemo(() => {
     const branches = snapshot?.branches ?? [];
@@ -518,6 +529,9 @@ function App() {
     loadingMoreCommitsRef.current = false;
     setViewingCommit(null);
     setViewingCommitMessage("");
+    setVisitSession(null);
+    setVisitCommitDialogOpen(false);
+    setVisitCommitTarget(null);
     setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
@@ -767,14 +781,6 @@ function App() {
     if (typeof folder === "string") await addRepo(folder);
   }
 
-  async function inspectCommitHistory(commit: CommitEntry, path = selectedPath) {
-    setFocus({ kind: "commit", commit });
-    const result = await run(() =>
-      invoke<string>("commit_diff", { path, commit: commit.hash }),
-    );
-    if (result !== null) setDiff(result || "This commit has no patch output.");
-  }
-
   async function inspectCommit(commit: CommitEntry, path = selectedPath) {
     setViewingCommit(commit);
     const files = await run(() =>
@@ -853,8 +859,149 @@ function App() {
     }
   }
 
+  async function captureReturnTarget(path = selectedPath): Promise<{
+    returnBranch: string;
+    returnHead?: string;
+  } | null> {
+    if (!path || !snapshot) return null;
+    const isDetached = snapshot.branch.includes("detached");
+    if (!isDetached) {
+      return { returnBranch: snapshot.branch };
+    }
+    try {
+      const head = await invoke<string>("rev_parse_head", { path });
+      return { returnBranch: snapshot.branch, returnHead: head };
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  }
+
+  async function executeVisitCheckout(commit: CommitEntry, stashed: boolean) {
+    if (!selectedPath || !snapshot) return false;
+
+    const returnTarget = await captureReturnTarget();
+    if (!returnTarget) return false;
+
+    const result = await run(() =>
+      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: commit.hash }),
+    );
+    if (!result) return false;
+
+    setMessage(result.message);
+    setVisitSession({
+      returnBranch: returnTarget.returnBranch,
+      returnHead: returnTarget.returnHead,
+      visitedCommit: commit,
+      stashed,
+    });
+    setViewingCommit(null);
+    setViewingCommitMessage("");
+    setCommitFiles([]);
+    setFocus(null);
+    setDiff(emptyDiff);
+    setVisitCommitDialogOpen(false);
+    setVisitCommitTarget(null);
+    await refreshRepo();
+    return true;
+  }
+
+  function requestVisitCommit(commit?: CommitEntry) {
+    const target = commit ?? viewingCommit;
+    if (!target || !selectedPath || !snapshot || visitSession) return;
+
+    if (!snapshot.isClean) {
+      setVisitCommitTarget(target);
+      setVisitCommitDialogOpen(true);
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Visit ${target.shortHash}? Your working tree will match that point in history.`,
+      )
+    ) {
+      return;
+    }
+
+    void executeVisitCheckout(target, false);
+  }
+
+  async function handleVisitCommitDialogAction(action: VisitCommitDialogAction) {
+    const commit = visitCommitTarget;
+    if (!commit || !selectedPath || !snapshot) {
+      setVisitCommitDialogOpen(false);
+      setVisitCommitTarget(null);
+      return;
+    }
+
+    if (action === "cancel" || action === "keep") {
+      setVisitCommitDialogOpen(false);
+      setVisitCommitTarget(null);
+      return;
+    }
+
+    if (action === "discard") {
+      const untracked = snapshot.changes.some((change) => change.status.includes("?"));
+      const resetResult = await run(() =>
+        invoke<ActionResult>("reset_working_tree", {
+          path: selectedPath,
+          includeUntracked: untracked,
+        }),
+      );
+      if (!resetResult) return;
+      setMessage(resetResult.message);
+      await executeVisitCheckout(commit, false);
+      return;
+    }
+
+    const stashResult = await run(() =>
+      invoke<ActionResult>("stash_push", {
+        path: selectedPath,
+        message: `gitty-visit-${commit.shortHash}`,
+      }),
+    );
+    if (!stashResult) return;
+    setMessage(stashResult.message);
+    await executeVisitCheckout(commit, true);
+  }
+
+  async function returnFromVisit() {
+    if (!visitSession || !selectedPath) return;
+
+    const { returnBranch, returnHead, stashed } = visitSession;
+    const checkoutTarget = returnBranch.includes("detached")
+      ? returnHead ?? visitSession.visitedCommit.hash
+      : returnBranch;
+
+    if (!checkoutTarget) {
+      setError("Could not determine where to return from time travel.");
+      return;
+    }
+
+    const checkoutResult = await run(() =>
+      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: checkoutTarget }),
+    );
+    if (!checkoutResult) return;
+
+    if (stashed) {
+      const popResult = await run(() => invoke<ActionResult>("stash_pop", { path: selectedPath }));
+      if (!popResult) return;
+      setMessage(popResult.message);
+    } else {
+      setMessage(checkoutResult.message);
+    }
+
+    setVisitSession(null);
+    await selectWorkingTree({ refresh: true });
+  }
+
   async function checkoutBranch(branch: string) {
     if (!selectedPath || !branch) return;
+    if (visitSession) {
+      setError("Return to latest before switching branches.");
+      return;
+    }
     const isDetached = snapshot?.branch.includes("detached");
     if (!isDetached && branch === snapshot?.branch) return;
     const result = await run(() =>
@@ -871,6 +1018,10 @@ function App() {
   }
 
   async function resumeBranch() {
+    if (visitSession) {
+      setError("Return to latest before resuming the branch.");
+      return;
+    }
     const branch = snapshot?.aheadBranch;
     const tip = snapshot?.aheadCommits?.[0];
     if (!selectedPath || !branch || !tip) return;
@@ -903,34 +1054,6 @@ function App() {
     setDiff(emptyDiff);
     const snap = await refreshRepo();
     if (snap) await selectWorkingTree({ snapshot: snap });
-  }
-
-  async function checkoutFromCommit(commit: CommitEntry) {
-    const ref = primaryRef(commit.refs) || parseRefs(commit.refs)[0];
-    if (ref?.startsWith("tag:")) {
-      const name = tagName(ref);
-      if (!window.confirm(`Check out tag ${name}?`)) return;
-      await checkoutBranch(name);
-      await selectWorkingTree({ refresh: true });
-      return;
-    }
-    if (ref && !ref.startsWith("tag:")) {
-      await checkoutBranch(ref.replace(/^origin\//, "") || ref);
-      await selectWorkingTree({ refresh: true });
-      return;
-    }
-    if (!window.confirm(`Check out detached commit ${commit.shortHash}?`)) return;
-    const result = await run(() =>
-      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: commit.hash }),
-    );
-    if (result) {
-      setMessage(result.message);
-      setViewingCommit(null);
-      setCommitFiles([]);
-      setFocus(null);
-      setDiff(emptyDiff);
-      await selectWorkingTree({ refresh: true });
-    }
   }
 
   function openCreateTagDialog(commit: CommitEntry) {
@@ -1406,7 +1529,7 @@ function App() {
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
   const showCommitSection = workingTreeActive;
-  const showResetSection = !!viewingCommit;
+  const showResetSection = !!visitSession;
 
   useEffect(() => {
     if (!viewingCommit || !selectedPath) {
@@ -1620,17 +1743,16 @@ function App() {
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
+              visitSession={visitSession}
               onSelectCommit={(commit) => void inspectCommit(commit)}
+              onVisitCommit={() => requestVisitCommit()}
+              onReturnFromVisit={() => void returnFromVisit()}
               onResumeBranch={() => void resumeBranch()}
               onToggleView={() => {
-                if (viewMode === "history") {
-                  setViewingCommit(null);
+                if (viewMode === "history" && !viewingCommit) {
                   setCommitFiles([]);
                   setFocus(null);
                   setDiff(emptyDiff);
-                } else {
-                  setViewingCommit(null);
-                  setCommitFiles([]);
                 }
                 setViewMode((mode) => (mode === "working" ? "history" : "working"));
               }}
@@ -1654,6 +1776,7 @@ function App() {
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
+                  onVisitCommit={(commit) => requestVisitCommit(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                 />
@@ -1769,8 +1892,8 @@ function App() {
                       unpushedTags={unpushedTagSet}
                       selectedHash={selectedCommit?.hash}
                       search=""
-                      onSelect={(commit) => void inspectCommitHistory(commit)}
-                      onDoubleClick={(commit) => void checkoutFromCommit(commit)}
+                      onSelect={(commit) => void inspectCommit(commit)}
+                      onVisitCommit={(commit) => requestVisitCommit(commit)}
                       onCreateTag={(commit) => openCreateTagDialog(commit)}
                       onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                     />
@@ -1808,6 +1931,13 @@ function App() {
 
       {snapshot ? (
         <>
+          <VisitCommitDialog
+            open={visitCommitDialogOpen}
+            commit={visitCommitTarget}
+            changes={snapshot.changes}
+            loading={loading}
+            onAction={(action) => void handleVisitCommitDialogAction(action)}
+          />
           <ResetAllConfirmDialog
             open={resetAllOpen}
             repoName={snapshot.repo.name}

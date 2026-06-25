@@ -1488,6 +1488,37 @@ fn delete_tag(path: String, name: String) -> Result<ActionResult, String> {
 }
 
 #[tauri::command]
+fn rev_parse_head(path: String) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    git(Path::new(&repo.path), &["rev-parse", "HEAD"])
+}
+
+#[tauri::command]
+fn stash_push(path: String, message: Option<String>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let message = message
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "gitty-visit".to_string());
+    let output = git(repo_path, &["stash", "push", "-u", "-m", &message])?;
+    Ok(ActionResult {
+        message: "Changes stashed.".to_string(),
+        output,
+    })
+}
+
+#[tauri::command]
+fn stash_pop(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let output = git(Path::new(&repo.path), &["stash", "pop"])?;
+    Ok(ActionResult {
+        message: "Stashed changes restored.".to_string(),
+        output,
+    })
+}
+
+#[tauri::command]
 fn reset_working_tree(path: String, include_untracked: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -1667,6 +1698,9 @@ pub fn run() {
             create_tag,
             delete_tag,
             reset_working_tree,
+            rev_parse_head,
+            stash_push,
+            stash_pop,
             reset_to_commit,
             set_remote,
             get_app_settings,

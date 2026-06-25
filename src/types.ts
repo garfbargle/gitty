@@ -104,3 +104,10 @@ export type DiffFocus =
   | { kind: "commit"; commit: CommitEntry }
   | { kind: "file"; file: FileChange; section: ChangeSection }
   | null;
+
+export type VisitSession = {
+  returnBranch: string;
+  returnHead?: string;
+  visitedCommit: CommitEntry;
+  stashed: boolean;
+};

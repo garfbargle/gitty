@@ -25,7 +25,7 @@ type HistoryTableProps = {
   loadingMore?: boolean;
   onLoadMore?: () => void;
   onSelect: (commit: CommitEntry) => void;
-  onDoubleClick: (commit: CommitEntry) => void;
+  onVisitCommit?: (commit: CommitEntry) => void;
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
 };
@@ -42,7 +42,7 @@ export function HistoryTable({
   loadingMore = false,
   onLoadMore,
   onSelect,
-  onDoubleClick,
+  onVisitCommit,
   onCreateTag,
   onDeleteTag,
 }: HistoryTableProps) {
@@ -94,12 +94,11 @@ export function HistoryTable({
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
-      items: buildCommitTagMenuItems(
-        commit,
-        tagActionsEnabled
-          ? { onCreateTag: onCreateTag!, onDeleteTag: onDeleteTag! }
-          : undefined,
-      ),
+      items: buildCommitTagMenuItems(commit, {
+        onVisitCommit,
+        onCreateTag: tagActionsEnabled ? onCreateTag : undefined,
+        onDeleteTag: tagActionsEnabled ? onDeleteTag : undefined,
+      }),
     });
   }
 
@@ -131,7 +130,6 @@ export function HistoryTable({
                 key={row.commit.hash}
                 type="button"
                 onClick={() => onSelect(row.commit)}
-                onDoubleClick={() => onDoubleClick(row.commit)}
                 onContextMenu={(event) => openTagContextMenu(event, row.commit)}
               >
                 <div className="col-graph" style={{ width: graphWidth }}>

@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import type { CommitEntry, RepoEntry } from "../types";
+import type { CommitEntry, RepoEntry, VisitSession } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
 import { WorkingTreePicker } from "./WorkingTreePicker";
@@ -23,6 +23,7 @@ type TopBarProps = {
   changeCount: number;
   viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
+  visitSession?: VisitSession | null;
   loading?: boolean;
   pushPhase?: PushPhase;
   repoSwitching?: boolean;
@@ -35,6 +36,8 @@ type TopBarProps = {
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
   onSelectCommit: (commit: CommitEntry) => void;
+  onVisitCommit?: () => void;
+  onReturnFromVisit?: () => void;
   onResumeBranch?: () => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
@@ -54,6 +57,7 @@ export function TopBar({
   changeCount,
   viewMode,
   viewingCommit,
+  visitSession,
   loading,
   pushPhase = "idle",
   repoSwitching = false,
@@ -66,6 +70,8 @@ export function TopBar({
   onToggleView,
   onReturnToWorkingTree,
   onSelectCommit,
+  onVisitCommit,
+  onReturnFromVisit,
   onResumeBranch,
   onRefresh,
   onPush,
@@ -73,15 +79,20 @@ export function TopBar({
   onSetupRemote,
   onOpenRepoSettings,
 }: TopBarProps) {
+  const inTimeTravel = !!visitSession;
+  const inPreview = !!viewingCommit && !inTimeTravel;
+  const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
+  const timeTravelCommit = visitSession?.visitedCommit;
+
   return (
-    <header className="top-bar">
+    <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
       <div className="top-bar-left">
         <button
           type="button"
           className={`view-mode-toggle ${viewMode}`}
           title={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
           aria-label={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
-          disabled={repoSwitching}
+          disabled={repoSwitching || inTimeTravel}
           onClick={onToggleView}
         >
           {viewMode === "working" ? <History size={15} /> : <GitCompareArrows size={15} />}
@@ -96,7 +107,7 @@ export function TopBar({
           <select
             className="top-select branch-select-top"
             value={branch}
-            disabled={repoSwitching || loading}
+            disabled={repoSwitching || loading || inTimeTravel}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
             {branches.map((name) => (
@@ -108,7 +119,24 @@ export function TopBar({
           <ChevronDown size={14} className="select-chevron" />
         </div>
 
-        {viewMode === "working" ? (
+        {inTimeTravel && timeTravelCommit ? (
+          <>
+            <span className="breadcrumb-sep">›</span>
+            <div className="time-travel-banner" role="status">
+              <span className="time-travel-label">Time Travel</span>
+              <code>{timeTravelCommit.shortHash}</code>
+            </div>
+          </>
+        ) : inPreview && viewingCommit ? (
+          <>
+            <span className="breadcrumb-sep">›</span>
+            <div className="preview-banner" role="status">
+              <span className="preview-label">Viewing</span>
+              <code>{viewingCommit.shortHash}</code>
+              <span className="preview-meta">· workspace on {previewBranchLabel}</span>
+            </div>
+          </>
+        ) : viewMode === "working" ? (
           <>
             <span className="breadcrumb-sep">›</span>
             <WorkingTreePicker
@@ -127,7 +155,18 @@ export function TopBar({
       </div>
 
       <div className="top-bar-right">
-        {(aheadCommits.length > 0 && aheadBranch && onResumeBranch) ? (
+        {inTimeTravel && onReturnFromVisit ? (
+          <button
+            type="button"
+            className="return-to-latest-btn"
+            title="Return to your latest branch and restore stashed changes if any"
+            disabled={loading}
+            onClick={onReturnFromVisit}
+          >
+            Return to Latest
+          </button>
+        ) : null}
+        {!inTimeTravel && aheadCommits.length > 0 && aheadBranch && onResumeBranch ? (
           <button
             type="button"
             className="resume-branch-btn"
@@ -140,22 +179,33 @@ export function TopBar({
             <em>{aheadCommits.length}</em>
           </button>
         ) : null}
-        {viewMode === "working" && viewingCommit ? (
+        {inPreview && onVisitCommit ? (
+          <button
+            type="button"
+            className="visit-commit-btn"
+            title="Check out this commit on disk (detached HEAD)"
+            disabled={loading}
+            onClick={onVisitCommit}
+          >
+            Visit Commit
+          </button>
+        ) : null}
+        {inPreview ? (
           <button
             type="button"
             className="return-to-changes-btn"
-            title="Return to current changes"
+            title="Return to current working tree"
             onClick={onReturnToWorkingTree}
           >
             <span className="working-dot" />
-            Current Changes
+            Back to Working Tree
             {changeCount > 0 ? <em>{changeCount}</em> : null}
           </button>
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>
-        {onPush && onForcePush && !repoSwitching ? (
+        {onPush && onForcePush && !repoSwitching && !inTimeTravel ? (
           <PushButton
             ahead={ahead}
             behind={behind}
