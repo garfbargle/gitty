@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderPlus, GitBranch, RefreshCw } from "lucide-react";
+import { FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
@@ -132,6 +132,15 @@ function emptySummaryCache(): SummaryCache {
 }
 
 const SNAPSHOT_SUPERSEDED = "__superseded__";
+const SIDEBAR_VISIBLE_KEY = "gitty.sidebarVisible";
+
+function readSidebarVisible(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_VISIBLE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 function isSupersededSnapshotError(err: unknown): boolean {
   return String(err).includes(SNAPSHOT_SUPERSEDED);
@@ -195,6 +204,19 @@ function App() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
+  const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarVisible((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem(SIDEBAR_VISIBLE_KEY, String(next));
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  }, []);
 
   const selectedCommit =
     viewingCommit ??
@@ -1618,6 +1640,19 @@ function App() {
   }, [viewMode, workingTreeActive, loading]);
 
   useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "b") return;
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+      event.preventDefault();
+      toggleSidebar();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleSidebar]);
+
+  useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;
     const currentSnapshot = snapshot;
 
@@ -1673,7 +1708,7 @@ function App() {
   ]);
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
       <RepoSidebar
         repos={repos}
         discoveredRepos={discoveredRepos}
@@ -1693,9 +1728,21 @@ function App() {
           }
         }}
         onRescanDiscovery={rescanDiscovery}
+        onHide={toggleSidebar}
       />
 
       <section className={`main-area${repoSwitching ? " repo-switching" : ""}`}>
+        {!sidebarVisible && !displaySnapshot && !repoSwitching ? (
+          <button
+            type="button"
+            className="sidebar-restore-btn"
+            title="Show repositories"
+            aria-label="Show repositories"
+            onClick={toggleSidebar}
+          >
+            <PanelLeft size={15} />
+          </button>
+        ) : null}
         {repoSwitching ? (
           <>
             <TopBar
@@ -1708,6 +1755,8 @@ function App() {
               viewMode={viewMode}
               loading
               repoSwitching
+              sidebarVisible={sidebarVisible}
+              onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={() => {}}
               onToggleView={() => {}}
@@ -1740,6 +1789,8 @@ function App() {
               behind={displaySnapshot.behind}
               unpushedTags={displaySnapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
+              sidebarVisible={sidebarVisible}
+              onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}

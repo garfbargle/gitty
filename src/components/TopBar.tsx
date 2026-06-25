@@ -4,6 +4,8 @@ import {
   GitCompareArrows,
   History,
   Link2,
+  PanelLeft,
+  PanelLeftClose,
   RefreshCw,
   Settings,
 } from "lucide-react";
@@ -44,6 +46,8 @@ type TopBarProps = {
   onForcePush?: () => Promise<boolean>;
   onSetupRemote?: () => void;
   onOpenRepoSettings?: () => void;
+  sidebarVisible?: boolean;
+  onToggleSidebar?: () => void;
 };
 
 export function TopBar({
@@ -78,6 +82,8 @@ export function TopBar({
   onForcePush,
   onSetupRemote,
   onOpenRepoSettings,
+  sidebarVisible = true,
+  onToggleSidebar,
 }: TopBarProps) {
   const inTimeTravel = !!visitSession;
   const inPreview = !!viewingCommit && !inTimeTravel;
@@ -87,6 +93,19 @@ export function TopBar({
   return (
     <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
       <div className="top-bar-left">
+        {onToggleSidebar ? (
+          <button
+            type="button"
+            className="view-mode-toggle"
+            title={sidebarVisible ? "Hide repositories" : "Show repositories"}
+            aria-label={sidebarVisible ? "Hide repositories" : "Show repositories"}
+            aria-pressed={sidebarVisible}
+            onClick={onToggleSidebar}
+          >
+            {sidebarVisible ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+          </button>
+        ) : null}
+
         <button
           type="button"
           className={`view-mode-toggle ${viewMode}`}

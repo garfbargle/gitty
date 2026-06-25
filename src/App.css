@@ -129,6 +129,15 @@ button:focus-visible {
   grid-template-columns: 220px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
+  transition: grid-template-columns 0.18s ease;
+}
+
+.app-shell.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell.sidebar-hidden .repo-sidebar {
+  display: none;
 }
 
 .main-area {
@@ -190,6 +199,12 @@ button:focus-visible {
   letter-spacing: 0.05em;
   padding: 14px 12px 8px;
   text-transform: uppercase;
+}
+
+.sidebar-header-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
 }
 
 .repo-list {
@@ -638,6 +653,29 @@ button:focus-visible {
 .view-mode-toggle.working,
 .view-mode-toggle.history {
   color: var(--accent);
+}
+
+.sidebar-restore-btn {
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  left: 12px;
+  position: absolute;
+  top: 12px;
+  width: 32px;
+  z-index: 2;
+}
+
+.sidebar-restore-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* ── Top bar ── */

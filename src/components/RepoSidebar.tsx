@@ -1,4 +1,13 @@
-import { BookmarkMinus, BookmarkPlus, FolderGit2, Plus, Radar, RefreshCw, Settings } from "lucide-react";
+import {
+  BookmarkMinus,
+  BookmarkPlus,
+  FolderGit2,
+  PanelLeftClose,
+  Plus,
+  Radar,
+  RefreshCw,
+  Settings,
+} from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
 import type { DiscoveredRepoEntry, RepoEntry } from "../types";
 import { shortenPath } from "../lib/git";
@@ -19,6 +28,7 @@ type RepoSidebarProps = {
   onOpenSettings: () => void;
   onOpenRepoSettings: (path: string) => void;
   onRescanDiscovery: () => void;
+  onHide?: () => void;
 };
 
 export const RepoSidebar = memo(function RepoSidebar({
@@ -34,6 +44,7 @@ export const RepoSidebar = memo(function RepoSidebar({
   onOpenSettings,
   onOpenRepoSettings,
   onRescanDiscovery,
+  onHide,
 }: RepoSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -85,9 +96,22 @@ export const RepoSidebar = memo(function RepoSidebar({
     <aside className="repo-sidebar">
       <header className="sidebar-header">
         <span>Repositories</span>
-        <button type="button" className="icon-btn sm" title="Add repository" onClick={onAddExisting}>
-          <Plus size={16} />
-        </button>
+        <div className="sidebar-header-actions">
+          <button type="button" className="icon-btn sm" title="Add repository" onClick={onAddExisting}>
+            <Plus size={16} />
+          </button>
+          {onHide ? (
+            <button
+              type="button"
+              className="icon-btn sm"
+              title="Hide repositories"
+              aria-label="Hide repositories"
+              onClick={onHide}
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="repo-list">
