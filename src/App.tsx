@@ -794,6 +794,58 @@ function App() {
     await inspectFileQuiet(sectionList[index], anchor.section);
   }
 
+  function remainingSelectionAfterToggle(
+    toggledPaths: Set<string>,
+    changes: FileChange[],
+  ): ChangeSelectionEntry[] {
+    const remaining = diffSelection.filter((entry) => !toggledPaths.has(entry.file.path));
+    const newSelection: ChangeSelectionEntry[] = [];
+    for (const prior of remaining) {
+      const unstaged = changes.find((file) => file.path === prior.file.path && isUnstaged(file));
+      const staged = changes.find((file) => file.path === prior.file.path && isStaged(file));
+      if (prior.section === "staged" && staged) {
+        newSelection.push({ file: staged, section: "staged" });
+      } else if (prior.section === "unstaged" && unstaged) {
+        newSelection.push({ file: unstaged, section: "unstaged" });
+      } else if (unstaged) {
+        newSelection.push({ file: unstaged, section: "unstaged" });
+      } else if (staged) {
+        newSelection.push({ file: staged, section: "staged" });
+      }
+    }
+    return newSelection;
+  }
+
+  function applyEarlyToggleSelection(toggledPaths: Set<string>) {
+    const remaining = diffSelection.filter((entry) => !toggledPaths.has(entry.file.path));
+    if (remaining.length === 0) return;
+    setDiffSelection(remaining);
+    if (focus?.kind === "file" && toggledPaths.has(focus.file.path)) {
+      const next = remaining[remaining.length - 1];
+      setFocus({ kind: "file", file: next.file, section: next.section });
+    }
+  }
+
+  async function resolveSelectionAfterToggle(
+    files: string[],
+    changes: FileChange[],
+    anchor: SelectionAnchor,
+  ) {
+    const toggledPaths = new Set(files);
+    const newSelection = remainingSelectionAfterToggle(toggledPaths, changes);
+    if (newSelection.length === 0) {
+      await selectAfterToggle(anchor, changes);
+      return;
+    }
+
+    const primary =
+      (focus?.kind === "file" && !toggledPaths.has(focus.file.path)
+        ? newSelection.find((entry) => entry.file.path === focus.file.path)
+        : undefined) ?? newSelection[newSelection.length - 1];
+    setFocus({ kind: "file", file: primary.file, section: primary.section });
+    await loadDiffForSelectionQuiet(newSelection);
+  }
+
   async function addRepo(path: string) {
     const result = await run(() => invoke<RepoEntry[]>("add_repo", { path }));
     if (result) {
@@ -1277,6 +1329,9 @@ function App() {
   async function stageFiles(files: string[], anchor?: SelectionAnchor) {
     if (!selectedPath || files.length === 0) return;
 
+    const toggledPaths = new Set(files);
+    if (anchor) applyEarlyToggleSelection(toggledPaths);
+
     setLoading(true);
     setError("");
     let success = false;
@@ -1299,7 +1354,7 @@ function App() {
     if (!changes) return;
 
     if (anchor) {
-      await selectAfterToggle(anchor, changes);
+      await resolveSelectionAfterToggle(files, changes, anchor);
       return;
     }
 
@@ -1313,6 +1368,9 @@ function App() {
 
   async function unstageFiles(files: string[], anchor?: SelectionAnchor) {
     if (!selectedPath || files.length === 0) return;
+
+    const toggledPaths = new Set(files);
+    if (anchor) applyEarlyToggleSelection(toggledPaths);
 
     setLoading(true);
     setError("");
@@ -1336,7 +1394,7 @@ function App() {
     if (!changes) return;
 
     if (anchor) {
-      await selectAfterToggle(anchor, changes);
+      await resolveSelectionAfterToggle(files, changes, anchor);
       return;
     }
 

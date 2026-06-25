@@ -45,17 +45,7 @@ function remapSelectedKeys(current: Set<string>, entries: ChangeEntry[]): Set<st
   const validKeys = new Set(entries.map((entry) => entry.key));
   const kept = [...current].filter((key) => validKeys.has(key));
   if (kept.length === current.size) return current;
-  if (kept.length > 0) return new Set(kept);
-
-  const remapped = new Set<string>();
-  for (const key of current) {
-    const path = entryPathFromKey(key);
-    const section = key.slice(0, key.indexOf(":"));
-    const matches = entries.filter((entry) => entry.file.path === path);
-    const preferred = matches.find((entry) => entry.section === section) ?? matches[0];
-    if (preferred) remapped.add(preferred.key);
-  }
-  return remapped;
+  return new Set(kept);
 }
 
 function selectionToKeys(
@@ -67,12 +57,7 @@ function selectionToKeys(
     const exact = entries.find(
       (entry) => entry.file.path === item.file.path && entry.section === item.section,
     );
-    if (exact) {
-      keys.add(exact.key);
-      continue;
-    }
-    const fallback = entries.find((entry) => entry.file.path === item.file.path);
-    if (fallback) keys.add(fallback.key);
+    if (exact) keys.add(exact.key);
   }
   return keys;
 }
@@ -252,6 +237,12 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
 
   function toggleStage(entry: ChangeEntry, anchor?: SelectionAnchor) {
     if (disabled || isCommitView) return;
+    setSelectedKeys((current) => {
+      if (!current.has(entry.key)) return current;
+      const next = new Set(current);
+      next.delete(entry.key);
+      return next;
+    });
     if (entry.section === "unstaged") {
       onStage([entry.file.path], anchor);
     } else {
