@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
-import { ChangesList, type ChangesListHandle, type ChangeSelectionEntry } from "./components/ChangesList";
+import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
 import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
@@ -29,6 +29,7 @@ import type {
   ActionResult,
   AppSettingsView,
   ChangeSection,
+  ChangeSelectionEntry,
   ChangeSummary,
   CommitEntry,
   DiffFocus,
@@ -267,6 +268,7 @@ function App() {
   focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
   const selectionPreserveRef = useRef(0);
+  const loadDiffRequestRef = useRef(0);
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
   const workingTreeRefreshInFlightRef = useRef(false);
@@ -794,49 +796,65 @@ function App() {
     await inspectFileQuiet(sectionList[index], anchor.section);
   }
 
-  function remainingSelectionAfterToggle(
-    toggledPaths: Set<string>,
+  function refreshSelectionEntries(
+    prior: ChangeSelectionEntry[],
     changes: FileChange[],
   ): ChangeSelectionEntry[] {
-    const remaining = diffSelection.filter((entry) => !toggledPaths.has(entry.file.path));
-    const newSelection: ChangeSelectionEntry[] = [];
-    for (const prior of remaining) {
-      const unstaged = changes.find((file) => file.path === prior.file.path && isUnstaged(file));
-      const staged = changes.find((file) => file.path === prior.file.path && isStaged(file));
-      if (prior.section === "staged" && staged) {
-        newSelection.push({ file: staged, section: "staged" });
-      } else if (prior.section === "unstaged" && unstaged) {
-        newSelection.push({ file: unstaged, section: "unstaged" });
+    const refreshed: ChangeSelectionEntry[] = [];
+    for (const entry of prior) {
+      const unstaged = changes.find((file) => file.path === entry.file.path && isUnstaged(file));
+      const staged = changes.find((file) => file.path === entry.file.path && isStaged(file));
+      if (entry.section === "staged" && staged) {
+        refreshed.push({ file: staged, section: "staged" });
+      } else if (entry.section === "unstaged" && unstaged) {
+        refreshed.push({ file: unstaged, section: "unstaged" });
       } else if (unstaged) {
-        newSelection.push({ file: unstaged, section: "unstaged" });
+        refreshed.push({ file: unstaged, section: "unstaged" });
       } else if (staged) {
-        newSelection.push({ file: staged, section: "staged" });
+        refreshed.push({ file: staged, section: "staged" });
       }
     }
-    return newSelection;
+    return refreshed;
   }
 
-  function applyEarlyToggleSelection(toggledPaths: Set<string>) {
-    const remaining = diffSelection.filter((entry) => !toggledPaths.has(entry.file.path));
+  function selectionPathsKey(selection: ChangeSelectionEntry[]) {
+    return selection
+      .map((entry) => `${entry.section}:${entry.file.path}`)
+      .sort()
+      .join("|");
+  }
+
+  function focusAfterToggle(
+    toggledPaths: Set<string>,
+    remaining: ChangeSelectionEntry[],
+  ) {
     if (remaining.length === 0) return;
-    setDiffSelection(remaining);
-    if (focus?.kind === "file" && toggledPaths.has(focus.file.path)) {
-      const next = remaining[remaining.length - 1];
-      setFocus({ kind: "file", file: next.file, section: next.section });
-    }
+    if (focus?.kind !== "file" || !toggledPaths.has(focus.file.path)) return;
+    const next = remaining[remaining.length - 1];
+    setFocus({ kind: "file", file: next.file, section: next.section });
   }
 
   async function resolveSelectionAfterToggle(
     files: string[],
     changes: FileChange[],
     anchor: SelectionAnchor,
+    selectionAlreadyUpdated: boolean,
   ) {
     const toggledPaths = new Set(files);
-    const newSelection = remainingSelectionAfterToggle(toggledPaths, changes);
+    const baseRemaining =
+      anchor.remainingSelection ??
+      diffSelection.filter((entry) => !toggledPaths.has(entry.file.path));
+    const newSelection = refreshSelectionEntries(baseRemaining, changes);
+
     if (newSelection.length === 0) {
       await selectAfterToggle(anchor, changes);
       return;
     }
+
+    focusAfterToggle(toggledPaths, newSelection);
+    setDiffSelection(newSelection);
+
+    if (selectionAlreadyUpdated) return;
 
     const primary =
       (focus?.kind === "file" && !toggledPaths.has(focus.file.path)
@@ -936,9 +954,11 @@ function App() {
       return true;
     });
 
+    const requestId = ++loadDiffRequestRef.current;
     setDiffSelection(selection);
 
     if (!path || entries.length === 0) {
+      if (requestId !== loadDiffRequestRef.current) return;
       setDiff(emptyDiff);
       setDiffBundles([]);
       return;
@@ -953,6 +973,7 @@ function App() {
           }),
         ),
       );
+      if (requestId !== loadDiffRequestRef.current) return;
       const bundles = parts.flatMap((part) => buildDiffBundles(part.staged, part.unstaged));
       setDiffBundles(bundles);
       const combined = parts
@@ -966,6 +987,7 @@ function App() {
         setDiff(combined || "No diff available for selected files.");
       }
     } catch (err) {
+      if (requestId !== loadDiffRequestRef.current) return;
       setError(String(err));
     }
   }
@@ -1086,9 +1108,12 @@ function App() {
     (selection: ChangeSelectionEntry[]) => {
       if (viewingCommit) return;
       if (selection.length === 0 && selectionPreserveRef.current > 0) return;
+      const nextKey = selectionPathsKey(selection);
+      const currentKey = selectionPathsKey(diffSelection);
+      if (nextKey === currentKey) return;
       void loadDiffForSelectionQuiet(selection);
     },
-    [selectedPath, viewingCommit],
+    [selectedPath, viewingCommit, diffSelection],
   );
 
   async function captureReturnTarget(path = selectedPath): Promise<{
@@ -1330,7 +1355,10 @@ function App() {
     if (!selectedPath || files.length === 0) return;
 
     const toggledPaths = new Set(files);
-    if (anchor) applyEarlyToggleSelection(toggledPaths);
+    const selectionAlreadyUpdated = anchor?.remainingSelection !== undefined;
+    if (selectionAlreadyUpdated) {
+      focusAfterToggle(toggledPaths, anchor.remainingSelection ?? []);
+    }
 
     setLoading(true);
     setError("");
@@ -1354,7 +1382,7 @@ function App() {
     if (!changes) return;
 
     if (anchor) {
-      await resolveSelectionAfterToggle(files, changes, anchor);
+      await resolveSelectionAfterToggle(files, changes, anchor, selectionAlreadyUpdated);
       return;
     }
 
@@ -1370,7 +1398,10 @@ function App() {
     if (!selectedPath || files.length === 0) return;
 
     const toggledPaths = new Set(files);
-    if (anchor) applyEarlyToggleSelection(toggledPaths);
+    const selectionAlreadyUpdated = anchor?.remainingSelection !== undefined;
+    if (selectionAlreadyUpdated) {
+      focusAfterToggle(toggledPaths, anchor.remainingSelection ?? []);
+    }
 
     setLoading(true);
     setError("");
@@ -1394,7 +1425,7 @@ function App() {
     if (!changes) return;
 
     if (anchor) {
-      await resolveSelectionAfterToggle(files, changes, anchor);
+      await resolveSelectionAfterToggle(files, changes, anchor, selectionAlreadyUpdated);
       return;
     }
 

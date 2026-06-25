@@ -95,9 +95,15 @@ export type ChangeSummary = {
 
 export type ChangeSection = "unstaged" | "staged" | "commit";
 
+export type ChangeSelectionEntry = {
+  file: FileChange;
+  section: ChangeSection;
+};
+
 export type SelectionAnchor = {
   section: ChangeSection;
   index: number;
+  remainingSelection?: ChangeSelectionEntry[];
 };
 
 export type DiffFocus =

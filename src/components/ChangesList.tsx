@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { ChangeSection, FileChange, SelectionAnchor } from "../types";
+import type { ChangeSection, ChangeSelectionEntry, FileChange, SelectionAnchor } from "../types";
 import {
   buildChangeEntries,
   moveChangeSelection,
@@ -11,13 +11,10 @@ import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FilePathLabel } from "./FilePathLabel";
 
+export type { ChangeSelectionEntry } from "../types";
+
 export type ChangesListHandle = {
   focus: () => void;
-};
-
-export type ChangeSelectionEntry = {
-  file: FileChange;
-  section: ChangeSection;
 };
 
 type ChangesListProps = {
@@ -36,10 +33,6 @@ type ChangesListProps = {
   onExitToTimeline?: () => void;
   disabled?: boolean;
 };
-
-function entryPathFromKey(key: string) {
-  return key.slice(key.indexOf(":") + 1);
-}
 
 function remapSelectedKeys(current: Set<string>, entries: ChangeEntry[]): Set<string> {
   const validKeys = new Set(entries.map((entry) => entry.key));
@@ -60,6 +53,10 @@ function selectionToKeys(
     if (exact) keys.add(exact.key);
   }
   return keys;
+}
+
+function setsEqual(a: Set<string>, b: Set<string>) {
+  return a.size === b.size && [...a].every((key) => b.has(key));
 }
 
 function statusClass(status: string) {
@@ -90,7 +87,8 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const selectionAnchorRef = useRef(-1);
   const isCommitView = variant === "commit";
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const isManaged = !isCommitView && managedSelection !== undefined;
+  const [localSelectedKeys, setLocalSelectedKeys] = useState<Set<string>>(() => new Set());
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -122,6 +120,34 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     [changes, isCommitView],
   );
 
+  const managedKeys = useMemo(() => {
+    if (!isManaged) return null;
+    return selectionToKeys(managedSelection ?? [], entries);
+  }, [isManaged, managedSelection, entries]);
+
+  const selectedKeys = isManaged ? (managedKeys ?? new Set<string>()) : localSelectedKeys;
+
+  const applySelectedKeys = useCallback(
+    (updater: Set<string> | ((current: Set<string>) => Set<string>)) => {
+      const resolve = (current: Set<string>) =>
+        typeof updater === "function" ? updater(current) : updater;
+
+      if (isManaged) {
+        const current = managedKeys ?? new Set<string>();
+        const next = resolve(current);
+        if (setsEqual(next, current)) return;
+        const selection = entries
+          .filter((entry) => next.has(entry.key))
+          .map((entry) => ({ file: entry.file, section: entry.section }));
+        onSelectionChange?.(selection);
+        return;
+      }
+
+      setLocalSelectedKeys((current) => resolve(current));
+    },
+    [isManaged, managedKeys, entries, onSelectionChange],
+  );
+
   useImperativeHandle(ref, () => ({
     focus: () => listRef.current?.focus(),
   }));
@@ -129,48 +155,9 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   const activeIndex = selectedKey ? entries.findIndex((entry) => entry.key === selectedKey) : -1;
 
   useEffect(() => {
-    setSelectedKeys((current) => remapSelectedKeys(current, entries));
-  }, [entries]);
-
-  useEffect(() => {
-    if (!managedSelection || managedSelection.length === 0 || isCommitView) return;
-    const keys = selectionToKeys(managedSelection, entries);
-    if (keys.size === 0) return;
-    setSelectedKeys((current) => {
-      if (current.size === keys.size && [...current].every((key) => keys.has(key))) {
-        return current;
-      }
-      return keys;
-    });
-  }, [managedSelection, entries, isCommitView]);
-
-  useEffect(() => {
-    if (!selectedKey) return;
-    setSelectedKeys((current) => {
-      if (current.has(selectedKey) && current.size > 1) return current;
-      if (current.size === 1 && current.has(selectedKey)) return current;
-
-      const validKeys = new Set(entries.map((entry) => entry.key));
-      if (validKeys.has(selectedKey)) {
-        return current.size === 0 ? new Set([selectedKey]) : current;
-      }
-
-      const path = entryPathFromKey(selectedKey);
-      const section = selectedKey.slice(0, selectedKey.indexOf(":"));
-      const matches = entries.filter((entry) => entry.file.path === path);
-      const preferred = matches.find((entry) => entry.section === section) ?? matches[0];
-      if (preferred) return new Set([preferred.key]);
-      return current;
-    });
-  }, [selectedKey, entries]);
-
-  useEffect(() => {
-    if (isCommitView || !onSelectionChange) return;
-    const selection = entries
-      .filter((entry) => selectedKeys.has(entry.key))
-      .map((entry) => ({ file: entry.file, section: entry.section }));
-    onSelectionChange(selection);
-  }, [selectedKeys, entries, isCommitView, onSelectionChange]);
+    if (isManaged) return;
+    setLocalSelectedKeys((current) => remapSelectedKeys(current, entries));
+  }, [entries, isManaged]);
 
   useEffect(() => {
     if (activeIndex < 0) return;
@@ -179,7 +166,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   }, [activeIndex, entries]);
 
   function syncSingleSelection(entry: ChangeEntry) {
-    setSelectedKeys(new Set([entry.key]));
+    applySelectedKeys(new Set([entry.key]));
     selectionAnchorRef.current = entries.findIndex((item) => item.key === entry.key);
   }
 
@@ -199,7 +186,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
 
     if (event.metaKey || event.ctrlKey) {
       event.preventDefault();
-      setSelectedKeys((current) => {
+      applySelectedKeys((current) => {
         const next = new Set(current.size > 0 ? current : selectedKey ? [selectedKey] : []);
         if (next.has(entry.key)) next.delete(entry.key);
         else next.add(entry.key);
@@ -214,7 +201,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     if (event.shiftKey && selectionAnchorRef.current >= 0) {
       event.preventDefault();
       const keys = rangeSelectKeys(entries, selectionAnchorRef.current, index);
-      setSelectedKeys(new Set(keys));
+      applySelectedKeys(new Set(keys));
       onSelect(entry.file, entry.section);
       return;
     }
@@ -237,16 +224,28 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
 
   function toggleStage(entry: ChangeEntry, anchor?: SelectionAnchor) {
     if (disabled || isCommitView) return;
-    setSelectedKeys((current) => {
+
+    const remaining = entries
+      .filter((item) => selectedKeys.has(item.key) && item.key !== entry.key)
+      .map((item) => ({ file: item.file, section: item.section }));
+
+    applySelectedKeys((current) => {
       if (!current.has(entry.key)) return current;
       const next = new Set(current);
       next.delete(entry.key);
       return next;
     });
+
+    const toggleAnchor: SelectionAnchor = {
+      section: entry.section,
+      index: anchor?.index ?? indexInSection(entry),
+      remainingSelection: remaining,
+    };
+
     if (entry.section === "unstaged") {
-      onStage([entry.file.path], anchor);
+      onStage([entry.file.path], toggleAnchor);
     } else {
-      onUnstage([entry.file.path], anchor);
+      onUnstage([entry.file.path], toggleAnchor);
     }
   }
 
