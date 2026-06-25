@@ -15,12 +15,18 @@ export type ChangesListHandle = {
   focus: () => void;
 };
 
+export type ChangeSelectionEntry = {
+  file: FileChange;
+  section: ChangeSection;
+};
+
 type ChangesListProps = {
   changes: FileChange[];
   repoPath?: string;
   selectedKey?: string;
   variant?: "working" | "commit";
   onSelect: (file: FileChange, section: ChangeSection) => void;
+  onSelectionChange?: (selection: ChangeSelectionEntry[]) => void;
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
   onRequestDiscard?: (paths: string[]) => void;
@@ -42,6 +48,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     selectedKey,
     variant = "working",
     onSelect,
+    onSelectionChange,
     onStage,
     onUnstage,
     onRequestDiscard,
@@ -101,6 +108,23 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
       return next.size === current.size ? current : next;
     });
   }, [entries]);
+
+  useEffect(() => {
+    if (!selectedKey) return;
+    setSelectedKeys((current) => {
+      if (current.has(selectedKey) && current.size > 1) return current;
+      if (current.size === 1 && current.has(selectedKey)) return current;
+      return new Set([selectedKey]);
+    });
+  }, [selectedKey]);
+
+  useEffect(() => {
+    if (isCommitView || !onSelectionChange) return;
+    const selection = entries
+      .filter((entry) => selectedKeys.has(entry.key))
+      .map((entry) => ({ file: entry.file, section: entry.section }));
+    onSelectionChange(selection);
+  }, [selectedKeys, entries, isCommitView, onSelectionChange]);
 
   useEffect(() => {
     if (activeIndex < 0) return;

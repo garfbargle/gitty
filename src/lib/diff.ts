@@ -136,10 +136,75 @@ function finalizeStats(file: DiffFile) {
   file.stats = { additions, deletions };
 }
 
-export function displayPath(file: DiffFile) {
-  const clean = (path: string) => path.replace(/^a\//, "").replace(/^b\//, "");
-  if (file.newPath && file.newPath !== "/dev/null") {
-    return clean(file.newPath);
+export type DiffHunkScope = "staged" | "unstaged";
+
+export type ScopedDiffHunk = {
+  hunk: DiffHunk;
+  scope: DiffHunkScope;
+  file: DiffFile;
+};
+
+export type DiffFileBundle = {
+  path: string;
+  file: DiffFile;
+  hunks: ScopedDiffHunk[];
+};
+
+function cleanDiffPath(path: string) {
+  return path.replace(/^a\//, "").replace(/^b\//, "");
+}
+
+export function buildDiffBundles(stagedRaw: string, unstagedRaw: string): DiffFileBundle[] {
+  const bundles = new Map<string, DiffFileBundle>();
+
+  const addParts = (raw: string, scope: DiffHunkScope) => {
+    for (const file of parseUnifiedDiff(raw)) {
+      const path = displayPath(file);
+      const hunks = file.hunks.filter((hunk) => hunk.lines.some((line) => line.kind !== "meta"));
+      if (hunks.length === 0) continue;
+
+      const existing = bundles.get(path);
+      const scoped = hunks.map((hunk) => ({ hunk, scope, file }));
+      if (existing) {
+        existing.hunks.push(...scoped);
+        continue;
+      }
+      bundles.set(path, { path, file, hunks: scoped });
+    }
+  };
+
+  addParts(stagedRaw, "staged");
+  addParts(unstagedRaw, "unstaged");
+  return [...bundles.values()];
+}
+
+export function serializeHunkPatch(file: DiffFile, hunk: DiffHunk): string {
+  const oldPath = cleanDiffPath(file.oldPath);
+  const newPath = cleanDiffPath(file.newPath);
+  const display = displayPath(file);
+  const leftPath = oldPath || display;
+  const rightPath = newPath || display;
+
+  const lines = [`diff --git a/${display} b/${display}`];
+  if (file.isNew) lines.push("new file mode 100644");
+  if (file.isDeleted) lines.push("deleted file mode 100644");
+  lines.push(file.isNew ? "--- /dev/null" : `--- a/${leftPath}`);
+  lines.push(file.isDeleted ? "+++ /dev/null" : `+++ b/${rightPath}`);
+  lines.push(hunk.header);
+
+  for (const line of hunk.lines) {
+    if (line.kind === "add") lines.push(`+${line.text}`);
+    else if (line.kind === "remove") lines.push(`-${line.text}`);
+    else if (line.kind === "context") lines.push(` ${line.text}`);
+    else if (line.kind === "meta" && line.text.startsWith("\\")) lines.push(line.text);
   }
-  return clean(file.oldPath);
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function displayPath(file: DiffFile) {
+  if (file.newPath && file.newPath !== "/dev/null") {
+    return cleanDiffPath(file.newPath);
+  }
+  return cleanDiffPath(file.oldPath);
 }

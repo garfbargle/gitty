@@ -1,22 +1,39 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronLeft, ChevronRight, MoreHorizontal } from "lucide-react";
-import { displayPath, parseUnifiedDiff, type DiffFile } from "../lib/diff";
+import { MoreHorizontal } from "lucide-react";
+import {
+  displayPath,
+  parseUnifiedDiff,
+  serializeHunkPatch,
+  type DiffFileBundle,
+  type DiffHunkScope,
+  type ScopedDiffHunk,
+} from "../lib/diff";
 import { type FileImagePreview, isImagePath } from "../lib/images";
 import { tokenizeLine } from "../lib/syntax";
 import type { ChangeSection, FileChange } from "../types";
 import { isStaged as isFileStaged } from "../lib/git";
 import { FilePathLabel } from "./FilePathLabel";
 
+export type DiffSelectionEntry = {
+  file: FileChange;
+  section: ChangeSection;
+};
+
 type DiffViewerProps = {
   raw: string;
+  diffBundles?: DiffFileBundle[];
   file?: FileChange | null;
+  selection?: DiffSelectionEntry[];
   repoPath?: string;
   section?: ChangeSection;
   commit?: string;
   showWorkingTreeBadges?: boolean;
   emptyMessage?: string;
+  disabled?: boolean;
   onUnstage?: (path: string) => void;
+  onStageHunk?: (filePath: string, patch: string) => void;
+  onUnstageHunk?: (filePath: string, patch: string) => void;
 };
 
 function HighlightedLine({ text }: { text: string }) {
@@ -36,36 +53,119 @@ function HighlightedLine({ text }: { text: string }) {
   );
 }
 
-export function DiffViewer({
-  raw,
-  file,
-  repoPath,
+function DiffHunkView({
+  scopedHunk,
+  filePath,
+  showActions,
+  disabled,
+  onStageHunk,
+  onUnstageHunk,
+}: {
+  scopedHunk: ScopedDiffHunk;
+  filePath: string;
+  showActions?: boolean;
+  disabled?: boolean;
+  onStageHunk?: (filePath: string, patch: string) => void;
+  onUnstageHunk?: (filePath: string, patch: string) => void;
+}) {
+  const { hunk, scope, file } = scopedHunk;
+  const canStage = showActions && scope === "unstaged" && onStageHunk;
+  const canUnstage = showActions && scope === "staged" && onUnstageHunk;
+
+  function applyHunkAction() {
+    const patch = serializeHunkPatch(file, hunk);
+    if (scope === "unstaged") onStageHunk?.(filePath, patch);
+    else onUnstageHunk?.(filePath, patch);
+  }
+
+  return (
+    <div className="diff-hunk-view">
+      {hunk.header ? (
+        <div className="diff-hunk-header">
+          <span className="diff-hunk-header-main">
+            <code>{hunk.header}</code>
+            {showActions ? (
+              <span className={`diff-hunk-scope ${scope}`}>
+                {scope === "staged" ? "Staged" : "Unstaged"}
+              </span>
+            ) : null}
+          </span>
+          {canStage ? (
+            <button
+              type="button"
+              className="ghost-btn sm diff-hunk-action"
+              disabled={disabled}
+              onClick={applyHunkAction}
+            >
+              Stage hunk
+            </button>
+          ) : null}
+          {canUnstage ? (
+            <button
+              type="button"
+              className="ghost-btn sm diff-hunk-action"
+              disabled={disabled}
+              onClick={applyHunkAction}
+            >
+              Unstage hunk
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="diff-lines">
+        {hunk.lines.map((line, lineIndex) => (
+          <div className={`diff-line ${line.kind}`} key={`${line.kind}-${lineIndex}`}>
+            <span className="diff-gutter old">{line.kind === "add" ? "" : (line.oldLine ?? "")}</span>
+            <span className="diff-gutter new">{line.kind === "remove" ? "" : (line.newLine ?? "")}</span>
+            <span className="diff-sign">
+              {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
+            </span>
+            {line.kind === "context" || line.kind === "add" || line.kind === "remove" ? (
+              <HighlightedLine text={line.text || " "} />
+            ) : (
+              <code className="diff-text meta">{line.text}</code>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DiffFileSection({
+  bundle,
+  fileChange,
   section,
+  repoPath,
   commit,
-  showWorkingTreeBadges = true,
-  emptyMessage,
+  showWorkingTreeBadges,
+  showHunkActions,
+  disabled,
   onUnstage,
-}: DiffViewerProps) {
-  const files = useMemo(() => parseUnifiedDiff(raw), [raw]);
-  const [hunkIndex, setHunkIndex] = useState(0);
+  onStageHunk,
+  onUnstageHunk,
+}: {
+  bundle: DiffFileBundle;
+  fileChange?: FileChange;
+  section?: ChangeSection;
+  repoPath?: string;
+  commit?: string;
+  showWorkingTreeBadges?: boolean;
+  showHunkActions?: boolean;
+  disabled?: boolean;
+  onUnstage?: (path: string) => void;
+  onStageHunk?: (filePath: string, patch: string) => void;
+  onUnstageHunk?: (filePath: string, patch: string) => void;
+}) {
   const [imagePreview, setImagePreview] = useState<FileImagePreview | null>(null);
   const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
   const [imagePreviewError, setImagePreviewError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setHunkIndex(0);
-  }, [raw]);
-
-  const activeFile: DiffFile | undefined = files[0];
-  const hunks = activeFile?.hunks.filter((h) => h.lines.some((l) => l.kind !== "meta")) ?? [];
-  const currentHunk = hunks[hunkIndex] ?? hunks[0];
-  const filePath = file?.path ?? (activeFile ? displayPath(activeFile) : "");
-  const staged = file ? isFileStaged(file) : false;
+  const diffFile = bundle.file;
+  const filePath = bundle.path;
+  const staged = fileChange ? isFileStaged(fileChange) : false;
   const showImagePreview =
-    !!repoPath &&
-    !!filePath &&
-    !!activeFile?.isBinary &&
-    isImagePath(filePath);
+    !!repoPath && !!filePath && diffFile.isBinary && isImagePath(filePath);
 
   useEffect(() => {
     if (!showImagePreview) {
@@ -109,9 +209,126 @@ export function DiffViewer({
     };
   }, [showImagePreview, repoPath, filePath, commit, section]);
 
-  if (!raw.trim() || !activeFile) {
+  return (
+    <section className="diff-file-section">
+      <header className="diff-file-header">
+        <FilePathLabel path={filePath} className="diff-path" />
+        {showWorkingTreeBadges && fileChange ? (
+          staged ? (
+            <span className="badge staged">Staged</span>
+          ) : (
+            <span className="badge unstaged">Unstaged</span>
+          )
+        ) : null}
+        {showWorkingTreeBadges && staged && onUnstage && fileChange ? (
+          <button type="button" className="ghost-btn sm" onClick={() => onUnstage(fileChange.path)}>
+            Unstage
+          </button>
+        ) : null}
+      </header>
+
+      {diffFile.isBinary ? (
+        showImagePreview ? (
+          imagePreviewLoading ? (
+            <div className="diff-empty inline">Loading image preview…</div>
+          ) : imagePreview ? (
+            <div className="image-diff-preview">
+              {imagePreview.oldDataUrl ? (
+                <figure className="image-diff-pane">
+                  <figcaption>Previous</figcaption>
+                  <img src={imagePreview.oldDataUrl} alt="Previous version" />
+                </figure>
+              ) : null}
+              {imagePreview.newDataUrl ? (
+                <figure className="image-diff-pane">
+                  <figcaption>Current</figcaption>
+                  <img src={imagePreview.newDataUrl} alt="Current version" />
+                </figure>
+              ) : null}
+            </div>
+          ) : (
+            <div className="diff-empty inline">
+              {imagePreviewError ?? "Binary file — no text diff available."}
+            </div>
+          )
+        ) : (
+          <div className="diff-empty inline">Binary file — no text diff available.</div>
+        )
+      ) : bundle.hunks.length === 0 ? (
+        <div className="diff-empty inline">No diff hunks for this file.</div>
+      ) : (
+        bundle.hunks.map((scopedHunk, index) => (
+          <DiffHunkView
+            scopedHunk={scopedHunk}
+            filePath={filePath}
+            showActions={showHunkActions}
+            disabled={disabled}
+            onStageHunk={onStageHunk}
+            onUnstageHunk={onUnstageHunk}
+            key={`${scopedHunk.scope}-${scopedHunk.hunk.header}-${index}`}
+          />
+        ))
+      )}
+    </section>
+  );
+}
+
+function bundlesFromRaw(raw: string): DiffFileBundle[] {
+  return parseUnifiedDiff(raw).map((file) => ({
+    path: displayPath(file),
+    file,
+    hunks: file.hunks
+      .filter((hunk) => hunk.lines.some((line) => line.kind !== "meta"))
+      .map((hunk) => ({ hunk, scope: "unstaged" as DiffHunkScope, file })),
+  }));
+}
+
+export function DiffViewer({
+  raw,
+  diffBundles,
+  file,
+  selection = [],
+  repoPath,
+  section,
+  commit,
+  showWorkingTreeBadges = true,
+  emptyMessage,
+  disabled,
+  onUnstage,
+  onStageHunk,
+  onUnstageHunk,
+}: DiffViewerProps) {
+  const bundles = useMemo(
+    () => diffBundles ?? (raw.trim() ? bundlesFromRaw(raw) : []),
+    [diffBundles, raw],
+  );
+  const showHunkActions =
+    showWorkingTreeBadges && !commit && !!(onStageHunk || onUnstageHunk);
+
+  const metaByPath = useMemo(() => {
+    const map = new Map<string, DiffSelectionEntry>();
+    for (const entry of selection) {
+      if (!map.has(entry.file.path)) {
+        map.set(entry.file.path, entry);
+      }
+    }
+    if (file && section) {
+      map.set(file.path, { file, section });
+    }
+    return map;
+  }, [file, section, selection]);
+
+  const uniqueSelectionCount = useMemo(() => {
+    const paths = new Set(selection.map((entry) => entry.file.path));
+    if (file) paths.add(file.path);
+    return paths.size;
+  }, [file, selection]);
+
+  const multiFile = uniqueSelectionCount > 1 || bundles.length > 1;
+
+  if (bundles.length === 0) {
     const message =
-      raw.trim() && !activeFile
+      raw.trim() && !diffBundles
         ? raw.trim()
         : (emptyMessage ?? "Select a file to view its diff.");
     return (
@@ -121,21 +338,29 @@ export function DiffViewer({
     );
   }
 
+  const primaryPath = file?.path ?? bundles[0]?.path ?? "";
+
   return (
     <section className="diff-panel-center">
       <header className="diff-toolbar">
         <div className="diff-toolbar-left">
-          <FilePathLabel path={filePath} className="diff-path" />
-          {showWorkingTreeBadges && file ? (
-            staged ? (
-              <span className="badge staged">Staged</span>
-            ) : (
-              <span className="badge unstaged">Unstaged</span>
-            )
-          ) : null}
+          {multiFile ? (
+            <span className="diff-selection-label">{uniqueSelectionCount} files selected</span>
+          ) : (
+            <>
+              <FilePathLabel path={primaryPath} className="diff-path" />
+              {showWorkingTreeBadges && file ? (
+                isFileStaged(file) ? (
+                  <span className="badge staged">Staged</span>
+                ) : (
+                  <span className="badge unstaged">Unstaged</span>
+                )
+              ) : null}
+            </>
+          )}
         </div>
         <div className="diff-toolbar-right">
-          {showWorkingTreeBadges && staged && onUnstage && file ? (
+          {!multiFile && showWorkingTreeBadges && file && isFileStaged(file) && onUnstage ? (
             <button type="button" className="ghost-btn sm" onClick={() => onUnstage(file.path)}>
               Unstage File
             </button>
@@ -147,90 +372,26 @@ export function DiffViewer({
       </header>
 
       <div className="diff-scroll">
-        {activeFile.isBinary ? (
-          showImagePreview ? (
-            imagePreviewLoading ? (
-              <div className="diff-empty">Loading image preview…</div>
-            ) : imagePreview ? (
-              <div className="image-diff-preview">
-                {imagePreview.oldDataUrl ? (
-                  <figure className="image-diff-pane">
-                    <figcaption>Previous</figcaption>
-                    <img src={imagePreview.oldDataUrl} alt="Previous version" />
-                  </figure>
-                ) : null}
-                {imagePreview.newDataUrl ? (
-                  <figure className="image-diff-pane">
-                    <figcaption>Current</figcaption>
-                    <img src={imagePreview.newDataUrl} alt="Current version" />
-                  </figure>
-                ) : null}
-              </div>
-            ) : (
-              <div className="diff-empty">
-                {imagePreviewError ?? "Binary file — no text diff available."}
-              </div>
-            )
-          ) : (
-            <div className="diff-empty">Binary file — no text diff available.</div>
-          )
-        ) : (
-          <div className="diff-hunk-view">
-            {currentHunk?.header ? (
-              <div className="diff-hunk-header">{currentHunk.header}</div>
-            ) : null}
-            <div className="diff-lines">
-              {(currentHunk?.lines ?? []).map((line, lineIndex) => (
-                <div className={`diff-line ${line.kind}`} key={`${line.kind}-${lineIndex}`}>
-                  <span className="diff-gutter old">
-                    {line.kind === "add" ? "" : line.oldLine ?? ""}
-                  </span>
-                  <span className="diff-gutter new">
-                    {line.kind === "remove" ? "" : line.newLine ?? ""}
-                  </span>
-                  <span className="diff-sign">
-                    {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
-                  </span>
-                  {line.kind === "context" || line.kind === "add" || line.kind === "remove" ? (
-                    <HighlightedLine text={line.text || " "} />
-                  ) : (
-                    <code className="diff-text meta">{line.text}</code>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {bundles.map((bundle) => {
+          const meta = metaByPath.get(bundle.path);
+          return (
+            <DiffFileSection
+              bundle={bundle}
+              fileChange={meta?.file}
+              section={meta?.section ?? section}
+              repoPath={repoPath}
+              commit={commit}
+              showWorkingTreeBadges={showWorkingTreeBadges}
+              showHunkActions={showHunkActions}
+              disabled={disabled}
+              onUnstage={onUnstage}
+              onStageHunk={onStageHunk}
+              onUnstageHunk={onUnstageHunk}
+              key={bundle.path}
+            />
+          );
+        })}
       </div>
-
-      <footer className="diff-footer">
-        <button type="button" className="ghost-btn sm" disabled>
-          Stage Hunk
-        </button>
-        <button type="button" className="ghost-btn sm" disabled>
-          Discard Hunk
-        </button>
-        <div className="diff-nav">
-          <button
-            type="button"
-            className="ghost-btn sm"
-            disabled={hunkIndex <= 0}
-            onClick={() => setHunkIndex((i) => Math.max(0, i - 1))}
-          >
-            <ChevronLeft size={16} />
-            Previous
-          </button>
-          <button
-            type="button"
-            className="ghost-btn sm"
-            disabled={hunkIndex >= hunks.length - 1}
-            onClick={() => setHunkIndex((i) => Math.min(hunks.length - 1, i + 1))}
-          >
-            Next
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      </footer>
     </section>
   );
 }

@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -1157,6 +1158,155 @@ fn file_image_preview(
     })
 }
 
+fn git_apply_cached(repo_path: &Path, patch: &str, reverse: bool) -> Result<String, String> {
+    let mut args = vec![
+        "apply".to_string(),
+        "--cached".to_string(),
+        "--whitespace=nowarn".to_string(),
+    ];
+    if reverse {
+        args.push("--reverse".to_string());
+    }
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .spawn()
+        .map_err(|err| format!("Could not run git apply: {err}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|err| format!("Could not write patch to git apply: {err}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("Could not finish git apply: {err}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .trim_end()
+        .to_string();
+
+    if output.status.success() {
+        Ok(stdout)
+    } else {
+        let detail = [stderr, stdout]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Err(if detail.is_empty() {
+            "git apply failed.".to_string()
+        } else {
+            detail
+        })
+    }
+}
+
+fn file_diff_parts_blocking(path: String, file_path: String) -> Result<FileDiffParts, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let staged = git_owned(
+        repo_path,
+        vec![
+            "--no-pager".to_string(),
+            "diff".to_string(),
+            "--cached".to_string(),
+            "--color=never".to_string(),
+            "--".to_string(),
+            file_path.clone(),
+        ],
+    )?;
+    let unstaged = git_owned(
+        repo_path,
+        vec![
+            "--no-pager".to_string(),
+            "diff".to_string(),
+            "--color=never".to_string(),
+            "--".to_string(),
+            file_path.clone(),
+        ],
+    )?;
+
+    let mut unstaged = unstaged;
+    if staged.trim().is_empty() && unstaged.trim().is_empty() {
+        if let Some(untracked) = untracked_file_diff(repo_path, &file_path)? {
+            unstaged = untracked;
+        }
+    }
+
+    Ok(FileDiffParts { staged, unstaged })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDiffParts {
+    staged: String,
+    unstaged: String,
+}
+
+#[tauri::command]
+async fn file_diff_parts(path: String, file_path: String) -> Result<FileDiffParts, String> {
+    tauri::async_runtime::spawn_blocking(move || file_diff_parts_blocking(path, file_path))
+        .await
+        .map_err(|err| format!("Diff task failed: {err}"))?
+}
+
+#[tauri::command]
+fn stage_hunk(path: String, file_path: String, patch: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("File path is required.".to_string());
+    }
+    if patch.trim().is_empty() {
+        return Err("Patch is required.".to_string());
+    }
+
+    if changed_files(repo_path)
+        .iter()
+        .any(|change| change.path == file_path && change.status.starts_with('?'))
+    {
+        git(repo_path, &["add", "-N", &file_path])?;
+    }
+
+    let output = git_apply_cached(repo_path, &patch, false)?;
+    Ok(ActionResult {
+        message: "Hunk staged.".to_string(),
+        output,
+    })
+}
+
+#[tauri::command]
+fn unstage_hunk(path: String, file_path: String, patch: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("File path is required.".to_string());
+    }
+    if patch.trim().is_empty() {
+        return Err("Patch is required.".to_string());
+    }
+
+    let output = git_apply_cached(repo_path, &patch, true)?;
+    Ok(ActionResult {
+        message: "Hunk unstaged.".to_string(),
+        output,
+    })
+}
+
 fn file_diff_blocking(path: String, file_path: String, commit: Option<String>) -> Result<String, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -1743,6 +1893,9 @@ pub fn run() {
             commit_files_command,
             commit_diff,
             file_diff,
+            file_diff_parts,
+            stage_hunk,
+            unstage_hunk,
             file_image_preview,
             checkout_branch,
             merge_branch,

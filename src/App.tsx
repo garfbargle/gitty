@@ -4,9 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
-import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
+import { ChangesList, type ChangesListHandle, type ChangeSelectionEntry } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
 import { DiffViewer } from "./components/DiffViewer";
+import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
 import { HistoryTable } from "./components/HistoryTable";
 import { HistoryTimeline } from "./components/HistoryTimeline";
 import { SplitPane, type SplitOrientation } from "./components/SplitPane";
@@ -171,6 +172,14 @@ function App() {
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
+  const [diffBundles, setDiffBundles] = useState<DiffFileBundle[]>([]);
+  const [diffSelection, setDiffSelection] = useState<ChangeSelectionEntry[]>([]);
+
+  useEffect(() => {
+    if (diff === emptyDiff) {
+      setDiffBundles([]);
+    }
+  }, [diff]);
   const [commitMessage, setCommitMessage] = useState("");
   const [amend, setAmend] = useState(false);
   const [pushOnCommit, setPushOnCommit] = useState(false);
@@ -863,27 +872,97 @@ function App() {
     }
   }
 
-  async function inspectFile(file: FileChange, section: ChangeSection, path = selectedPath) {
+  async function loadDiffForSelectionQuiet(
+    selection: ChangeSelectionEntry[],
+    path = selectedPath,
+  ) {
+    const seen = new Set<string>();
+    const entries = selection.filter((entry) => {
+      if (seen.has(entry.file.path)) return false;
+      seen.add(entry.file.path);
+      return true;
+    });
+
+    setDiffSelection(selection);
+
+    if (!path || entries.length === 0) {
+      setDiff(emptyDiff);
+      setDiffBundles([]);
+      return;
+    }
+
+    try {
+      const parts = await Promise.all(
+        entries.map((entry) =>
+          invoke<{ staged: string; unstaged: string }>("file_diff_parts", {
+            path,
+            filePath: entry.file.path,
+          }),
+        ),
+      );
+      const bundles = parts.flatMap((part) => buildDiffBundles(part.staged, part.unstaged));
+      setDiffBundles(bundles);
+      const combined = parts
+        .flatMap((part) => [part.staged, part.unstaged])
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      if (entries.length === 1) {
+        setDiff(combined || "This file has no tracked diff.");
+      } else {
+        setDiff(combined || "No diff available for selected files.");
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function reloadWorkingDiff() {
+    if (diffSelection.length === 0) return;
+    await loadDiffForSelectionQuiet(diffSelection);
+    await refreshChangesQuiet();
+  }
+
+  async function stageHunk(filePath: string, patch: string) {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("stage_hunk", { path: selectedPath, filePath, patch }),
+    );
+    if (!result) return;
+    applyChangesOptimistic([filePath], true);
+    await reloadWorkingDiff();
+  }
+
+  async function unstageHunk(filePath: string, patch: string) {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("unstage_hunk", { path: selectedPath, filePath, patch }),
+    );
+    if (!result) return;
+    applyChangesOptimistic([filePath], false);
+    await reloadWorkingDiff();
+  }
+
+  async function inspectFile(file: FileChange, section: ChangeSection) {
     setViewingCommit(null);
     setCommitFiles([]);
     setFocus({ kind: "file", file, section });
-    const result = await run(() =>
-      invoke<string>("file_diff", { path, filePath: file.path }),
-    );
-    if (result !== null) setDiff(result || "This file has no tracked diff.");
   }
 
   async function inspectFileQuiet(file: FileChange, section: ChangeSection, path = selectedPath) {
     setViewingCommit(null);
     setCommitFiles([]);
     setFocus({ kind: "file", file, section });
-    try {
-      const result = await invoke<string>("file_diff", { path, filePath: file.path });
-      setDiff(result || "This file has no tracked diff.");
-    } catch (err) {
-      setError(String(err));
-    }
+    await loadDiffForSelectionQuiet([{ file, section }], path);
   }
+
+  const handleChangesSelectionChange = useCallback(
+    (selection: ChangeSelectionEntry[]) => {
+      if (viewingCommit) return;
+      void loadDiffForSelectionQuiet(selection);
+    },
+    [selectedPath, viewingCommit],
+  );
 
   async function captureReturnTarget(path = selectedPath): Promise<{
     returnBranch: string;
@@ -1898,6 +1977,9 @@ function App() {
                               void inspectFile(file, section);
                             }
                           }}
+                          onSelectionChange={
+                            workingTreeActive ? handleChangesSelectionChange : undefined
+                          }
                           onStage={(files, anchor) => void stageFiles(files, anchor)}
                           onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
                           onResetAll={
@@ -1914,7 +1996,9 @@ function App() {
                       secondary={
                         <DiffViewer
                           raw={diff}
+                          diffBundles={workingTreeActive ? diffBundles : undefined}
                           file={selectedFile}
+                          selection={workingTreeActive ? diffSelection : []}
                           repoPath={selectedPath}
                           section={focus?.kind === "file" ? focus.section : undefined}
                           commit={
@@ -1922,7 +2006,10 @@ function App() {
                           }
                           showWorkingTreeBadges={!viewingCommit}
                           emptyMessage={emptyDiff}
+                          disabled={loading}
                           onUnstage={(path) => void unstageFiles([path])}
+                          onStageHunk={(filePath, patch) => void stageHunk(filePath, patch)}
+                          onUnstageHunk={(filePath, patch) => void unstageHunk(filePath, patch)}
                         />
                       }
                     />
