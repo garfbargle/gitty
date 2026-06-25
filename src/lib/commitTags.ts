@@ -4,21 +4,25 @@ import { tagName, tagRefs } from "./git";
 
 export function buildCommitTagMenuItems(
   commit: CommitEntry,
-  handlers: {
+  handlers?: {
     onCreateTag: (commit: CommitEntry) => void;
     onDeleteTag: (commit: CommitEntry, name: string) => void;
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
-    { label: "Create tag…", onClick: () => handlers.onCreateTag(commit) },
+    { label: "Copy SHA", onClick: () => void navigator.clipboard.writeText(commit.hash) },
   ];
 
-  for (const ref of tagRefs(commit.refs)) {
-    const name = tagName(ref);
-    items.push({
-      label: `Delete tag "${name}"`,
-      onClick: () => handlers.onDeleteTag(commit, name),
-    });
+  if (handlers) {
+    items.push({ label: "Create tag…", onClick: () => handlers.onCreateTag(commit) });
+
+    for (const ref of tagRefs(commit.refs)) {
+      const name = tagName(ref);
+      items.push({
+        label: `Delete tag "${name}"`,
+        onClick: () => handlers.onDeleteTag(commit, name),
+      });
+    }
   }
 
   return items;

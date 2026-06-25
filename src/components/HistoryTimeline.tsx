@@ -215,16 +215,17 @@ export function HistoryTimeline({
   }
 
   function openTagContextMenu(event: React.MouseEvent, commit: CommitEntry) {
-    if (!tagActionsEnabled) return;
     event.preventDefault();
     event.stopPropagation();
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
-      items: buildCommitTagMenuItems(commit, {
-        onCreateTag: onCreateTag!,
-        onDeleteTag: onDeleteTag!,
-      }),
+      items: buildCommitTagMenuItems(
+        commit,
+        tagActionsEnabled
+          ? { onCreateTag: onCreateTag!, onDeleteTag: onDeleteTag! }
+          : undefined,
+      ),
     });
   }
 
