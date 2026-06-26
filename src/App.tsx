@@ -267,7 +267,21 @@ function App() {
     return [...local, ...remote];
   }, [snapshot]);
 
-  // Local branches that the current branch could be merged into.
+  // The project's integration branch (the trunk you ship into).
+  const integrationBranch = useMemo(() => {
+    const locals = (snapshot?.branches ?? [])
+      .filter((b) => !b.isRemote)
+      .map((b) => b.name);
+    if (locals.includes("main")) return "main";
+    if (locals.includes("master")) return "master";
+    return null;
+  }, [snapshot?.branches]);
+
+  // You're sitting on the trunk — there's nothing to "ship", so no merge strip.
+  const onIntegrationBranch =
+    !!snapshot && !!integrationBranch && snapshot.branch === integrationBranch;
+
+  // Local branches the current branch could be merged into (excludes itself).
   const mergeCandidates = useMemo(() => {
     const current = snapshot?.branch;
     return (snapshot?.branches ?? [])
@@ -275,17 +289,14 @@ function App() {
       .map((b) => b.name);
   }, [snapshot?.branches, snapshot?.branch]);
 
-  const defaultBaseBranch = useMemo(() => {
-    if (mergeCandidates.includes("main")) return "main";
-    if (mergeCandidates.includes("master")) return "master";
-    return mergeCandidates[0] ?? null;
-  }, [mergeCandidates]);
-
-  // The resolved merge target: the user's pick when still valid, else the default.
+  // The resolved merge target. Only offered when you're on a feature branch and
+  // a trunk exists; a saved pick is honored only when it's still a valid target.
+  // Sitting on the trunk itself never shows the strip, even with a stale pick.
   const baseBranch = useMemo(() => {
+    if (!integrationBranch || onIntegrationBranch) return null;
     if (mergeTarget && mergeCandidates.includes(mergeTarget)) return mergeTarget;
-    return defaultBaseBranch;
-  }, [mergeTarget, mergeCandidates, defaultBaseBranch]);
+    return integrationBranch;
+  }, [integrationBranch, onIntegrationBranch, mergeTarget, mergeCandidates]);
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
