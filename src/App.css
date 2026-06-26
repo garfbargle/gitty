@@ -3502,6 +3502,16 @@ button:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
+/* Nothing picked yet — keep the picker as small as its content. */
+.merge-strip.compact {
+  gap: 3px;
+  padding: 2px 5px;
+}
+
+.merge-strip.compact .merge-strip-select {
+  padding: 1px 15px 1px 2px;
+}
+
 .merge-strip-icon {
   color: var(--accent);
 }

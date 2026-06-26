@@ -196,7 +196,11 @@ export function TopBar({
             {showMergeStrip ? (
               <>
                 <ChevronRight size={14} className="merge-strip-arrow" />
-                <div className={`merge-strip${mergeActive ? " active" : ""}`}>
+                <div
+                  className={`merge-strip${mergeActive ? " active" : ""}${
+                    hasPair ? "" : " compact"
+                  }`}
+                >
                   <GitMerge size={13} className="merge-strip-icon" />
                   {(() => {
                     // The partner branch is the editable side; the current
@@ -215,7 +219,7 @@ export function TopBar({
                         >
                           {!mergePartner ? (
                             <option value="" disabled>
-                              Merge a branch…
+                              Merge…
                             </option>
                           ) : null}
                           {mergeCandidates.map((name) => (
@@ -344,22 +348,18 @@ export function TopBar({
               <GitMerge size={14} />
               {mergeConflictState === "conflicts" ? "Resolving" : "Merging"}
             </button>
-          ) : (
+          ) : hasPair ? (
             <button
               type="button"
               className="merge-action-btn"
-              title={
-                hasPair
-                  ? `Merge ${mergeSource} into ${mergeTargetName}`
-                  : "Choose a branch to merge"
-              }
-              disabled={loading || !hasPair}
+              title={`Merge ${mergeSource} into ${mergeTargetName}`}
+              disabled={loading}
               onClick={onOpenMerge}
             >
               <GitMerge size={14} />
               Merge
             </button>
-          )
+          ) : null
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
