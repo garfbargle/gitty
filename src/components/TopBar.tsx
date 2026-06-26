@@ -51,6 +51,8 @@ type TopBarProps = {
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   baseBranch?: string | null;
+  mergeTargets?: string[];
+  onMergeTargetChange?: (name: string) => void;
   mergeActive?: boolean;
   mergeDirection?: "ship" | "update";
   aheadOfBase?: number | null;
@@ -95,6 +97,8 @@ export function TopBar({
   sidebarVisible = true,
   onToggleSidebar,
   baseBranch,
+  mergeTargets = [],
+  onMergeTargetChange,
   mergeActive = false,
   mergeDirection = "ship",
   aheadOfBase,
@@ -187,7 +191,25 @@ export function TopBar({
                 <ChevronRight size={14} className="merge-strip-arrow" />
                 <div className={`merge-strip${mergeActive ? " active" : ""}`}>
                   <GitMerge size={13} className="merge-strip-icon" />
-                  <span className="merge-strip-base">{baseBranch}</span>
+                  {mergeTargets.length > 1 && onMergeTargetChange && !mergeActive ? (
+                    <span className="merge-strip-select-wrap">
+                      <select
+                        className="merge-strip-select"
+                        value={baseBranch ?? ""}
+                        title="Choose the branch to merge into"
+                        onChange={(event) => onMergeTargetChange(event.currentTarget.value)}
+                      >
+                        {mergeTargets.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={11} className="merge-strip-chevron" />
+                    </span>
+                  ) : (
+                    <span className="merge-strip-base">{baseBranch}</span>
+                  )}
                   {mergeConflictState === "checking" ? (
                     <span className="merge-chip neutral">checking…</span>
                   ) : (

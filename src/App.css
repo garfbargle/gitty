@@ -3510,6 +3510,41 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.merge-strip-select-wrap {
+  align-items: center;
+  display: inline-flex;
+  position: relative;
+}
+
+.merge-strip-select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  outline: none;
+  padding: 1px 16px 1px 4px;
+}
+
+.merge-strip-select:hover {
+  background: var(--bg-active);
+}
+
+.merge-strip-select:focus-visible {
+  outline: 2px solid var(--accent-soft);
+}
+
+.merge-strip-chevron {
+  color: var(--text-muted);
+  pointer-events: none;
+  position: absolute;
+  right: 3px;
+}
+
 .merge-chip {
   border-radius: 999px;
   font-size: 10px;

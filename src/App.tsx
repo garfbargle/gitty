@@ -180,6 +180,7 @@ function App() {
   const [visitCommitTarget, setVisitCommitTarget] = useState<CommitEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [mergeAnalysis, setMergeAnalysis] = useState<MergeAnalysis | null>(null);
   const [mergeAnalysisLoading, setMergeAnalysisLoading] = useState(false);
   const [mergeRunning, setMergeRunning] = useState(false);
@@ -266,14 +267,25 @@ function App() {
     return [...local, ...remote];
   }, [snapshot]);
 
-  const baseBranch = useMemo(() => {
-    const locals = (snapshot?.branches ?? [])
-      .filter((b) => !b.isRemote)
+  // Local branches that the current branch could be merged into.
+  const mergeCandidates = useMemo(() => {
+    const current = snapshot?.branch;
+    return (snapshot?.branches ?? [])
+      .filter((b) => !b.isRemote && b.name !== current && !b.name.includes("detached"))
       .map((b) => b.name);
-    if (locals.includes("main")) return "main";
-    if (locals.includes("master")) return "master";
-    return null;
-  }, [snapshot?.branches]);
+  }, [snapshot?.branches, snapshot?.branch]);
+
+  const defaultBaseBranch = useMemo(() => {
+    if (mergeCandidates.includes("main")) return "main";
+    if (mergeCandidates.includes("master")) return "master";
+    return mergeCandidates[0] ?? null;
+  }, [mergeCandidates]);
+
+  // The resolved merge target: the user's pick when still valid, else the default.
+  const baseBranch = useMemo(() => {
+    if (mergeTarget && mergeCandidates.includes(mergeTarget)) return mergeTarget;
+    return defaultBaseBranch;
+  }, [mergeTarget, mergeCandidates, defaultBaseBranch]);
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
@@ -608,6 +620,7 @@ function App() {
     setNavZone("files");
     setRepoSettingsOpen(false);
     setMergeSession(null);
+    setMergeTarget(null);
     setMergeAnalysis(null);
     mergeAnalysisKeyRef.current = "";
     setConflictFiles([]);
@@ -2444,6 +2457,13 @@ function App() {
               onForcePush={() => push(true)}
               onSetupRemote={() => openRepoSettings()}
               baseBranch={baseBranch}
+              mergeTargets={mergeCandidates}
+              onMergeTargetChange={(name) => {
+                setMergeTarget(name);
+                if (mergeSession && mergeSession.phase === "preview") {
+                  closeMerge();
+                }
+              }}
               mergeActive={!!mergeSession}
               mergeDirection={mergeSession?.direction ?? "ship"}
               aheadOfBase={aheadOfBase}
