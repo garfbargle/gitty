@@ -99,6 +99,69 @@ struct ActionResult {
     output: String,
 }
 
+/// A safety preview of merging `source` into `target`, computed without
+/// touching the working tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeAnalysis {
+    source: String,
+    target: String,
+    /// Commits in `source` that `target` does not yet contain.
+    commits: Vec<CommitEntry>,
+    /// Files that the merge would change.
+    files: Vec<FileChange>,
+    conflict_files: Vec<String>,
+    has_conflicts: bool,
+    /// Whether conflict prediction was able to run at all.
+    conflicts_known: bool,
+    working_tree_clean: bool,
+    /// How far `target` trails its own upstream (needs update first).
+    target_behind: u32,
+    target_has_upstream: bool,
+    /// `source` has nothing `target` is missing.
+    already_up_to_date: bool,
+    /// Commits `target` has that `source` lacks — i.e. how far behind the base
+    /// the source branch is. Non-zero means "update your branch first".
+    source_behind: u32,
+    /// `target` can be fast-forwarded to `source` (no merge commit needed).
+    fast_forward: bool,
+    source_is_current: bool,
+    target_is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeOutcome {
+    /// "merged" | "fast_forward" | "conflicts" | "up_to_date"
+    status: String,
+    conflict_files: Vec<String>,
+    message: String,
+    output: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeStatus {
+    merging: bool,
+    branch: String,
+    conflict_files: Vec<String>,
+    /// Files that were conflicted but are now staged/resolved.
+    resolved_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictSides {
+    /// Content of the side we are merging into (the current branch, "ours").
+    ours: String,
+    /// Content of the branch being merged in ("theirs").
+    theirs: String,
+    /// Working-tree content, including conflict markers, that the user edits.
+    result: String,
+    ours_exists: bool,
+    theirs_exists: bool,
+}
+
 const REPOS_FILE: &str = "repos.json";
 
 fn repos_file(app: &AppHandle) -> Result<PathBuf, String> {
@@ -163,6 +226,25 @@ fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
             .join("\n");
         Err(format!("{command}\n{detail}"))
     }
+}
+
+/// Runs git and returns (success, stdout, stderr) without folding a non-zero
+/// exit into an error. Needed for commands like `merge` and `merge-tree` that
+/// signal conflicts via a non-zero exit while still producing useful stdout.
+fn git_raw(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|err| format!("Could not run git: {err}"))?;
+
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
 }
 
 fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
@@ -1439,6 +1521,424 @@ fn merge_branch(path: String, branch: String) -> Result<ActionResult, String> {
     })
 }
 
+/// Parses a `git diff --name-status` block into FileChange entries.
+fn parse_name_status(output: &str) -> Vec<FileChange> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.split('\t');
+            let status_part = parts.next()?;
+            let status_code = status_part.chars().next().unwrap_or('M');
+            match status_code {
+                'R' | 'C' => {
+                    let old_path = parts.next().map(|value| value.to_string());
+                    let path = parts.next()?.to_string();
+                    Some(FileChange {
+                        status: format!("{status_code} "),
+                        path,
+                        old_path,
+                    })
+                }
+                _ => {
+                    let path = parts.next()?.to_string();
+                    Some(FileChange {
+                        status: format!("{status_code} "),
+                        path,
+                        old_path: None,
+                    })
+                }
+            }
+        })
+        .collect()
+}
+
+fn rev_exists(repo_path: &Path, rev: &str) -> bool {
+    git(repo_path, &["rev-parse", "--verify", "--quiet", rev]).is_ok()
+}
+
+fn unmerged_files(repo_path: &Path) -> Vec<String> {
+    git(repo_path, &["diff", "--name-only", "--diff-filter=U"])
+        .map(|output| {
+            output
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Predicts whether merging `source` into `target` would conflict, using
+/// `git merge-tree` (no working-tree changes). Returns (known, has_conflicts, files).
+fn predict_conflicts(repo_path: &Path, target: &str, source: &str) -> (bool, bool, Vec<String>) {
+    let Ok((success, stdout, _stderr)) = git_raw(
+        repo_path,
+        &["merge-tree", "--write-tree", "--name-only", target, source],
+    ) else {
+        return (false, false, Vec::new());
+    };
+
+    if success {
+        return (true, false, Vec::new());
+    }
+
+    // Conflict output: first line is the tree OID, then conflicted file names
+    // until a blank line separates the informational messages.
+    let files: Vec<String> = stdout
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .collect();
+
+    (true, true, files)
+}
+
+fn behind_upstream(repo_path: &Path, branch: &str) -> (bool, u32) {
+    let upstream_ref = format!("{branch}@{{u}}");
+    if !rev_exists(repo_path, &upstream_ref) {
+        return (false, 0);
+    }
+    let range = format!("{branch}..{upstream_ref}");
+    let Ok(output) = git(repo_path, &["rev-list", "--count", &range]) else {
+        return (true, 0);
+    };
+    let count = output.trim().parse::<u32>().unwrap_or(0);
+    (true, count)
+}
+
+fn merge_analysis_blocking(
+    path: String,
+    source: String,
+    target: String,
+) -> Result<MergeAnalysis, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let source = source.trim().to_string();
+    let target = target.trim().to_string();
+    if source.is_empty() || target.is_empty() {
+        return Err("Both a source and target branch are required.".to_string());
+    }
+    if !rev_exists(&repo_path, &source) {
+        return Err(format!("Branch {source} could not be found."));
+    }
+    if !rev_exists(&repo_path, &target) {
+        return Err(format!("Branch {target} could not be found."));
+    }
+
+    let current = current_branch(&repo_path);
+    let working_tree_clean = changed_files(&repo_path).is_empty();
+
+    // Commits in source that target lacks.
+    let range = format!("{target}..{source}");
+    let commits = commit_log_with_args(&repo_path, &[&range, "-n", "200"]);
+    let already_up_to_date = commits.is_empty();
+
+    // Commits target has that source lacks (source is behind the base).
+    let behind_range = format!("{source}..{target}");
+    let source_behind = git(&repo_path, &["rev-list", "--count", &behind_range])
+        .ok()
+        .and_then(|out| out.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    // Files the merge would touch (changes on source since the merge base).
+    let three_dot = format!("{target}...{source}");
+    let files = git(&repo_path, &["diff", "--name-status", "--find-renames", &three_dot])
+        .map(|output| parse_name_status(&output))
+        .unwrap_or_default();
+
+    // Fast-forward possible when target is an ancestor of source.
+    let fast_forward = !already_up_to_date && is_ancestor(&repo_path, &target, &source);
+
+    let (target_has_upstream, target_behind) = behind_upstream(&repo_path, &target);
+
+    let (conflicts_known, has_conflicts, conflict_files) = if already_up_to_date || fast_forward {
+        (true, false, Vec::new())
+    } else {
+        predict_conflicts(&repo_path, &target, &source)
+    };
+
+    Ok(MergeAnalysis {
+        source: source.clone(),
+        target: target.clone(),
+        commits,
+        files,
+        conflict_files,
+        has_conflicts,
+        conflicts_known,
+        working_tree_clean,
+        target_behind,
+        target_has_upstream,
+        already_up_to_date,
+        source_behind,
+        fast_forward,
+        source_is_current: current == source,
+        target_is_current: current == target,
+    })
+}
+
+#[tauri::command]
+async fn merge_analysis(
+    path: String,
+    source: String,
+    target: String,
+) -> Result<MergeAnalysis, String> {
+    tauri::async_runtime::spawn_blocking(move || merge_analysis_blocking(path, source, target))
+        .await
+        .map_err(|err| format!("Merge analysis failed: {err}"))?
+}
+
+/// Merges `source` into `target`. Checks out `target` first if needed. Leaves
+/// the repository in a conflicted/merging state when conflicts occur so the
+/// caller can drive resolution.
+#[tauri::command]
+fn merge_execute(
+    path: String,
+    source: String,
+    target: String,
+    update_first: Option<bool>,
+) -> Result<MergeOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let source = source.trim().to_string();
+    let target = target.trim().to_string();
+    if source.is_empty() || target.is_empty() {
+        return Err("Both a source and target branch are required.".to_string());
+    }
+    if source == target {
+        return Err("Source and target branch must be different.".to_string());
+    }
+    if !rev_exists(repo_path, &source) {
+        return Err(format!("Branch {source} could not be found."));
+    }
+
+    if !changed_files(repo_path).is_empty() {
+        return Err("Working tree has uncommitted changes. Commit or stash them first.".to_string());
+    }
+
+    // Switch onto the target branch if we are not already there.
+    if current_branch(repo_path) != target {
+        git(repo_path, &["switch", &target]).or_else(|_| git(repo_path, &["checkout", &target]))?;
+    }
+
+    // Optionally bring the target up to date with its upstream first.
+    if update_first.unwrap_or(false) && rev_exists(repo_path, &format!("{target}@{{u}}")) {
+        let _ = git_raw(repo_path, &["merge", "--ff-only", "@{u}"]);
+    }
+
+    let (success, stdout, stderr) =
+        git_raw(repo_path, &["merge", "--no-edit", &source])?;
+    let output = [stdout.trim_end(), stderr.trim_end()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if success {
+        let fast_forwarded = output.contains("Fast-forward");
+        return Ok(MergeOutcome {
+            status: if fast_forwarded {
+                "fast_forward".to_string()
+            } else if output.contains("Already up to date") {
+                "up_to_date".to_string()
+            } else {
+                "merged".to_string()
+            },
+            conflict_files: Vec::new(),
+            message: format!("Merged {source} into {target}."),
+            output,
+        });
+    }
+
+    let conflict_files = unmerged_files(repo_path);
+    if conflict_files.is_empty() {
+        // Merge failed for some non-conflict reason; surface it as an error.
+        return Err(if output.is_empty() {
+            format!("Could not merge {source} into {target}.")
+        } else {
+            output
+        });
+    }
+
+    Ok(MergeOutcome {
+        status: "conflicts".to_string(),
+        message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
+        conflict_files,
+        output,
+    })
+}
+
+#[tauri::command]
+fn merge_status(path: String) -> Result<MergeStatus, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let merging = rev_exists(repo_path, "MERGE_HEAD");
+    let conflict_files = if merging {
+        unmerged_files(repo_path)
+    } else {
+        Vec::new()
+    };
+
+    // Files staged during the merge that were previously conflicted.
+    let resolved_files = if merging {
+        git(repo_path, &["diff", "--name-only", "--cached", "--diff-filter=M"])
+            .map(|output| {
+                output
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Ok(MergeStatus {
+        merging,
+        branch: current_branch(repo_path),
+        conflict_files,
+        resolved_files,
+    })
+}
+
+#[tauri::command]
+fn abort_merge(path: String, return_branch: Option<String>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let output = git(repo_path, &["merge", "--abort"])?;
+
+    if let Some(branch) = return_branch
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+    {
+        if current_branch(repo_path) != branch && rev_exists(repo_path, &branch) {
+            let _ = git(repo_path, &["switch", &branch])
+                .or_else(|_| git(repo_path, &["checkout", &branch]));
+        }
+    }
+
+    Ok(ActionResult {
+        message: "Merge aborted.".to_string(),
+        output,
+    })
+}
+
+/// Resolves a conflicted file by taking one whole side. `side` is "ours"
+/// (the target/current branch) or "theirs" (the incoming source branch).
+#[tauri::command]
+fn resolve_conflict(path: String, file: String, side: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file = file.trim().to_string();
+    if file.is_empty() {
+        return Err("A file path is required.".to_string());
+    }
+    let flag = match side.as_str() {
+        "ours" => "--ours",
+        "theirs" => "--theirs",
+        _ => return Err("Side must be \"ours\" or \"theirs\".".to_string()),
+    };
+    git_owned(
+        repo_path,
+        vec![
+            "checkout".to_string(),
+            flag.to_string(),
+            "--".to_string(),
+            file.clone(),
+        ],
+    )?;
+    let output = git_owned(
+        repo_path,
+        vec!["add".to_string(), "--".to_string(), file.clone()],
+    )?;
+    Ok(ActionResult {
+        message: format!("Resolved {file}."),
+        output,
+    })
+}
+
+#[tauri::command]
+fn conflict_sides(path: String, file: String) -> Result<ConflictSides, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file = file.trim().to_string();
+    if file.is_empty() {
+        return Err("A file path is required.".to_string());
+    }
+
+    let ours = git_owned(repo_path, vec!["show".to_string(), format!(":2:{file}")]);
+    let theirs = git_owned(repo_path, vec!["show".to_string(), format!(":3:{file}")]);
+    let result = fs::read_to_string(repo_path.join(&file)).unwrap_or_default();
+
+    Ok(ConflictSides {
+        ours_exists: ours.is_ok(),
+        theirs_exists: theirs.is_ok(),
+        ours: ours.unwrap_or_default(),
+        theirs: theirs.unwrap_or_default(),
+        result,
+    })
+}
+
+/// Writes a manually-resolved file and stages it.
+#[tauri::command]
+fn resolve_conflict_manual(
+    path: String,
+    file: String,
+    content: String,
+) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file = file.trim().to_string();
+    if file.is_empty() {
+        return Err("A file path is required.".to_string());
+    }
+    let full = repo_path.join(&file);
+    fs::write(&full, content)
+        .map_err(|err| format!("Could not write {}: {err}", full.display()))?;
+    let output = git_owned(
+        repo_path,
+        vec!["add".to_string(), "--".to_string(), file.clone()],
+    )?;
+    Ok(ActionResult {
+        message: format!("Resolved {file}."),
+        output,
+    })
+}
+
+#[tauri::command]
+fn complete_merge(path: String, message: Option<String>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    if !rev_exists(repo_path, "MERGE_HEAD") {
+        return Err("No merge is in progress.".to_string());
+    }
+    let remaining = unmerged_files(repo_path);
+    if !remaining.is_empty() {
+        return Err(format!(
+            "Resolve all conflicts first ({} remaining).",
+            remaining.len()
+        ));
+    }
+
+    let args = match message.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()) {
+        Some(msg) => vec!["commit".to_string(), "-m".to_string(), msg],
+        None => vec!["commit".to_string(), "--no-edit".to_string()],
+    };
+    let output = git_owned(repo_path, args)?;
+    Ok(ActionResult {
+        message: "Merge completed.".to_string(),
+        output,
+    })
+}
+
 #[tauri::command]
 fn stage_files(path: String, files: Vec<String>, stage: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
@@ -1927,6 +2427,14 @@ pub fn run() {
             file_image_preview,
             checkout_branch,
             merge_branch,
+            merge_analysis,
+            merge_execute,
+            merge_status,
+            abort_merge,
+            resolve_conflict,
+            resolve_conflict_manual,
+            conflict_sides,
+            complete_merge,
             stage_files,
             stage_all,
             commit_repo,

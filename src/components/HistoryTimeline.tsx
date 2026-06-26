@@ -23,6 +23,12 @@ type HistoryTimelineProps = {
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
   workingTreeActive?: boolean;
+  mergePreview?: {
+    source: string;
+    target: string;
+    merged: boolean;
+    conflicts: boolean;
+  } | null;
 };
 
 export function HistoryTimeline({
@@ -38,6 +44,7 @@ export function HistoryTimeline({
   onCreateTag,
   onDeleteTag,
   workingTreeActive,
+  mergePreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -309,8 +316,38 @@ export function HistoryTimeline({
           </button>
 
           {ahead.map((commit, index) =>
-            renderCommitNode(commit, ancestry.length + index, index < ahead.length - 1, true),
+            renderCommitNode(
+              commit,
+              ancestry.length + index,
+              index < ahead.length - 1 || !!mergePreview,
+              true,
+            ),
           )}
+
+          {mergePreview ? (
+            <div
+              className={`timeline-node merge-preview${
+                mergePreview.merged ? " merged" : ""
+              }${mergePreview.conflicts ? " conflicts" : ""}`}
+              title={
+                mergePreview.merged
+                  ? `Merged ${mergePreview.source} into ${mergePreview.target}`
+                  : mergePreview.conflicts
+                    ? `Merge ${mergePreview.source} into ${mergePreview.target} — conflicts`
+                    : `Preview: merge ${mergePreview.source} into ${mergePreview.target}`
+              }
+            >
+              <span className="node-dot merge-preview-dot" />
+              <span className="node-hash">{mergePreview.target}</span>
+              <span className="node-subject">
+                {mergePreview.merged
+                  ? "merged"
+                  : mergePreview.conflicts
+                    ? "conflicts"
+                    : "merge preview"}
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 

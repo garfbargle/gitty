@@ -6,6 +6,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
+import { MergePanel } from "./components/MergePanel";
+import { ConflictResolver } from "./components/ConflictResolver";
 import { DiffViewer } from "./components/DiffViewer";
 import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
 import { HistoryTable } from "./components/HistoryTable";
@@ -41,6 +43,12 @@ import type {
   RepoSnapshot,
   SelectionAnchor,
   VisitSession,
+  MergeAnalysis,
+  MergeOutcome,
+  MergeStatus,
+  MergeSession,
+  MergeDirection,
+  ConflictSides,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
@@ -171,6 +179,16 @@ function App() {
   const [visitCommitDialogOpen, setVisitCommitDialogOpen] = useState(false);
   const [visitCommitTarget, setVisitCommitTarget] = useState<CommitEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
+  const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
+  const [mergeAnalysis, setMergeAnalysis] = useState<MergeAnalysis | null>(null);
+  const [mergeAnalysisLoading, setMergeAnalysisLoading] = useState(false);
+  const [mergeRunning, setMergeRunning] = useState(false);
+  const [mergePushed, setMergePushed] = useState(false);
+  const [conflictFiles, setConflictFiles] = useState<string[]>([]);
+  const [resolvedFiles, setResolvedFiles] = useState<string[]>([]);
+  const [selectedConflict, setSelectedConflict] = useState<string | null>(null);
+  const [conflictSides, setConflictSides] = useState<ConflictSides | null>(null);
+  const [conflictSidesLoading, setConflictSidesLoading] = useState(false);
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
   const [diffBundles, setDiffBundles] = useState<DiffFileBundle[]>([]);
@@ -247,6 +265,15 @@ function App() {
     const remote = branches.filter((b) => b.isRemote).map((b) => b.name);
     return [...local, ...remote];
   }, [snapshot]);
+
+  const baseBranch = useMemo(() => {
+    const locals = (snapshot?.branches ?? [])
+      .filter((b) => !b.isRemote)
+      .map((b) => b.name);
+    if (locals.includes("main")) return "main";
+    if (locals.includes("master")) return "master";
+    return null;
+  }, [snapshot?.branches]);
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
@@ -580,6 +607,14 @@ function App() {
     setViewMode("working");
     setNavZone("files");
     setRepoSettingsOpen(false);
+    setMergeSession(null);
+    setMergeAnalysis(null);
+    mergeAnalysisKeyRef.current = "";
+    setConflictFiles([]);
+    setResolvedFiles([]);
+    setSelectedConflict(null);
+    setConflictSides(null);
+    setMergePushed(false);
   }
 
   async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
@@ -1313,6 +1348,278 @@ function App() {
     if (snap) await selectWorkingTree({ snapshot: snap });
   }
 
+  // ── Merge mode ──────────────────────────────────────────────────────────
+
+  const mergeAnalysisKeyRef = useRef("");
+
+  async function fetchMergeAnalysis(source: string, target: string) {
+    return invoke<MergeAnalysis>("merge_analysis", {
+      path: selectedPath,
+      source,
+      target,
+    });
+  }
+
+  function mergeBranchesFor(direction: MergeDirection, current: string, base: string) {
+    return direction === "ship"
+      ? { source: current, target: base }
+      : { source: base, target: current };
+  }
+
+  async function loadMergeAnalysis(session: MergeSession) {
+    setMergeAnalysisLoading(true);
+    try {
+      const result = await fetchMergeAnalysis(session.source, session.target);
+      setMergeAnalysis(result);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setMergeAnalysisLoading(false);
+    }
+  }
+
+  function openMerge(direction: MergeDirection = "ship") {
+    if (!selectedPath || !snapshot || !baseBranch) return;
+    if (visitSession) {
+      setError("Return to latest before merging.");
+      return;
+    }
+    const current = snapshot.branch;
+    if (current === baseBranch || current.includes("detached")) return;
+
+    const { source, target } = mergeBranchesFor(direction, current, baseBranch);
+    const session: MergeSession = {
+      source,
+      target,
+      direction,
+      phase: "preview",
+      returnBranch: current,
+    };
+    setViewingCommit(null);
+    setCommitFiles([]);
+    setFocus(null);
+    setDiff(emptyDiff);
+    setViewMode("working");
+    setMergePushed(false);
+    setConflictFiles([]);
+    setResolvedFiles([]);
+    setSelectedConflict(null);
+    setConflictSides(null);
+    setMergeSession(session);
+    // Reuse a cached ship-direction analysis when it matches.
+    if (
+      direction === "ship" &&
+      mergeAnalysis &&
+      mergeAnalysis.source === source &&
+      mergeAnalysis.target === target
+    ) {
+      // keep it
+    } else {
+      setMergeAnalysis(null);
+    }
+    void loadMergeAnalysis(session);
+  }
+
+  function closeMerge() {
+    setMergeSession(null);
+    setMergeAnalysis(null);
+    mergeAnalysisKeyRef.current = "";
+    setConflictFiles([]);
+    setResolvedFiles([]);
+    setSelectedConflict(null);
+    setConflictSides(null);
+    setMergePushed(false);
+  }
+
+  function swapMergeDirection() {
+    if (!mergeSession) return;
+    openMerge(mergeSession.direction === "ship" ? "update" : "ship");
+  }
+
+  async function runMerge() {
+    if (!selectedPath || !mergeSession || mergeRunning) return;
+    if (mergeAnalysis && !mergeAnalysis.workingTreeClean) {
+      setError("Commit or stash your changes before merging.");
+      return;
+    }
+    setMergeRunning(true);
+    setMergeSession((prev) => (prev ? { ...prev, phase: "merging" } : prev));
+    setError("");
+    setMessage("");
+    try {
+      const outcome = await invoke<MergeOutcome>("merge_execute", {
+        path: selectedPath,
+        source: mergeSession.source,
+        target: mergeSession.target,
+        updateFirst: (mergeAnalysis?.targetBehind ?? 0) > 0,
+      });
+      await refreshRepoQuiet(selectedPath);
+      if (outcome.status === "conflicts") {
+        setConflictFiles(outcome.conflictFiles);
+        setResolvedFiles([]);
+        setSelectedConflict(outcome.conflictFiles[0] ?? null);
+        setMergeSession((prev) => (prev ? { ...prev, phase: "conflicts" } : prev));
+      } else {
+        setMessage(outcome.message);
+        setMergeSession((prev) => (prev ? { ...prev, phase: "done" } : prev));
+      }
+    } catch (err) {
+      setError(String(err));
+      setMergeSession((prev) => (prev ? { ...prev, phase: "preview" } : prev));
+    } finally {
+      setMergeRunning(false);
+    }
+  }
+
+  async function refreshMergeStatus() {
+    if (!selectedPath) return;
+    try {
+      const status = await invoke<MergeStatus>("merge_status", { path: selectedPath });
+      setConflictFiles(status.conflictFiles);
+      setResolvedFiles(status.resolvedFiles);
+      setSelectedConflict((prev) =>
+        prev && status.conflictFiles.includes(prev)
+          ? prev
+          : status.conflictFiles[0] ?? null,
+      );
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function resolveConflictFile(file: string, side: "ours" | "theirs") {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("resolve_conflict", { path: selectedPath, file, side }),
+    );
+    if (!result) return;
+    await refreshMergeStatus();
+    await refreshChangesQuiet(selectedPath);
+  }
+
+  async function resolveConflictManual(content: string) {
+    if (!selectedPath || !selectedConflict) return;
+    const result = await run(() =>
+      invoke<ActionResult>("resolve_conflict_manual", {
+        path: selectedPath,
+        file: selectedConflict,
+        content,
+      }),
+    );
+    if (!result) return;
+    await refreshMergeStatus();
+    await refreshChangesQuiet(selectedPath);
+  }
+
+  async function completeMerge() {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("complete_merge", { path: selectedPath, message: null }),
+    );
+    if (!result) return;
+    setMessage(result.message);
+    setConflictFiles([]);
+    setResolvedFiles([]);
+    setSelectedConflict(null);
+    setConflictSides(null);
+    setMergeSession((prev) => (prev ? { ...prev, phase: "done" } : prev));
+    await refreshRepoQuiet(selectedPath);
+  }
+
+  async function abortMerge() {
+    if (!selectedPath) return;
+    const returnBranch = mergeSession?.returnBranch ?? null;
+    const result = await run(() =>
+      invoke<ActionResult>("abort_merge", { path: selectedPath, returnBranch }),
+    );
+    closeMerge();
+    if (result) setMessage(result.message);
+    const snap = await refreshRepo();
+    if (snap) await selectWorkingTree({ snapshot: snap });
+  }
+
+  async function mergePush() {
+    const ok = await push(false);
+    if (ok) setMergePushed(true);
+  }
+
+  async function finishMerge() {
+    const returnBranch = mergeSession?.returnBranch;
+    closeMerge();
+    if (returnBranch && snapshot && snapshot.branch !== returnBranch) {
+      await run(() =>
+        invoke<ActionResult>("checkout_branch", {
+          path: selectedPath,
+          branch: returnBranch,
+        }),
+      );
+    }
+    const snap = await refreshRepo();
+    if (snap) await selectWorkingTree({ snapshot: snap });
+  }
+
+  function showMergeCommands() {
+    if (!mergeSession) return;
+    const { source, target } = mergeSession;
+    const lines = [
+      `git switch ${target}`,
+      (mergeAnalysis?.targetBehind ?? 0) > 0 ? `git pull --ff-only` : null,
+      `git merge ${source}`,
+      `git push`,
+    ].filter(Boolean);
+    setMessage(`Equivalent commands:\n${lines.join("\n")}`);
+  }
+
+  async function loadConflictSides(file: string) {
+    if (!selectedPath) return;
+    setConflictSidesLoading(true);
+    try {
+      const sides = await invoke<ConflictSides>("conflict_sides", {
+        path: selectedPath,
+        file,
+      });
+      setConflictSides(sides);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setConflictSidesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (mergeSession?.phase === "conflicts" && selectedConflict) {
+      void loadConflictSides(selectedConflict);
+    } else {
+      setConflictSides(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConflict, mergeSession?.phase]);
+
+  useEffect(() => {
+    if (mergeSession) return;
+    if (viewMode !== "working") return;
+    if (!selectedPath || !snapshot || !baseBranch) return;
+    const current = snapshot.branch;
+    if (current === baseBranch || current.includes("detached")) return;
+    const headHash = snapshot.commits[0]?.hash ?? "";
+    const baseTip = snapshot.branches.find((b) => b.name === baseBranch)?.name ?? baseBranch;
+    const key = `${selectedPath}|${current}|${headHash}|${baseTip}`;
+    if (mergeAnalysisKeyRef.current === key) return;
+    mergeAnalysisKeyRef.current = key;
+    let cancelled = false;
+    void fetchMergeAnalysis(current, baseBranch)
+      .then((res) => {
+        if (!cancelled) setMergeAnalysis(res);
+      })
+      .catch(() => {
+        mergeAnalysisKeyRef.current = "";
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPath, snapshot?.branch, baseBranch, viewMode, snapshot?.commits, mergeSession]);
+
   function openCreateTagDialog(commit: CommitEntry) {
     setTagCreateCommit(commit);
   }
@@ -1829,8 +2136,34 @@ function App() {
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
-  const showCommitSection = workingTreeActive;
+  const showCommitSection = workingTreeActive && !mergeSession;
   const showResetSection = !!visitSession;
+
+  // Merge-strip chips reflect the ship direction (current → base). They are
+  // only meaningful when the cached analysis matches that direction.
+  const shipAnalysis =
+    mergeAnalysis &&
+    snapshot &&
+    mergeAnalysis.source === snapshot.branch &&
+    mergeAnalysis.target === baseBranch
+      ? mergeAnalysis
+      : null;
+  const aheadOfBase = shipAnalysis ? shipAnalysis.commits.length : null;
+  const baseBehind = shipAnalysis ? shipAnalysis.sourceBehind : null;
+  const mergeConflictState: "clean" | "conflicts" | "unknown" | "checking" =
+    mergeSession?.phase === "conflicts"
+      ? "conflicts"
+      : mergeAnalysisLoading && !shipAnalysis
+        ? "checking"
+        : shipAnalysis
+          ? shipAnalysis.alreadyUpToDate
+            ? "unknown"
+            : !shipAnalysis.conflictsKnown
+              ? "unknown"
+              : shipAnalysis.hasConflicts
+                ? "conflicts"
+                : "clean"
+          : "unknown";
 
   useEffect(() => {
     if (!viewingCommit || !selectedPath) {
@@ -1930,6 +2263,25 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggleSidebar]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "m") return;
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+      if (!baseBranch || !snapshot || snapshot.branch === baseBranch) return;
+      event.preventDefault();
+      if (mergeSession) {
+        if (mergeSession.phase === "preview") closeMerge();
+      } else {
+        openMerge("ship");
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseBranch, snapshot?.branch, mergeSession]);
 
   useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;
@@ -2091,6 +2443,24 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onSetupRemote={() => openRepoSettings()}
+              baseBranch={baseBranch}
+              mergeActive={!!mergeSession}
+              mergeDirection={mergeSession?.direction ?? "ship"}
+              aheadOfBase={aheadOfBase}
+              baseBehind={baseBehind}
+              mergeConflictState={mergeConflictState}
+              onOpenMerge={() => openMerge("ship")}
+              onExitMerge={() => {
+                if (mergeSession?.phase === "conflicts") {
+                  setError("Resolve or abort the merge before leaving.");
+                  return;
+                }
+                if (mergeSession?.phase === "done") {
+                  void finishMerge();
+                } else {
+                  closeMerge();
+                }
+              }}
             />
 
             {viewMode === "working" ? (
@@ -2109,9 +2479,108 @@ function App() {
                   onVisitCommit={(commit) => requestVisitCommit(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
+                  mergePreview={
+                    mergeSession
+                      ? {
+                          target: mergeSession.target,
+                          source: mergeSession.source,
+                          merged: mergeSession.phase === "done",
+                          conflicts: mergeSession.phase === "conflicts",
+                        }
+                      : null
+                  }
                 />
 
-                {showGittyEmptyState ? (
+                {mergeSession && mergeSession.phase === "conflicts" ? (
+                  <div className="merge-conflict-grid">
+                    <div className="conflict-file-list">
+                      <header className="conflict-list-head">
+                        <span>Conflicted</span>
+                        <em>{conflictFiles.length}</em>
+                      </header>
+                      {conflictFiles.length === 0 ? (
+                        <p className="conflict-list-empty">
+                          All conflicts resolved. Complete the merge.
+                        </p>
+                      ) : (
+                        <ul>
+                          {conflictFiles.map((file) => (
+                            <li key={file}>
+                              <button
+                                type="button"
+                                className={file === selectedConflict ? "active" : ""}
+                                onClick={() => setSelectedConflict(file)}
+                              >
+                                <span className="conflict-file-row-name">
+                                  {file.split("/").pop()}
+                                </span>
+                                <span className="conflict-file-row-path">{file}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {resolvedFiles.length > 0 ? (
+                        <>
+                          <header className="conflict-list-head resolved">
+                            <span>Resolved</span>
+                            <em>{resolvedFiles.length}</em>
+                          </header>
+                          <ul>
+                            {resolvedFiles.map((file) => (
+                              <li key={file} className="resolved-row">
+                                <span className="conflict-file-row-name">
+                                  {file.split("/").pop()}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                    </div>
+
+                    <ConflictResolver
+                      file={selectedConflict}
+                      sides={conflictSides}
+                      loading={conflictSidesLoading}
+                      oursLabel={mergeSession.target}
+                      theirsLabel={mergeSession.source}
+                      resolved={
+                        !!selectedConflict && resolvedFiles.includes(selectedConflict)
+                      }
+                      onUseOurs={() =>
+                        selectedConflict &&
+                        void resolveConflictFile(selectedConflict, "ours")
+                      }
+                      onUseTheirs={() =>
+                        selectedConflict &&
+                        void resolveConflictFile(selectedConflict, "theirs")
+                      }
+                      onSaveManual={(content) => void resolveConflictManual(content)}
+                    />
+
+                    <MergePanel
+                      analysis={mergeAnalysis}
+                      source={mergeSession.source}
+                      target={mergeSession.target}
+                      direction={mergeSession.direction}
+                      phase={mergeSession.phase}
+                      loading={loading}
+                      running={mergeRunning}
+                      hasRemotes={hasRemotes}
+                      conflictCount={conflictFiles.length}
+                      pushed={mergePushed}
+                      onMerge={() => void runMerge()}
+                      onCancel={closeMerge}
+                      onSwapDirection={swapMergeDirection}
+                      onCompleteMerge={() => void completeMerge()}
+                      onAbort={() => void abortMerge()}
+                      onPush={() => void mergePush()}
+                      onShowCommands={showMergeCommands}
+                      onBackToWorkingTree={() => void finishMerge()}
+                    />
+                  </div>
+                ) : showGittyEmptyState && !mergeSession ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
@@ -2180,6 +2649,28 @@ function App() {
                       }
                     />
 
+                    {mergeSession ? (
+                      <MergePanel
+                        analysis={mergeAnalysis}
+                        source={mergeSession.source}
+                        target={mergeSession.target}
+                        direction={mergeSession.direction}
+                        phase={mergeSession.phase}
+                        loading={mergeAnalysisLoading}
+                        running={mergeRunning}
+                        hasRemotes={hasRemotes}
+                        conflictCount={conflictFiles.length}
+                        pushed={mergePushed}
+                        onMerge={() => void runMerge()}
+                        onCancel={closeMerge}
+                        onSwapDirection={swapMergeDirection}
+                        onCompleteMerge={() => void completeMerge()}
+                        onAbort={() => void abortMerge()}
+                        onPush={() => void mergePush()}
+                        onShowCommands={showMergeCommands}
+                        onBackToWorkingTree={() => void finishMerge()}
+                      />
+                    ) : (
                     <CommitPanel
                       message={commitMessage}
                       messageInputRef={commitMessageRef}
@@ -2225,6 +2716,7 @@ function App() {
                       onSetupRemote={() => openRepoSettings()}
                       disabled={loading}
                     />
+                    )}
                   </div>
                 )}
               </div>

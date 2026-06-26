@@ -1,7 +1,9 @@
 import {
   ChevronDown,
+  ChevronRight,
   GitBranch,
   GitCompareArrows,
+  GitMerge,
   History,
   Link2,
   PanelLeft,
@@ -48,6 +50,14 @@ type TopBarProps = {
   onOpenRepoSettings?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
+  baseBranch?: string | null;
+  mergeActive?: boolean;
+  mergeDirection?: "ship" | "update";
+  aheadOfBase?: number | null;
+  baseBehind?: number | null;
+  mergeConflictState?: "clean" | "conflicts" | "unknown" | "checking";
+  onOpenMerge?: () => void;
+  onExitMerge?: () => void;
 };
 
 export function TopBar({
@@ -84,11 +94,26 @@ export function TopBar({
   onOpenRepoSettings,
   sidebarVisible = true,
   onToggleSidebar,
+  baseBranch,
+  mergeActive = false,
+  mergeDirection = "ship",
+  aheadOfBase,
+  baseBehind,
+  mergeConflictState = "unknown",
+  onOpenMerge,
+  onExitMerge,
 }: TopBarProps) {
   const inTimeTravel = !!visitSession;
   const inPreview = !!viewingCommit && !inTimeTravel;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
   const timeTravelCommit = visitSession?.visitedCommit;
+  const canMerge =
+    !!baseBranch &&
+    !branch.includes("detached") &&
+    branch !== baseBranch &&
+    !inTimeTravel &&
+    !inPreview;
+  const showMergeStrip = canMerge && viewMode === "working";
 
   return (
     <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
@@ -157,6 +182,32 @@ export function TopBar({
           </>
         ) : viewMode === "working" ? (
           <>
+            {showMergeStrip ? (
+              <>
+                <ChevronRight size={14} className="merge-strip-arrow" />
+                <div className={`merge-strip${mergeActive ? " active" : ""}`}>
+                  <GitMerge size={13} className="merge-strip-icon" />
+                  <span className="merge-strip-base">{baseBranch}</span>
+                  {mergeConflictState === "checking" ? (
+                    <span className="merge-chip neutral">checking…</span>
+                  ) : (
+                    <>
+                      {typeof aheadOfBase === "number" && aheadOfBase > 0 ? (
+                        <span className="merge-chip ahead">{aheadOfBase} ahead</span>
+                      ) : null}
+                      {typeof baseBehind === "number" && baseBehind > 0 ? (
+                        <span className="merge-chip behind">{baseBehind} behind</span>
+                      ) : null}
+                      {mergeConflictState === "clean" ? (
+                        <span className="merge-chip ok">no conflicts</span>
+                      ) : mergeConflictState === "conflicts" ? (
+                        <span className="merge-chip danger">conflicts</span>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </>
+            ) : null}
             <span className="breadcrumb-sep">›</span>
             <WorkingTreePicker
               commits={commits}
@@ -220,6 +271,30 @@ export function TopBar({
             Back to Working Tree
             {changeCount > 0 ? <em>{changeCount}</em> : null}
           </button>
+        ) : null}
+        {showMergeStrip && onOpenMerge ? (
+          mergeActive ? (
+            <button
+              type="button"
+              className={`merge-action-btn${mergeConflictState === "conflicts" ? " danger" : " active"}`}
+              title="Close merge mode"
+              onClick={onExitMerge}
+            >
+              <GitMerge size={14} />
+              {mergeConflictState === "conflicts" ? "Resolving" : "Merging"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="merge-action-btn"
+              title={`Merge ${branch} into ${baseBranch}`}
+              disabled={loading}
+              onClick={onOpenMerge}
+            >
+              <GitMerge size={14} />
+              {mergeDirection === "update" ? "Update" : "Merge"}
+            </button>
+          )
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
