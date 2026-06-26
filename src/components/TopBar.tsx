@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   RefreshCw,
   Settings,
+  X,
 } from "lucide-react";
 import type { CommitEntry, RepoEntry, VisitSession } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
@@ -57,6 +58,7 @@ type TopBarProps = {
   mergePartner?: string | null;
   mergeCandidates?: string[];
   onMergePartnerChange?: (name: string) => void;
+  onClearMerge?: () => void;
   mergeActive?: boolean;
   aheadOfBase?: number | null;
   baseBehind?: number | null;
@@ -106,6 +108,7 @@ export function TopBar({
   mergePartner,
   mergeCandidates = [],
   onMergePartnerChange,
+  onClearMerge,
   mergeActive = false,
   aheadOfBase,
   baseBehind,
@@ -269,6 +272,17 @@ export function TopBar({
                         ) : null}
                       </>
                     )
+                  ) : null}
+                  {hasPair && !mergeActive && onClearMerge ? (
+                    <button
+                      type="button"
+                      className="merge-strip-clear"
+                      title="Clear merge selection"
+                      aria-label="Clear merge selection"
+                      onClick={onClearMerge}
+                    >
+                      <X size={12} />
+                    </button>
                   ) : null}
                 </div>
               </>

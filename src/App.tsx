@@ -291,16 +291,14 @@ function App() {
   // On the trunk you pull a sibling IN; elsewhere you ship the current branch UP.
   const mergeIncoming = onIntegrationBranch;
 
-  // The "other" branch in the relationship. On a feature branch it defaults to
-  // the trunk (the common "ship it" case). On the trunk there is no default —
-  // you choose which sibling to merge in. A saved pick is honored when valid.
+  // The "other" branch in the relationship. There is no default in either
+  // direction — the strip stays a neutral "Merge…" picker until you explicitly
+  // pick a branch, and clearing the pick returns it to that resting state. A
+  // saved pick is honored only while it's still a valid candidate.
   const mergePartner = useMemo(() => {
     if (mergeTarget && mergeCandidates.includes(mergeTarget)) return mergeTarget;
-    if (!mergeIncoming && integrationBranch && mergeCandidates.includes(integrationBranch)) {
-      return integrationBranch;
-    }
     return null;
-  }, [mergeTarget, mergeCandidates, mergeIncoming, integrationBranch]);
+  }, [mergeTarget, mergeCandidates]);
 
   // Resolved source → target. On the trunk the partner is the source (merged
   // in); on a feature branch the current branch is the source (shipped up).
@@ -1485,6 +1483,15 @@ function App() {
     openMerge({ source: mergeSession.target, target: mergeSession.source });
   }
 
+  // A clean merge needs no further input — close the merge UI and drop straight
+  // back to the working tree. Git already left us on the target branch, so the
+  // merge result is in view and the top-bar Push button surfaces it normally.
+  async function concludeMerge() {
+    closeMerge();
+    const snap = await refreshRepo();
+    if (snap) await selectWorkingTree({ snapshot: snap });
+  }
+
   async function runMerge() {
     if (!selectedPath || !mergeSession || mergeRunning) return;
     if (mergeAnalysis && !mergeAnalysis.workingTreeClean) {
@@ -1502,15 +1509,15 @@ function App() {
         target: mergeSession.target,
         updateFirst: (mergeAnalysis?.targetBehind ?? 0) > 0,
       });
-      await refreshRepoQuiet(selectedPath);
       if (outcome.status === "conflicts") {
+        await refreshRepoQuiet(selectedPath);
         setConflictFiles(outcome.conflictFiles);
         setResolvedFiles([]);
         setSelectedConflict(outcome.conflictFiles[0] ?? null);
         setMergeSession((prev) => (prev ? { ...prev, phase: "conflicts" } : prev));
       } else {
         setMessage(outcome.message);
-        setMergeSession((prev) => (prev ? { ...prev, phase: "done" } : prev));
+        await concludeMerge();
       }
     } catch (err) {
       setError(String(err));
@@ -1567,12 +1574,7 @@ function App() {
     );
     if (!result) return;
     setMessage(result.message);
-    setConflictFiles([]);
-    setResolvedFiles([]);
-    setSelectedConflict(null);
-    setConflictSides(null);
-    setMergeSession((prev) => (prev ? { ...prev, phase: "done" } : prev));
-    await refreshRepoQuiet(selectedPath);
+    await concludeMerge();
   }
 
   async function abortMerge() {
@@ -2499,6 +2501,12 @@ function App() {
               mergeCandidates={mergeCandidates}
               onMergePartnerChange={(name) => {
                 setMergeTarget(name);
+                if (mergeSession && mergeSession.phase === "preview") {
+                  closeMerge();
+                }
+              }}
+              onClearMerge={() => {
+                setMergeTarget(null);
                 if (mergeSession && mergeSession.phase === "preview") {
                   closeMerge();
                 }

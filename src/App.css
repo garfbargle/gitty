@@ -3593,6 +3593,28 @@ button:focus-visible {
   color: var(--text-muted);
 }
 
+.merge-strip-clear {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 2px;
+}
+
+.merge-strip-clear:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.merge-strip-clear:focus-visible {
+  outline: 2px solid var(--accent-soft);
+}
+
 /* Top-bar Merge button */
 .merge-action-btn {
   align-items: center;
