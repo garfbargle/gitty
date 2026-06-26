@@ -50,11 +50,14 @@ type TopBarProps = {
   onOpenRepoSettings?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
-  baseBranch?: string | null;
-  mergeTargets?: string[];
-  onMergeTargetChange?: (name: string) => void;
+  mergeStripAvailable?: boolean;
+  mergeIncoming?: boolean;
+  mergeSource?: string | null;
+  mergeTargetName?: string | null;
+  mergePartner?: string | null;
+  mergeCandidates?: string[];
+  onMergePartnerChange?: (name: string) => void;
   mergeActive?: boolean;
-  mergeDirection?: "ship" | "update";
   aheadOfBase?: number | null;
   baseBehind?: number | null;
   mergeConflictState?: "clean" | "conflicts" | "unknown" | "checking";
@@ -96,11 +99,14 @@ export function TopBar({
   onOpenRepoSettings,
   sidebarVisible = true,
   onToggleSidebar,
-  baseBranch,
-  mergeTargets = [],
-  onMergeTargetChange,
+  mergeStripAvailable = false,
+  mergeIncoming = false,
+  mergeSource,
+  mergeTargetName,
+  mergePartner,
+  mergeCandidates = [],
+  onMergePartnerChange,
   mergeActive = false,
-  mergeDirection = "ship",
   aheadOfBase,
   baseBehind,
   mergeConflictState = "unknown",
@@ -111,13 +117,14 @@ export function TopBar({
   const inPreview = !!viewingCommit && !inTimeTravel;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
   const timeTravelCommit = visitSession?.visitedCommit;
-  const canMerge =
-    !!baseBranch &&
+  const showMergeStrip =
+    mergeStripAvailable &&
     !branch.includes("detached") &&
-    branch !== baseBranch &&
     !inTimeTravel &&
-    !inPreview;
-  const showMergeStrip = canMerge && viewMode === "working";
+    !inPreview &&
+    viewMode === "working";
+  // A partner is chosen → we have a real source→target pair to act on.
+  const hasPair = !!mergeSource && !!mergeTargetName;
 
   return (
     <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
@@ -191,42 +198,74 @@ export function TopBar({
                 <ChevronRight size={14} className="merge-strip-arrow" />
                 <div className={`merge-strip${mergeActive ? " active" : ""}`}>
                   <GitMerge size={13} className="merge-strip-icon" />
-                  {mergeTargets.length > 1 && onMergeTargetChange && !mergeActive ? (
-                    <span className="merge-strip-select-wrap">
-                      <select
-                        className="merge-strip-select"
-                        value={baseBranch ?? ""}
-                        title="Choose the branch to merge into"
-                        onChange={(event) => onMergeTargetChange(event.currentTarget.value)}
-                      >
-                        {mergeTargets.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={11} className="merge-strip-chevron" />
-                    </span>
-                  ) : (
-                    <span className="merge-strip-base">{baseBranch}</span>
-                  )}
-                  {mergeConflictState === "checking" ? (
-                    <span className="merge-chip neutral">checking…</span>
-                  ) : (
-                    <>
-                      {typeof aheadOfBase === "number" && aheadOfBase > 0 ? (
-                        <span className="merge-chip ahead">{aheadOfBase} ahead</span>
-                      ) : null}
-                      {typeof baseBehind === "number" && baseBehind > 0 ? (
-                        <span className="merge-chip behind">{baseBehind} behind</span>
-                      ) : null}
-                      {mergeConflictState === "clean" ? (
-                        <span className="merge-chip ok">no conflicts</span>
-                      ) : mergeConflictState === "conflicts" ? (
-                        <span className="merge-chip danger">conflicts</span>
-                      ) : null}
-                    </>
-                  )}
+                  {(() => {
+                    // The partner branch is the editable side; the current
+                    // branch is fixed. On the trunk the partner is the source
+                    // (merged in); elsewhere it's the target (shipped to).
+                    const PartnerPicker = (
+                      <span className="merge-strip-select-wrap">
+                        <select
+                          className="merge-strip-select"
+                          value={mergePartner ?? ""}
+                          title="Choose a branch to merge"
+                          disabled={mergeActive || !onMergePartnerChange}
+                          onChange={(event) =>
+                            onMergePartnerChange?.(event.currentTarget.value)
+                          }
+                        >
+                          {!mergePartner ? (
+                            <option value="" disabled>
+                              Merge a branch…
+                            </option>
+                          ) : null}
+                          {mergeCandidates.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown size={11} className="merge-strip-chevron" />
+                      </span>
+                    );
+
+                    if (!hasPair) return PartnerPicker;
+
+                    // The current branch is already shown in the branch picker,
+                    // so only render the partner side plus a direction arrow.
+                    // Incoming (on the trunk): partner → current. Ship: → partner.
+                    return mergeIncoming ? (
+                      <>
+                        {PartnerPicker}
+                        <ChevronRight size={12} className="merge-strip-into" />
+                        <span className="merge-strip-base">{mergeTargetName}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronRight size={12} className="merge-strip-into" />
+                        {PartnerPicker}
+                      </>
+                    );
+                  })()}
+
+                  {hasPair ? (
+                    mergeConflictState === "checking" ? (
+                      <span className="merge-chip neutral">checking…</span>
+                    ) : (
+                      <>
+                        {typeof aheadOfBase === "number" && aheadOfBase > 0 ? (
+                          <span className="merge-chip ahead">{aheadOfBase} ahead</span>
+                        ) : null}
+                        {typeof baseBehind === "number" && baseBehind > 0 ? (
+                          <span className="merge-chip behind">{baseBehind} behind</span>
+                        ) : null}
+                        {mergeConflictState === "clean" ? (
+                          <span className="merge-chip ok">no conflicts</span>
+                        ) : mergeConflictState === "conflicts" ? (
+                          <span className="merge-chip danger">conflicts</span>
+                        ) : null}
+                      </>
+                    )
+                  ) : null}
                 </div>
               </>
             ) : null}
@@ -309,12 +348,16 @@ export function TopBar({
             <button
               type="button"
               className="merge-action-btn"
-              title={`Merge ${branch} into ${baseBranch}`}
-              disabled={loading}
+              title={
+                hasPair
+                  ? `Merge ${mergeSource} into ${mergeTargetName}`
+                  : "Choose a branch to merge"
+              }
+              disabled={loading || !hasPair}
               onClick={onOpenMerge}
             >
               <GitMerge size={14} />
-              {mergeDirection === "update" ? "Update" : "Merge"}
+              Merge
             </button>
           )
         ) : null}

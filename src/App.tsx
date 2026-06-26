@@ -47,7 +47,6 @@ import type {
   MergeOutcome,
   MergeStatus,
   MergeSession,
-  MergeDirection,
   ConflictSides,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
@@ -289,14 +288,34 @@ function App() {
       .map((b) => b.name);
   }, [snapshot?.branches, snapshot?.branch]);
 
-  // The resolved merge target. Only offered when you're on a feature branch and
-  // a trunk exists; a saved pick is honored only when it's still a valid target.
-  // Sitting on the trunk itself never shows the strip, even with a stale pick.
-  const baseBranch = useMemo(() => {
-    if (!integrationBranch || onIntegrationBranch) return null;
+  // On the trunk you pull a sibling IN; elsewhere you ship the current branch UP.
+  const mergeIncoming = onIntegrationBranch;
+
+  // The "other" branch in the relationship. On a feature branch it defaults to
+  // the trunk (the common "ship it" case). On the trunk there is no default —
+  // you choose which sibling to merge in. A saved pick is honored when valid.
+  const mergePartner = useMemo(() => {
     if (mergeTarget && mergeCandidates.includes(mergeTarget)) return mergeTarget;
-    return integrationBranch;
-  }, [integrationBranch, onIntegrationBranch, mergeTarget, mergeCandidates]);
+    if (!mergeIncoming && integrationBranch && mergeCandidates.includes(integrationBranch)) {
+      return integrationBranch;
+    }
+    return null;
+  }, [mergeTarget, mergeCandidates, mergeIncoming, integrationBranch]);
+
+  // Resolved source → target. On the trunk the partner is the source (merged
+  // in); on a feature branch the current branch is the source (shipped up).
+  const mergePair = useMemo(() => {
+    const current = snapshot?.branch;
+    if (!mergePartner || !current || current.includes("detached")) return null;
+    return mergeIncoming
+      ? { source: mergePartner, target: current }
+      : { source: current, target: mergePartner };
+  }, [mergePartner, mergeIncoming, snapshot?.branch]);
+
+  // The strip is available whenever there's at least one other local branch to
+  // merge with. When no partner is chosen yet it just shows a "Merge a branch…"
+  // picker — no forced target, no chips.
+  const mergeStripAvailable = mergeCandidates.length > 0;
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
@@ -1399,12 +1418,6 @@ function App() {
     });
   }
 
-  function mergeBranchesFor(direction: MergeDirection, current: string, base: string) {
-    return direction === "ship"
-      ? { source: current, target: base }
-      : { source: base, target: current };
-  }
-
   async function loadMergeAnalysis(session: MergeSession) {
     setMergeAnalysisLoading(true);
     try {
@@ -1417,20 +1430,22 @@ function App() {
     }
   }
 
-  function openMerge(direction: MergeDirection = "ship") {
-    if (!selectedPath || !snapshot || !baseBranch) return;
+  function openMerge(pair?: { source: string; target: string } | null) {
+    if (!selectedPath || !snapshot) return;
     if (visitSession) {
       setError("Return to latest before merging.");
       return;
     }
-    const current = snapshot.branch;
-    if (current === baseBranch || current.includes("detached")) return;
+    const { source, target } = pair ?? mergePair ?? {};
+    if (!source || !target || source === target || source.includes("detached")) return;
 
-    const { source, target } = mergeBranchesFor(direction, current, baseBranch);
+    const current = snapshot.branch;
     const session: MergeSession = {
       source,
       target,
-      direction,
+      // "ship" = current branch is the source; "update" = current is the target
+      // (the partner is being merged into us). Drives the panel's swap wording.
+      direction: current === target ? "update" : "ship",
       phase: "preview",
       returnBranch: current,
     };
@@ -1445,13 +1460,8 @@ function App() {
     setSelectedConflict(null);
     setConflictSides(null);
     setMergeSession(session);
-    // Reuse a cached ship-direction analysis when it matches.
-    if (
-      direction === "ship" &&
-      mergeAnalysis &&
-      mergeAnalysis.source === source &&
-      mergeAnalysis.target === target
-    ) {
+    // Reuse cached analysis when it already matches this pair.
+    if (mergeAnalysis && mergeAnalysis.source === source && mergeAnalysis.target === target) {
       // keep it
     } else {
       setMergeAnalysis(null);
@@ -1472,7 +1482,7 @@ function App() {
 
   function swapMergeDirection() {
     if (!mergeSession) return;
-    openMerge(mergeSession.direction === "ship" ? "update" : "ship");
+    openMerge({ source: mergeSession.target, target: mergeSession.source });
   }
 
   async function runMerge() {
@@ -1637,16 +1647,14 @@ function App() {
   useEffect(() => {
     if (mergeSession) return;
     if (viewMode !== "working") return;
-    if (!selectedPath || !snapshot || !baseBranch) return;
-    const current = snapshot.branch;
-    if (current === baseBranch || current.includes("detached")) return;
+    if (!selectedPath || !snapshot || !mergePair) return;
     const headHash = snapshot.commits[0]?.hash ?? "";
-    const baseTip = snapshot.branches.find((b) => b.name === baseBranch)?.name ?? baseBranch;
-    const key = `${selectedPath}|${current}|${headHash}|${baseTip}`;
+    const key = `${selectedPath}|${mergePair.source}|${mergePair.target}|${headHash}`;
     if (mergeAnalysisKeyRef.current === key) return;
     mergeAnalysisKeyRef.current = key;
+    const { source, target } = mergePair;
     let cancelled = false;
-    void fetchMergeAnalysis(current, baseBranch)
+    void fetchMergeAnalysis(source, target)
       .then((res) => {
         if (!cancelled) setMergeAnalysis(res);
       })
@@ -1657,7 +1665,7 @@ function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPath, snapshot?.branch, baseBranch, viewMode, snapshot?.commits, mergeSession]);
+  }, [selectedPath, mergePair?.source, mergePair?.target, viewMode, snapshot?.commits, mergeSession]);
 
   function openCreateTagDialog(commit: CommitEntry) {
     setTagCreateCommit(commit);
@@ -2178,28 +2186,29 @@ function App() {
   const showCommitSection = workingTreeActive && !mergeSession;
   const showResetSection = !!visitSession;
 
-  // Merge-strip chips reflect the ship direction (current → base). They are
-  // only meaningful when the cached analysis matches that direction.
-  const shipAnalysis =
+  // Merge-strip chips reflect the resolved pair. Only meaningful when the cached
+  // analysis matches that pair. "ahead" = commits the source brings; "behind" =
+  // commits the target has that the source lacks.
+  const pairAnalysis =
     mergeAnalysis &&
-    snapshot &&
-    mergeAnalysis.source === snapshot.branch &&
-    mergeAnalysis.target === baseBranch
+    mergePair &&
+    mergeAnalysis.source === mergePair.source &&
+    mergeAnalysis.target === mergePair.target
       ? mergeAnalysis
       : null;
-  const aheadOfBase = shipAnalysis ? shipAnalysis.commits.length : null;
-  const baseBehind = shipAnalysis ? shipAnalysis.sourceBehind : null;
+  const aheadOfBase = pairAnalysis ? pairAnalysis.commits.length : null;
+  const baseBehind = pairAnalysis ? pairAnalysis.sourceBehind : null;
   const mergeConflictState: "clean" | "conflicts" | "unknown" | "checking" =
     mergeSession?.phase === "conflicts"
       ? "conflicts"
-      : mergeAnalysisLoading && !shipAnalysis
+      : mergeAnalysisLoading && !pairAnalysis
         ? "checking"
-        : shipAnalysis
-          ? shipAnalysis.alreadyUpToDate
+        : pairAnalysis
+          ? pairAnalysis.alreadyUpToDate
             ? "unknown"
-            : !shipAnalysis.conflictsKnown
+            : !pairAnalysis.conflictsKnown
               ? "unknown"
-              : shipAnalysis.hasConflicts
+              : pairAnalysis.hasConflicts
                 ? "conflicts"
                 : "clean"
           : "unknown";
@@ -2308,19 +2317,19 @@ function App() {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== "m") return;
       if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!baseBranch || !snapshot || snapshot.branch === baseBranch) return;
+      if (!mergePair) return;
       event.preventDefault();
       if (mergeSession) {
         if (mergeSession.phase === "preview") closeMerge();
       } else {
-        openMerge("ship");
+        openMerge(mergePair);
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseBranch, snapshot?.branch, mergeSession]);
+  }, [mergePair?.source, mergePair?.target, mergeSession]);
 
   useEffect(() => {
     if (viewMode !== "working" || !snapshot) return;
@@ -2482,20 +2491,23 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onSetupRemote={() => openRepoSettings()}
-              baseBranch={baseBranch}
-              mergeTargets={mergeCandidates}
-              onMergeTargetChange={(name) => {
+              mergeStripAvailable={mergeStripAvailable}
+              mergeIncoming={mergeIncoming}
+              mergeSource={mergePair?.source ?? null}
+              mergeTargetName={mergePair?.target ?? null}
+              mergePartner={mergePartner}
+              mergeCandidates={mergeCandidates}
+              onMergePartnerChange={(name) => {
                 setMergeTarget(name);
                 if (mergeSession && mergeSession.phase === "preview") {
                   closeMerge();
                 }
               }}
               mergeActive={!!mergeSession}
-              mergeDirection={mergeSession?.direction ?? "ship"}
               aheadOfBase={aheadOfBase}
               baseBehind={baseBehind}
               mergeConflictState={mergeConflictState}
-              onOpenMerge={() => openMerge("ship")}
+              onOpenMerge={() => openMerge()}
               onExitMerge={() => {
                 if (mergeSession?.phase === "conflicts") {
                   setError("Resolve or abort the merge before leaving.");
@@ -2609,7 +2621,7 @@ function App() {
                       analysis={mergeAnalysis}
                       source={mergeSession.source}
                       target={mergeSession.target}
-                      direction={mergeSession.direction}
+                      currentBranch={mergeSession.returnBranch}
                       phase={mergeSession.phase}
                       loading={loading}
                       running={mergeRunning}
@@ -2700,7 +2712,7 @@ function App() {
                         analysis={mergeAnalysis}
                         source={mergeSession.source}
                         target={mergeSession.target}
-                        direction={mergeSession.direction}
+                        currentBranch={mergeSession.returnBranch}
                         phase={mergeSession.phase}
                         loading={mergeAnalysisLoading}
                         running={mergeRunning}

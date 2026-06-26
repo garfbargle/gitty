@@ -3506,6 +3506,11 @@ button:focus-visible {
   color: var(--accent);
 }
 
+.merge-strip-into {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .merge-strip-base {
   font-weight: 600;
 }

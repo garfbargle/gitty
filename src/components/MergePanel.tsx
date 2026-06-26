@@ -24,7 +24,7 @@ type MergePanelProps = {
   analysis: MergeAnalysis | null;
   source: string;
   target: string;
-  direction: "ship" | "update";
+  currentBranch: string;
   phase: MergePhase;
   loading: boolean;
   running: boolean;
@@ -52,7 +52,7 @@ export function MergePanel({
   analysis,
   source,
   target,
-  direction,
+  currentBranch,
   phase,
   loading,
   running,
@@ -145,10 +145,15 @@ export function MergePanel({
     !loading &&
     !merging;
 
-  const title =
-    direction === "ship"
-      ? { verb: "Merge", from: source, to: target }
-      : { verb: "Update", from: target, to: source };
+  // Everything is framed as "merge source into target" — unambiguous whether
+  // you're shipping your branch up or pulling a sibling into the current one.
+  const currentIsSource = currentBranch === source;
+  const currentIsTarget = currentBranch === target;
+  const swapLabel = currentIsSource
+    ? `Update this branch from ${target} instead`
+    : currentIsTarget
+      ? `Merge ${target} into ${source} instead`
+      : `Merge ${target} into ${source} instead`;
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -175,10 +180,10 @@ export function MergePanel({
         <header className="panel-title merge-panel-title">
           <GitMerge size={14} />
           <span>
-            {direction === "ship" ? "Resolve merge:" : "Update branch:"}{" "}
-            <strong className="merge-branch-name source">{title.from}</strong>
+            {conflicts ? "Resolve merge:" : "Merge:"}{" "}
+            <strong className="merge-branch-name source">{source}</strong>
             <ChevronRight size={12} className="merge-arrow" />
-            <strong className="merge-branch-name target">{title.to}</strong>
+            <strong className="merge-branch-name target">{target}</strong>
           </span>
         </header>
 
@@ -313,7 +318,7 @@ export function MergePanel({
               onClick={onMerge}
             >
               {merging ? <Loader2 size={15} className="spin" /> : <GitMerge size={15} />}
-              {direction === "ship" ? `Merge into ${target}` : `Update ${source}`}
+              {`Merge into ${target}`}
               <kbd>⌘↵</kbd>
             </button>
             <button type="button" className="merge-secondary" onClick={onCancel} disabled={merging}>
@@ -325,9 +330,7 @@ export function MergePanel({
               onClick={onSwapDirection}
               disabled={merging}
             >
-              {direction === "ship"
-                ? `Update this branch from ${target} instead`
-                : `Merge ${source} into ${target} instead`}
+              {swapLabel}
             </button>
           </>
         )}
