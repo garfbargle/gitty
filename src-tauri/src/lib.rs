@@ -1491,18 +1491,36 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
         return Err("Branch name is required.".to_string());
     }
     let repo_path = Path::new(&repo.path);
-    let output = if branch.contains('/') {
-        git(repo_path, &["switch", "--track", &branch]).or_else(|_| {
-            git(repo_path, &["checkout", "--track", &branch])
-                .or_else(|_| git(repo_path, &["checkout", &branch]))
-        })?
+    let (output, checked_out) = if branch.contains('/') {
+        // A remote-tracking ref like "origin/main". Switching to it directly
+        // detaches HEAD, so prefer an existing local branch (the leaf name) and
+        // only create a tracking branch when no local one exists. We never fall
+        // back to a plain checkout of the remote ref, which would detach HEAD.
+        let leaf = branch.splitn(2, '/').nth(1).unwrap_or("").to_string();
+        let local_exists = !leaf.is_empty()
+            && git(
+                repo_path,
+                &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{leaf}")],
+            )
+            .is_ok();
+        if local_exists {
+            let out = git(repo_path, &["switch", &leaf])
+                .or_else(|_| git(repo_path, &["checkout", &leaf]))?;
+            (out, leaf)
+        } else {
+            let out = git(repo_path, &["switch", "--track", &branch])
+                .or_else(|_| git(repo_path, &["checkout", "--track", &branch]))?;
+            (out, leaf.clone())
+        }
     } else {
-        git(repo_path, &["switch", &branch])
-            .or_else(|_| git(repo_path, &["checkout", &branch]))?
+        let out = git(repo_path, &["switch", &branch])
+            .or_else(|_| git(repo_path, &["checkout", &branch]))?;
+        (out, branch.clone())
     };
 
+    let label = if checked_out.is_empty() { &branch } else { &checked_out };
     Ok(ActionResult {
-        message: format!("Checked out {branch}."),
+        message: format!("Checked out {label}."),
         output,
     })
 }

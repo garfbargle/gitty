@@ -1307,6 +1307,21 @@ function App() {
       setError("Return to latest before switching branches.");
       return;
     }
+
+    // Picking a remote-tracking branch (e.g. "github/main") with a plain
+    // checkout detaches HEAD. If a local branch already tracks it — or shares
+    // its leaf name — switch to that local branch instead so the user stays on
+    // a real branch they can commit and push from.
+    const branches = snapshot?.branches ?? [];
+    const picked = branches.find((b) => b.name === branch);
+    if (picked?.isRemote) {
+      const leaf = branch.split("/").slice(1).join("/");
+      const localEquivalent =
+        branches.find((b) => !b.isRemote && b.upstream === branch) ??
+        branches.find((b) => !b.isRemote && b.name === leaf);
+      if (localEquivalent) branch = localEquivalent.name;
+    }
+
     const isDetached = snapshot?.branch.includes("detached");
     if (!isDetached && branch === snapshot?.branch) return;
     const result = await run(() =>
