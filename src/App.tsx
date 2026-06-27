@@ -354,9 +354,9 @@ function App() {
   const historyCommits = useMemo(
     () =>
       snapshot
-        ? pickerCommits(snapshot.commits, snapshot.aheadCommits ?? [])
+        ? pickerCommits(snapshot.graphCommits ?? snapshot.commits, snapshot.aheadCommits ?? [])
         : [],
-    [snapshot?.commits, snapshot?.aheadCommits],
+    [snapshot?.graphCommits, snapshot?.commits, snapshot?.aheadCommits],
   );
 
   const startDiscovery = useCallback((paths: string[]) => {
@@ -616,7 +616,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      setCommitsHasMore(commitsPageHasMore(result.commits.length, INITIAL_COMMIT_LIMIT));
+      setCommitsHasMore(commitsPageHasMore(result.graphCommits.length, INITIAL_COMMIT_LIMIT));
       void enrichRepoSnapshot(path, requestId);
       return;
     }
@@ -689,7 +689,7 @@ function App() {
     loadingMoreCommitsRef.current = true;
     setLoadingMoreCommits(true);
     try {
-      const skip = snapshot?.repo.path === path ? snapshot.commits.length : 0;
+      const skip = snapshot?.repo.path === path ? snapshot.graphCommits.length : 0;
       const more = await invoke<CommitEntry[]>("repo_commits", {
         path,
         skip,
@@ -700,7 +700,7 @@ function App() {
       if (more.length === 0) return;
       setSnapshot((prev) =>
         prev && prev.repo.path === path
-          ? { ...prev, commits: appendUniqueCommits(prev.commits, more) }
+          ? { ...prev, graphCommits: appendUniqueCommits(prev.graphCommits, more) }
           : prev,
       );
     } catch (err) {
@@ -723,7 +723,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      setCommitsHasMore(commitsPageHasMore(result.commits.length, INITIAL_COMMIT_LIMIT));
+      setCommitsHasMore(commitsPageHasMore(result.graphCommits.length, INITIAL_COMMIT_LIMIT));
       return result;
     }
     return null;
@@ -2459,6 +2459,7 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
+              branchEntries={displaySnapshot.branches}
               commits={displaySnapshot.commits}
               aheadCommits={displaySnapshot.aheadCommits ?? []}
               aheadBranch={displaySnapshot.aheadBranch}
@@ -2474,6 +2475,9 @@ function App() {
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
+              onMergeIn={(name) =>
+                openMerge({ source: name, target: displaySnapshot.branch })
+              }
               viewingCommit={viewingCommit}
               visitSession={visitSession}
               onSelectCommit={(commit) => void inspectCommit(commit)}

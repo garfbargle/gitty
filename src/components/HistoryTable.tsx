@@ -10,7 +10,7 @@ import {
   tagName,
   tagRefs,
 } from "../lib/git";
-import { buildGraphRows, laneColor } from "../lib/graph";
+import { buildGraphRows } from "../lib/graph";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
@@ -31,6 +31,13 @@ type HistoryTableProps = {
 };
 
 const SCROLL_LOAD_THRESHOLD = 120;
+
+// Fixed row geometry so the graph strands of adjacent rows line up centre-to-
+// centre. Each row's SVG draws the half-curves into the gaps above and below;
+// neighbouring rows draw the matching halves, so the curves meet.
+const ROW_H = 36;
+const LANE_W = 14;
+const laneX = (lane: number) => 12 + lane * LANE_W;
 
 export function HistoryTable({
   commits,
@@ -86,7 +93,8 @@ export function HistoryTable({
       )
     : commits;
   const rows = buildGraphRows(filtered);
-  const graphWidth = Math.max(...rows.map((row) => row.laneCount), 1) * 14 + 24;
+  const laneCount = Math.max(rows[0]?.laneCount ?? 1, 1);
+  const graphWidth = laneCount * LANE_W + 10;
 
   function openTagContextMenu(event: React.MouseEvent, commit: CommitEntry) {
     event.preventDefault();
@@ -116,13 +124,14 @@ export function HistoryTable({
         </div>
 
         <div className="history-body" ref={bodyRef}>
-          {rows.map((row) => {
+          {rows.map((row, idx) => {
             const refs = parseRefs(row.commit.refs);
             const mainRef = primaryRef(row.commit.refs);
             const tags = tagRefs(row.commit.refs).map(tagName);
             const active = row.commit.hash === selectedHash;
-            const refColor = laneColor(row.lane);
+            const refColor = row.color;
             const isAhead = aheadHashes?.has(row.commit.hash) ?? false;
+            const edgesAbove = idx > 0 ? rows[idx - 1].edges : [];
 
             return (
               <button
@@ -136,29 +145,37 @@ export function HistoryTable({
                   <svg
                     className="graph-svg"
                     width={graphWidth}
-                    height={36}
+                    height={ROW_H}
                     aria-hidden="true"
                   >
-                    {Array.from({ length: row.laneCount }).map((_, laneIndex) => {
-                      const color = laneColor(laneIndex);
-                      const x = 12 + laneIndex * 14;
+                    {edgesAbove.map((edge, ei) => {
+                      const xf = laneX(edge.fromLane);
+                      const xt = laneX(edge.toLane);
+                      const d =
+                        xf === xt
+                          ? `M ${xf} ${-ROW_H / 2} L ${xt} ${ROW_H / 2}`
+                          : `M ${xf} ${-ROW_H / 2} C ${xf} 0 ${xt} 0 ${xt} ${ROW_H / 2}`;
                       return (
-                        <g key={laneIndex}>
-                          {laneIndex === row.lane && row.continueDown ? (
-                            <line x1={x} y1={18} x2={x} y2={36} stroke={color} strokeWidth={2} />
-                          ) : null}
-                          {laneIndex === row.lane ? (
-                            <line x1={x} y1={0} x2={x} y2={18} stroke={color} strokeWidth={2} />
-                          ) : null}
-                        </g>
+                        <path key={`t${ei}`} d={d} fill="none" stroke={edge.color} strokeWidth={2} />
+                      );
+                    })}
+                    {row.edges.map((edge, ei) => {
+                      const xf = laneX(edge.fromLane);
+                      const xt = laneX(edge.toLane);
+                      const d =
+                        xf === xt
+                          ? `M ${xf} ${ROW_H / 2} L ${xt} ${ROW_H * 1.5}`
+                          : `M ${xf} ${ROW_H / 2} C ${xf} ${ROW_H} ${xt} ${ROW_H} ${xt} ${ROW_H * 1.5}`;
+                      return (
+                        <path key={`b${ei}`} d={d} fill="none" stroke={edge.color} strokeWidth={2} />
                       );
                     })}
                     <circle
-                      cx={12 + row.lane * 14}
-                      cy={18}
+                      cx={laneX(row.lane)}
+                      cy={ROW_H / 2}
                       r={5}
                       fill={refColor}
-                      stroke="white"
+                      stroke="var(--bg-panel)"
                       strokeWidth={2}
                     />
                   </svg>

@@ -62,6 +62,19 @@ struct BranchEntry {
     is_remote: bool,
     is_current: bool,
     upstream: Option<String>,
+    /// Tip commit of the branch, so the UI can locate it on the graph.
+    tip_hash: Option<String>,
+    tip_short_hash: Option<String>,
+    /// Committer date of the tip (iso-strict), for "recently active" sorting.
+    last_commit_date: Option<String>,
+    /// How this branch sits relative to the *current* branch: `ahead` is commits
+    /// this branch has that the current branch lacks (pull candidates), `behind`
+    /// is commits the current branch has that this branch lacks.
+    ahead: Option<u32>,
+    behind: Option<u32>,
+    /// How this branch sits relative to its own upstream.
+    ahead_upstream: Option<u32>,
+    behind_upstream: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +96,10 @@ struct RepoSnapshot {
     behind: u32,
     is_clean: bool,
     changes: Vec<FileChange>,
+    /// Linear HEAD ancestry — drives the working-tree timeline and picker.
     commits: Vec<CommitEntry>,
+    /// Multi-branch history for the graph view; shows parallel lanes.
+    graph_commits: Vec<CommitEntry>,
     ahead_commits: Vec<CommitEntry>,
     ahead_branch: Option<String>,
     remotes: Vec<RemoteEntry>,
@@ -550,6 +566,19 @@ fn parse_commit_log_output(output: &str) -> Vec<CommitEntry> {
         .collect()
 }
 
+/// First-parent-reachable history of HEAD — the linear "your branch" ancestry
+/// that the working-tree timeline and commit picker rely on. Distinct from the
+/// multi-branch `graph_log_page`, which the history graph uses.
+fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
+    commit_log_page(repo_path, 0, limit)
+}
+
+fn commit_log_page(repo_path: &Path, skip: u32, limit: u32) -> Vec<CommitEntry> {
+    let limit = limit.clamp(1, 100).to_string();
+    let skip = skip.to_string();
+    commit_log_with_args(repo_path, &["-n", &limit, "--skip", &skip])
+}
+
 fn commit_log_with_args(repo_path: &Path, extra_args: &[&str]) -> Vec<CommitEntry> {
     let mut args = vec![
         "log",
@@ -562,16 +591,6 @@ fn commit_log_with_args(repo_path: &Path, extra_args: &[&str]) -> Vec<CommitEntr
         return Vec::new();
     };
     parse_commit_log_output(&output)
-}
-
-fn commit_log(repo_path: &Path, limit: u32) -> Vec<CommitEntry> {
-    commit_log_page(repo_path, 0, limit)
-}
-
-fn commit_log_page(repo_path: &Path, skip: u32, limit: u32) -> Vec<CommitEntry> {
-    let limit = limit.clamp(1, 100).to_string();
-    let skip = skip.to_string();
-    commit_log_with_args(repo_path, &["-n", &limit, "--skip", &skip])
 }
 
 fn is_ancestor(repo_path: &Path, ancestor: &str, descendant: &str) -> bool {
@@ -725,6 +744,17 @@ fn ahead_commits(
     (collected, resume)
 }
 
+/// Commits in `left` not in `right`, and in `right` not in `left`, via a single
+/// `rev-list --left-right --count`. Returns None when either ref is unresolvable.
+fn divergence(repo_path: &Path, left: &str, right: &str) -> Option<(u32, u32)> {
+    let range = format!("{left}...{right}");
+    let output = git(repo_path, &["rev-list", "--left-right", "--count", &range]).ok()?;
+    let mut parts = output.split_whitespace();
+    let ahead = parts.next()?.parse().ok()?;
+    let behind = parts.next()?.parse().ok()?;
+    Some((ahead, behind))
+}
+
 fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
     let current = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
     let Ok(output) = git(
@@ -734,7 +764,7 @@ fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
             "--sort=-committerdate",
             "refs/heads/",
             "refs/remotes/",
-            "--format=%(refname:short)\x1f%(upstream:short)\x1f%(refname)",
+            "--format=%(refname:short)\x1f%(upstream:short)\x1f%(refname)\x1f%(objectname)\x1f%(objectname:short)\x1f%(committerdate:iso-strict)",
         ],
     ) else {
         return Vec::new();
@@ -753,16 +783,119 @@ fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
                 .filter(|value| !value.is_empty())
                 .map(|value| value.to_string());
             let full_ref = parts.next().unwrap_or_default();
+            let tip_hash = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+            let tip_short_hash = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
+            let last_commit_date = parts.next().filter(|v| !v.is_empty()).map(str::to_string);
             let is_remote = full_ref.starts_with("refs/remotes/");
             let is_current = !current.is_empty() && name == current;
+
+            // Position relative to the branch the user is on, so the working-tree
+            // view can answer "main is N ahead of me" without a round trip.
+            let (ahead, behind) = if is_current || current.is_empty() {
+                (Some(0), Some(0))
+            } else {
+                match divergence(repo_path, &name, &current) {
+                    Some((a, b)) => (Some(a), Some(b)),
+                    None => (None, None),
+                }
+            };
+
+            let (ahead_upstream, behind_upstream) = match &upstream {
+                Some(up) => match divergence(repo_path, &name, up) {
+                    Some((a, b)) => (Some(a), Some(b)),
+                    None => (None, None),
+                },
+                None => (None, None),
+            };
+
             Some(BranchEntry {
                 name,
                 is_remote,
                 is_current,
                 upstream,
+                tip_hash,
+                tip_short_hash,
+                last_commit_date,
+                ahead,
+                behind,
+                ahead_upstream,
+                behind_upstream,
             })
         })
         .collect()
+}
+
+/// Number of seconds in the "recently active" window for remote branches that
+/// we fold into the graph log. Local branches are always included.
+const ACTIVE_BRANCH_WINDOW_SECS: u64 = 60 * 60 * 24 * 30;
+
+/// The set of refs whose history the graph should show: HEAD, every local
+/// branch, their upstreams, and any remote branch with a commit inside the
+/// active window. This is what lets parallel lanes exist in the graph at all —
+/// a bare `git log HEAD` can only ever draw the current branch's ancestry.
+fn graph_log_refs(repo_path: &Path) -> Vec<String> {
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "refs/heads/",
+            "refs/remotes/",
+            "--format=%(refname)\x1f%(committerdate:unix)\x1f%(upstream)",
+        ],
+    ) else {
+        return vec!["HEAD".to_string()];
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let cutoff = now.saturating_sub(ACTIVE_BRANCH_WINDOW_SECS);
+
+    let mut refs: Vec<String> = vec!["HEAD".to_string()];
+    let mut tracked_upstreams: Vec<String> = Vec::new();
+    let mut remotes: Vec<(String, u64)> = Vec::new();
+
+    for line in output.lines() {
+        let mut parts = line.split('\x1f');
+        let Some(refname) = parts.next() else { continue };
+        if refname.is_empty() || refname.ends_with("/HEAD") {
+            continue;
+        }
+        let when: u64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let upstream = parts.next().unwrap_or_default();
+
+        if refname.starts_with("refs/heads/") {
+            refs.push(refname.to_string());
+            if !upstream.is_empty() {
+                tracked_upstreams.push(upstream.to_string());
+            }
+        } else if refname.starts_with("refs/remotes/") {
+            remotes.push((refname.to_string(), when));
+        }
+    }
+
+    for (refname, when) in remotes {
+        if when >= cutoff || tracked_upstreams.contains(&refname) {
+            refs.push(refname);
+        }
+    }
+
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
+/// Like `commit_log_page`, but spanning the active branch set so the graph can
+/// render parallel lanes. Order is `--date-order` for a readable graph.
+fn graph_log_page(repo_path: &Path, skip: u32, limit: u32) -> Vec<CommitEntry> {
+    let limit = limit.clamp(1, 100).to_string();
+    let skip = skip.to_string();
+    let refs = graph_log_refs(repo_path);
+    let mut args: Vec<&str> = vec!["--date-order", "-n", &limit, "--skip", &skip];
+    let ref_args: Vec<&str> = refs.iter().map(String::as_str).collect();
+    args.extend(ref_args);
+    commit_log_with_args(repo_path, &args)
 }
 
 fn remote_list(repo_path: &Path) -> Vec<RemoteEntry> {
@@ -848,17 +981,20 @@ fn repo_snapshot_blocking(
 
     let repo_path_changes = repo_path.clone();
     let repo_path_commits = repo_path.clone();
+    let repo_path_graph = repo_path.clone();
     let repo_path_remotes = repo_path.clone();
     let repo_path_branches = repo_path.clone();
 
-    let (changes, commits, remotes, branches) = std::thread::scope(|scope| {
+    let (changes, commits, graph_commits, remotes, branches) = std::thread::scope(|scope| {
         let changes_handle = scope.spawn(|| changed_files(&repo_path_changes));
         let commits_handle = scope.spawn(|| commit_log(&repo_path_commits, log_limit));
+        let graph_handle = scope.spawn(|| graph_log_page(&repo_path_graph, 0, log_limit));
         let remotes_handle = scope.spawn(|| remote_list(&repo_path_remotes));
         let branches_handle = scope.spawn(|| branch_list(&repo_path_branches));
         (
             changes_handle.join().unwrap(),
             commits_handle.join().unwrap(),
+            graph_handle.join().unwrap(),
             remotes_handle.join().unwrap(),
             branches_handle.join().unwrap(),
         )
@@ -903,6 +1039,7 @@ fn repo_snapshot_blocking(
         is_clean: changes.is_empty(),
         changes,
         commits,
+        graph_commits,
         ahead_commits,
         ahead_branch,
         remotes,
@@ -970,7 +1107,7 @@ fn repo_commits(path: String, skip: Option<u32>, limit: Option<u32>) -> Result<V
     let repo = normalize_repo(&path)?;
     let skip = skip.unwrap_or(0);
     let limit = limit.unwrap_or(50);
-    Ok(commit_log_page(Path::new(&repo.path), skip, limit))
+    Ok(graph_log_page(Path::new(&repo.path), skip, limit))
 }
 
 #[tauri::command]

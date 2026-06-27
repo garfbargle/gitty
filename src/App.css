@@ -961,6 +961,133 @@ button:focus-visible {
   color: var(--accent);
 }
 
+/* Current-branch divergence line at the top of the picker. */
+.wt-branch-current {
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.wt-branch-current-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wt-branch-vs {
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+/* "Other branches" rows: a wide switch button plus a merge affordance. */
+.wt-branches {
+  display: flex;
+  flex-direction: column;
+}
+
+.wt-branch-row {
+  align-items: stretch;
+  display: flex;
+  gap: 2px;
+}
+
+.wt-branch-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.wt-branch-main:hover {
+  background: var(--bg-hover);
+}
+
+.wt-branch-main svg {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.wt-branch-main svg.wt-branch-remote {
+  opacity: 0.6;
+}
+
+.wt-branch-name {
+  flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-branch-counts {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  gap: 6px;
+}
+
+.wt-ahead {
+  color: var(--success);
+}
+
+.wt-behind {
+  color: var(--warning);
+}
+
+.wt-even {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  opacity: 0.7;
+}
+
+.wt-branch-merge {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  padding: 0 8px;
+}
+
+.wt-branch-merge:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* Persistent ahead/behind pill beside the branch selector. */
+.branch-divergence {
+  align-items: center;
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.branch-divergence-ahead {
+  color: var(--success);
+}
+
+.branch-divergence-behind {
+  color: var(--warning);
+}
+
 .option-ahead-badge {
   background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
   border-radius: 999px;

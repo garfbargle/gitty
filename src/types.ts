@@ -35,6 +35,15 @@ export type BranchEntry = {
   isRemote: boolean;
   isCurrent: boolean;
   upstream?: string | null;
+  tipHash?: string | null;
+  tipShortHash?: string | null;
+  lastCommitDate?: string | null;
+  /// Commits this branch has that the current branch lacks (pull candidates).
+  ahead?: number | null;
+  /// Commits the current branch has that this branch lacks.
+  behind?: number | null;
+  aheadUpstream?: number | null;
+  behindUpstream?: number | null;
 };
 
 export type TagEntry = {
@@ -64,7 +73,10 @@ export type RepoSnapshot = {
   behind: number;
   isClean: boolean;
   changes: FileChange[];
+  /// Linear HEAD ancestry — drives the working-tree timeline and picker.
   commits: CommitEntry[];
+  /// Multi-branch history for the graph view; shows parallel lanes.
+  graphCommits: CommitEntry[];
   aheadCommits: CommitEntry[];
   aheadBranch?: string | null;
   remotes: RemoteEntry[];
