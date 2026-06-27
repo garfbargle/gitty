@@ -164,6 +164,7 @@ function DiffFileSection({
   commit,
   showWorkingTreeBadges,
   showHunkActions,
+  showHeader = true,
   disabled,
   onUnstage,
   onStageHunk,
@@ -173,6 +174,7 @@ function DiffFileSection({
   bundle: DiffFileBundle;
   fileChange?: FileChange;
   section?: ChangeSection;
+  showHeader?: boolean;
   repoPath?: string;
   commit?: string;
   showWorkingTreeBadges?: boolean;
@@ -237,21 +239,23 @@ function DiffFileSection({
 
   return (
     <section className="diff-file-section">
-      <header className="diff-file-header">
-        <FilePathLabel path={filePath} className="diff-path" />
-        {showWorkingTreeBadges && fileChange ? (
-          staged ? (
-            <span className="badge staged">Staged</span>
-          ) : (
-            <span className="badge unstaged">Unstaged</span>
-          )
-        ) : null}
-        {showWorkingTreeBadges && staged && onUnstage && fileChange ? (
-          <button type="button" className="ghost-btn sm" onClick={() => onUnstage(fileChange.path)}>
-            Unstage
-          </button>
-        ) : null}
-      </header>
+      {showHeader ? (
+        <header className="diff-file-header">
+          <FilePathLabel path={filePath} className="diff-path" />
+          {showWorkingTreeBadges && fileChange ? (
+            staged ? (
+              <span className="badge staged">Staged</span>
+            ) : (
+              <span className="badge unstaged">Unstaged</span>
+            )
+          ) : null}
+          {showWorkingTreeBadges && staged && onUnstage && fileChange ? (
+            <button type="button" className="ghost-btn sm" onClick={() => onUnstage(fileChange.path)}>
+              Unstage
+            </button>
+          ) : null}
+        </header>
+      ) : null}
 
       {diffFile.isBinary ? (
         showImagePreview ? (
@@ -413,6 +417,7 @@ export function DiffViewer({
               commit={commit}
               showWorkingTreeBadges={showWorkingTreeBadges}
               showHunkActions={showHunkActions}
+              showHeader={multiFile}
               disabled={disabled}
               onUnstage={onUnstage}
               onStageHunk={onStageHunk}

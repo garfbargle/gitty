@@ -7,13 +7,22 @@ export type GraphEdge = {
   fromLane: number;
   toLane: number;
   color: string;
+  /// Internal: the persistent colour id of the lane this strand leaves from.
+  /// Used to decide whether the strand belongs to the checked-out branch.
+  colorIdx: number;
+  /// True when this strand is part of the currently checked-out branch's
+  /// first-parent history, so the renderer can draw it as the bold mainline.
+  onHead: boolean;
 };
 
 export type GraphRow = {
   commit: CommitEntry;
   lane: number;
   color: string;
+  colorIdx: number;
   laneCount: number;
+  /// True when this commit sits on the checked-out branch's first-parent line.
+  onHead: boolean;
   /// Strands leaving this commit downward, toward the next row.
   edges: GraphEdge[];
 };
@@ -36,7 +45,7 @@ export function laneColor(lane: number) {
 /// connecting strands between every adjacent pair of rows. Unlike a per-lane
 /// on/off renderer, this draws real fork/merge edges, so a merge's second parent
 /// no longer appears out of nowhere.
-export function buildGraphRows(commits: CommitEntry[]): GraphRow[] {
+export function buildGraphRows(commits: CommitEntry[], headHash?: string): GraphRow[] {
   // `lanes[k]` is the commit hash lane k is currently routing toward (the next
   // commit expected in that lane), or null when the lane is free. `laneColorIdx`
   // keeps a colour with a lane for as long as it stays continuously occupied, so
@@ -74,7 +83,13 @@ export function buildGraphRows(commits: CommitEntry[]): GraphRow[] {
       for (let k = 0; k < lanes.length; k += 1) {
         if (lanes[k] === null) continue;
         const toLane = lanes[k] === commit.hash ? myLane : k;
-        edges.push({ fromLane: k, toLane, color: laneColor(laneColorIdx[k]) });
+        edges.push({
+          fromLane: k,
+          toLane,
+          color: laneColor(laneColorIdx[k]),
+          colorIdx: laneColorIdx[k],
+          onHead: false,
+        });
       }
       rows[i - 1].edges = edges;
     }
@@ -83,7 +98,9 @@ export function buildGraphRows(commits: CommitEntry[]): GraphRow[] {
       commit,
       lane: myLane,
       color: laneColor(laneColorIdx[myLane]),
+      colorIdx: laneColorIdx[myLane],
       laneCount: 0,
+      onHead: false,
       edges: [],
     });
 
@@ -136,6 +153,23 @@ export function buildGraphRows(commits: CommitEntry[]): GraphRow[] {
     widest = Math.max(widest, rowMax);
   }
   for (const row of rows) row.laneCount = widest;
+
+  // Flag the checked-out branch's lane. A lane keeps one colour id for its whole
+  // continuous run, so tagging every row/edge that shares the HEAD commit's
+  // colour id traces that branch — and only that branch — top to bottom. The
+  // renderer draws it bold and full-strength so "the line you're on" is obvious.
+  if (headHash) {
+    const headRow = rows.find((row) => row.commit.hash === headHash);
+    if (headRow) {
+      const headColorIdx = headRow.colorIdx;
+      for (const row of rows) {
+        if (row.colorIdx === headColorIdx) row.onHead = true;
+        for (const edge of row.edges) {
+          if (edge.colorIdx === headColorIdx) edge.onHead = true;
+        }
+      }
+    }
+  }
 
   return rows;
 }

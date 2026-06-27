@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import type { CommitEntry } from "../types";
 import {
   authorInitials,
+  branchRefs,
   formatCommitDate,
   formatCommitTime,
   parseRefs,
@@ -17,6 +18,7 @@ import { TagBadge } from "./TagBadge";
 
 type HistoryTableProps = {
   commits: CommitEntry[];
+  currentBranch?: string;
   aheadHashes?: Set<string>;
   unpushedTags?: Set<string>;
   selectedHash?: string;
@@ -41,6 +43,7 @@ const laneX = (lane: number) => 12 + lane * LANE_W;
 
 export function HistoryTable({
   commits,
+  currentBranch,
   aheadHashes,
   unpushedTags,
   selectedHash,
@@ -92,7 +95,15 @@ export function HistoryTable({
           commit.refs.toLowerCase().includes(query),
       )
     : commits;
-  const rows = buildGraphRows(filtered);
+  // The checked-out tip: prefer the commit git marks with "HEAD ->", falling
+  // back to whichever commit carries the current branch name. Everything HEAD-
+  // related (bold lane, "you are here" node + pill) keys off this hash.
+  const headHash =
+    filtered.find((commit) => parseRefs(commit.refs).some((ref) => ref.includes("HEAD")))?.hash ??
+    (currentBranch
+      ? filtered.find((commit) => branchRefs(commit.refs).includes(currentBranch))?.hash
+      : undefined);
+  const rows = buildGraphRows(filtered, headHash);
   const laneCount = Math.max(rows[0]?.laneCount ?? 1, 1);
   const graphWidth = laneCount * LANE_W + 10;
 
@@ -130,6 +141,7 @@ export function HistoryTable({
             const tags = tagRefs(row.commit.refs).map(tagName);
             const active = row.commit.hash === selectedHash;
             const refColor = row.color;
+            const isHeadTip = !!headHash && row.commit.hash === headHash;
             const isAhead = aheadHashes?.has(row.commit.hash) ?? false;
             const edgesAbove = idx > 0 ? rows[idx - 1].edges : [];
 
@@ -156,7 +168,15 @@ export function HistoryTable({
                           ? `M ${xf} ${-ROW_H / 2} L ${xt} ${ROW_H / 2}`
                           : `M ${xf} ${-ROW_H / 2} C ${xf} 0 ${xt} 0 ${xt} ${ROW_H / 2}`;
                       return (
-                        <path key={`t${ei}`} d={d} fill="none" stroke={edge.color} strokeWidth={2} />
+                        <path
+                          key={`t${ei}`}
+                          d={d}
+                          fill="none"
+                          stroke={edge.color}
+                          strokeWidth={edge.onHead ? 3 : 2}
+                          strokeLinecap="round"
+                          opacity={edge.onHead ? 1 : 0.5}
+                        />
                       );
                     })}
                     {row.edges.map((edge, ei) => {
@@ -167,16 +187,36 @@ export function HistoryTable({
                           ? `M ${xf} ${ROW_H / 2} L ${xt} ${ROW_H * 1.5}`
                           : `M ${xf} ${ROW_H / 2} C ${xf} ${ROW_H} ${xt} ${ROW_H} ${xt} ${ROW_H * 1.5}`;
                       return (
-                        <path key={`b${ei}`} d={d} fill="none" stroke={edge.color} strokeWidth={2} />
+                        <path
+                          key={`b${ei}`}
+                          d={d}
+                          fill="none"
+                          stroke={edge.color}
+                          strokeWidth={edge.onHead ? 3 : 2}
+                          strokeLinecap="round"
+                          opacity={edge.onHead ? 1 : 0.5}
+                        />
                       );
                     })}
+                    {row.onHead ? (
+                      <circle
+                        cx={laneX(row.lane)}
+                        cy={ROW_H / 2}
+                        r={9}
+                        fill="none"
+                        stroke={refColor}
+                        strokeWidth={2}
+                        opacity={0.3}
+                      />
+                    ) : null}
                     <circle
                       cx={laneX(row.lane)}
                       cy={ROW_H / 2}
-                      r={5}
+                      r={row.onHead ? 5.5 : 4.5}
                       fill={refColor}
                       stroke="var(--bg-panel)"
                       strokeWidth={2}
+                      opacity={row.onHead ? 1 : 0.85}
                     />
                   </svg>
                 </div>
@@ -185,13 +225,19 @@ export function HistoryTable({
                   <div className="ref-badges">
                     {mainRef ? (
                       <span
-                        className="branch-badge"
-                        style={{
-                          background: `${refColor}18`,
-                          color: refColor,
-                          borderColor: `${refColor}40`,
-                        }}
+                        className={`branch-badge${isHeadTip ? " head" : ""}`}
+                        title={isHeadTip ? `Checked out: ${mainRef}` : mainRef}
+                        style={
+                          isHeadTip
+                            ? { background: refColor, borderColor: refColor }
+                            : {
+                                background: `${refColor}18`,
+                                color: refColor,
+                                borderColor: `${refColor}40`,
+                              }
+                        }
                       >
+                        {isHeadTip ? <span className="branch-badge-dot" /> : null}
                         {mainRef}
                       </span>
                     ) : refs[0] && !refs[0].startsWith("tag:") ? (

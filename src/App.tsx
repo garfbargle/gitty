@@ -2800,6 +2800,7 @@ function App() {
                   primary={
                     <HistoryTable
                       commits={historyCommits}
+                      currentBranch={displaySnapshot.branch}
                       hasMore={commitsHasMore}
                       loadingMore={loadingMoreCommits}
                       onLoadMore={() => void loadMoreCommits()}
