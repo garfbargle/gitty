@@ -1844,6 +1844,151 @@ button:focus-visible {
   opacity: 0.55;
 }
 
+/* ── Branch-context chips (above the timeline) ── */
+.timeline-context-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 2px 10px;
+}
+
+.context-chip {
+  align-items: center;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  padding: 3px 5px 3px 9px;
+}
+
+.context-chip.behind {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.context-chip .chip-ref {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.context-chip svg {
+  color: var(--text-muted);
+}
+
+.chip-count {
+  align-items: center;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 1px;
+}
+
+.chip-count.behind {
+  color: var(--warning);
+}
+
+.chip-count.ahead {
+  color: var(--accent);
+}
+
+.chip-sync {
+  color: var(--text-muted);
+}
+
+.chip-update {
+  background: var(--warning);
+  border: 0;
+  border-radius: 999px;
+  color: #1b1206;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 9px;
+}
+
+.chip-update:hover {
+  filter: brightness(1.07);
+}
+
+/* ── Branch-context lanes (ghost commits above the working tree) ── */
+.timeline-track-wrap {
+  min-width: min-content;
+  position: relative;
+}
+
+.timeline-context-layer {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
+.lane-strand {
+  height: 2px;
+  position: absolute;
+}
+
+.lane-strand.faded {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--text-muted) 0,
+    var(--text-muted) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  opacity: 0.45;
+}
+
+.lane-fork-stub {
+  background: var(--text-muted);
+  opacity: 0.3;
+  position: absolute;
+  width: 2px;
+}
+
+.lane-dot {
+  background: var(--bg-panel);
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+  box-sizing: border-box;
+  height: 11px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 11px;
+}
+
+.lane-dot.tip {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 16%, transparent);
+}
+
+.lane-overflow {
+  background: var(--bg-panel);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 3px;
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.lane-label {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 10px;
+  font-weight: 600;
+  gap: 3px;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
 /* ── Workspace grid ── */
 .workspace-grid {
   display: grid;

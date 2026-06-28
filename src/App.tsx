@@ -2543,6 +2543,10 @@ function App() {
                   unpushedTags={unpushedTagSet}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
+                  contextLanes={displaySnapshot.timelineContext ?? []}
+                  onUpdateFromBase={(lane) =>
+                    openMerge({ source: lane.refName, target: displaySnapshot.branch })
+                  }
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
