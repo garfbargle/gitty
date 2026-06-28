@@ -650,9 +650,52 @@ button:focus-visible {
   color: var(--text-primary);
 }
 
-.view-mode-toggle.working,
-.view-mode-toggle.history {
+/* Segmented Changes | History switch */
+.view-mode-switch {
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  height: 32px;
+  padding: 2px;
+}
+
+.view-mode-segment {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 5px;
+  height: 100%;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.view-mode-segment:hover:not(:disabled):not(.active) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.view-mode-segment.active {
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
   color: var(--accent);
+}
+
+.view-mode-switch:has(.view-mode-segment:disabled) {
+  opacity: 0.5;
+}
+
+.view-mode-segment:disabled {
+  cursor: default;
 }
 
 .sidebar-restore-btn {

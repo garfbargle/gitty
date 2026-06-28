@@ -151,17 +151,6 @@ export function TopBar({
           </button>
         ) : null}
 
-        <button
-          type="button"
-          className={`view-mode-toggle ${viewMode}`}
-          title={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
-          aria-label={viewMode === "working" ? "Switch to history" : "Switch to working tree"}
-          disabled={repoSwitching || inTimeTravel}
-          onClick={onToggleView}
-        >
-          {viewMode === "working" ? <History size={15} /> : <GitCompareArrows size={15} />}
-        </button>
-
         <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
 
         <span className="breadcrumb-sep">›</span>
@@ -194,6 +183,35 @@ export function TopBar({
             {behind > 0 ? <span className="branch-divergence-behind">↓{behind}</span> : null}
           </span>
         ) : null}
+
+        <div className="view-mode-switch" role="tablist" aria-label="View">
+          <button
+            type="button"
+            role="tab"
+            className={`view-mode-segment${viewMode === "working" ? " active" : ""}`}
+            aria-selected={viewMode === "working"}
+            disabled={repoSwitching || inTimeTravel}
+            onClick={() => {
+              if (viewMode !== "working") onToggleView();
+            }}
+          >
+            <GitCompareArrows size={14} />
+            <span>Changes</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`view-mode-segment${viewMode === "history" ? " active" : ""}`}
+            aria-selected={viewMode === "history"}
+            disabled={repoSwitching || inTimeTravel}
+            onClick={() => {
+              if (viewMode !== "history") onToggleView();
+            }}
+          >
+            <History size={14} />
+            <span>History</span>
+          </button>
+        </div>
 
         {inTimeTravel && timeTravelCommit ? (
           <>
