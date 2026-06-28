@@ -196,6 +196,23 @@ export function tagName(ref: string) {
   return ref.replace(/^tag:\s*/, "");
 }
 
+/**
+ * Suggest the next tag name by bumping the trailing number of the most recent
+ * tag, preserving any prefix/suffix around it:
+ *   "v1.2.3"      -> "v1.2.4"
+ *   "v1.2"        -> "v1.3"
+ *   "release-4"   -> "release-5"
+ *   "v1.2.3-rc.1" -> "v1.2.3-rc.2"
+ * Returns null when there's no tag or no numeric component to bump.
+ */
+export function guessNextTag(latestTag: string | undefined | null): string | null {
+  if (!latestTag) return null;
+  const match = latestTag.match(/(\d+)(\D*)$/);
+  if (!match || match.index === undefined) return null;
+  const next = String(Number(match[1]) + 1);
+  return latestTag.slice(0, match.index) + next + match[2];
+}
+
 export function branchRefs(refs: string) {
   return parseRefs(refs).filter((ref) => !ref.startsWith("tag:") && !ref.includes("HEAD"));
 }

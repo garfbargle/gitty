@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { CommitEntry, TagEntry } from "../types";
-import { formatRelativeTime } from "../lib/git";
+import { formatRelativeTime, guessNextTag } from "../lib/git";
 import { TagBadge } from "./TagBadge";
 import { SettingsModal } from "./SettingsModal";
 
@@ -28,13 +28,18 @@ export function TagCreateDialog({
   const [name, setName] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const previousTags = recentTags.slice(0, PREVIOUS_TAG_LIMIT);
+  const suggestedTag = guessNextTag(recentTags[0]?.name);
 
   useEffect(() => {
     if (!open) return;
-    setName("");
+    setName(suggestedTag ?? "");
     setNow(Date.now());
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, commit?.hash]);
 
   function submit() {
@@ -96,7 +101,7 @@ export function TagCreateDialog({
             submit();
           }
         }}
-        placeholder={previousTags[0]?.name ?? "v1.0.0"}
+        placeholder={suggestedTag ?? "v1.0.0"}
         disabled={loading}
         autoComplete="off"
         spellCheck={false}
