@@ -46,6 +46,24 @@ export type BranchEntry = {
   behindUpstream?: number | null;
 };
 
+/// How the checked-out branch sits relative to one reference branch (the trunk,
+/// or this branch's own upstream), with the reference's divergent commits so the
+/// timeline can draw a "context lane" showing how far behind the branch is.
+export type BranchDivergence = {
+  /// Display name of the reference (e.g. "main" or "origin/feature").
+  refName: string;
+  /// "integration" (the trunk) or "upstream" (this branch's remote).
+  kind: "integration" | "upstream";
+  /// Where HEAD and the reference last shared history. The lane forks here.
+  mergeBase?: string | null;
+  /// Commits the reference has that HEAD lacks — how far behind you are.
+  behind: number;
+  /// Commits HEAD has that the reference lacks — how far ahead you are.
+  ahead: number;
+  /// The reference's divergent commits since the merge-base, newest first.
+  commits: CommitEntry[];
+};
+
 export type TagEntry = {
   name: string;
   date: string;
@@ -81,6 +99,9 @@ export type RepoSnapshot = {
   aheadBranch?: string | null;
   remotes: RemoteEntry[];
   branches: BranchEntry[];
+  /// How the checked-out branch sits relative to the trunk and its own upstream,
+  /// for the working-tree timeline's branch-context lanes.
+  timelineContext: BranchDivergence[];
   tags: TagEntry[];
   unpushedTags: string[];
 };

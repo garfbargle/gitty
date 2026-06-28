@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CommitEntry } from "../types";
+import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
+import type { BranchDivergence, CommitEntry } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
 import { laneColor } from "../lib/graph";
@@ -9,6 +10,18 @@ import { TagBadge } from "./TagBadge";
 
 const SCROLL_END_THRESHOLD = 24;
 const SCROLLBAR_HIDE_DELAY_MS = 800;
+
+// Branch-context lane geometry. Ghost commits cluster near the right edge (most
+// recent) above the working tree, so "the base has moved ahead of you" stays
+// visible even when the timeline is scrolled to the present. The lanes live in
+// their own region that occupies real layout space above the commit track, so a
+// lane can never overlap the commit row. LANE_BOTTOM_PAD is the clear air between
+// the lowest lane and that row.
+const GHOST_SPACING = 28;
+const MAX_GHOST_DOTS = 8;
+const LANE_BAND_H = 30;
+const LANE_TOP_PAD = 12;
+const LANE_BOTTOM_PAD = 12;
 
 type HistoryTimelineProps = {
   commits: CommitEntry[];
@@ -23,6 +36,10 @@ type HistoryTimelineProps = {
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
   workingTreeActive?: boolean;
+  /// Where the checked-out branch sits relative to the trunk and its upstream.
+  contextLanes?: BranchDivergence[];
+  /// Pull the given reference branch into the current branch ("update").
+  onUpdateFromBase?: (lane: BranchDivergence) => void;
   mergePreview?: {
     source: string;
     target: string;
@@ -44,6 +61,8 @@ export function HistoryTimeline({
   onCreateTag,
   onDeleteTag,
   workingTreeActive,
+  contextLanes = [],
+  onUpdateFromBase,
   mergePreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -82,12 +101,51 @@ export function HistoryTimeline({
     };
   }, [commitDates]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
   const programmaticScrollDepthRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollbarTimeoutRef = useRef<number | null>(null);
   const headHash = commits[0]?.hash ?? "";
+
+  // Only lanes that are actually behind get drawn — a base you're level with or
+  // ahead of needs no ghost commits, just a header chip.
+  const lanes = useMemo(
+    () => contextLanes.filter((lane) => lane.behind > 0 && lane.commits.length > 0),
+    [contextLanes],
+  );
+  const laneRegionHeight =
+    lanes.length > 0 ? LANE_TOP_PAD + lanes.length * LANE_BAND_H + LANE_BOTTOM_PAD : 0;
+
+  // Fork x (merge-base node centre) per lane, plus the right anchor (working-tree
+  // node centre) the ghost commits hang above — all in wrap-content coordinates,
+  // so they survive horizontal scrolling without re-measuring.
+  const [geom, setGeom] = useState<{ rightX: number | null; forks: (number | null)[] }>({
+    rightX: null,
+    forks: [],
+  });
+
+  const measureLanes = useCallback(() => {
+    if (lanes.length === 0) {
+      setGeom((prev) => (prev.rightX === null && prev.forks.length === 0 ? prev : { rightX: null, forks: [] }));
+      return;
+    }
+    const centerOf = (node: HTMLButtonElement | undefined) =>
+      node ? node.offsetLeft + node.offsetWidth / 2 : null;
+    const wt = nodeRefs.current.get("working-tree");
+    const rightX = centerOf(wt);
+    const forks = lanes.map((lane) =>
+      lane.mergeBase ? centerOf(nodeRefs.current.get(lane.mergeBase)) : null,
+    );
+    setGeom((prev) => {
+      const same =
+        prev.rightX === rightX &&
+        prev.forks.length === forks.length &&
+        prev.forks.every((value, index) => value === forks[index]);
+      return same ? prev : { rightX, forks };
+    });
+  }, [lanes]);
 
   const revealScrollbar = useCallback(() => {
     const container = scrollRef.current;
@@ -199,19 +257,24 @@ export function HistoryTimeline({
   }, [headHash, selectedHash, workingTreeActive, ancestry.length, ahead.length, scheduleApplyScrollPosition]);
 
   useLayoutEffect(() => {
+    measureLanes();
+  }, [measureLanes, headHash, ancestry.length, ahead.length, changeCount, !!mergePreview]);
+
+  useLayoutEffect(() => {
     const container = scrollRef.current;
     const track = container?.querySelector(".timeline-track");
     if (!container) return;
 
     const observer = new ResizeObserver(() => {
       scheduleApplyScrollPosition();
+      measureLanes();
     });
 
     observer.observe(container);
     if (track) observer.observe(track);
 
     return () => observer.disconnect();
-  }, [scheduleApplyScrollPosition]);
+  }, [scheduleApplyScrollPosition, measureLanes]);
 
   function selectCommit(commit: CommitEntry) {
     onInteract?.();
@@ -287,10 +350,127 @@ export function HistoryTimeline({
 
   const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
 
+  // One ghost lane, drawn inside the dedicated lane region that sits *above* the
+  // commit track in normal flow (so it can never overlap the commits). The
+  // reference's recent commits cluster above the working tree (the present), with
+  // a faint strand and a downward stub back to where you forked.
+  function renderLane(lane: BranchDivergence, index: number) {
+    const rightX = geom.rightX;
+    if (rightX === null) return null;
+
+    const bandTop = LANE_TOP_PAD + index * LANE_BAND_H;
+    const dotY = bandTop + Math.round(LANE_BAND_H / 2);
+    const visible = Math.min(lane.behind, MAX_GHOST_DOTS);
+    const overflow = lane.behind - visible;
+    // j = 0 is the reference tip (newest), pinned above the working tree.
+    const dotX = (j: number) => rightX - GHOST_SPACING * j;
+    const oldestX = dotX(visible - 1);
+    const overflowX = dotX(visible);
+    const forkX = geom.forks[index];
+    const ghost = "var(--text-secondary)";
+
+    return (
+      <div className="context-lane" key={`${lane.kind}-${lane.refName}`}>
+        <span className="lane-tag" style={{ left: oldestX, top: dotY }}>
+          <GitBranch size={10} aria-hidden />
+          {lane.refName}
+        </span>
+        {forkX !== null && forkX < oldestX - 2 ? (
+          <span
+            className="lane-strand faded"
+            style={{ left: forkX, width: oldestX - forkX, top: dotY }}
+          />
+        ) : null}
+        {forkX !== null ? (
+          <span
+            className="lane-fork-stub"
+            style={{ left: forkX, top: dotY, height: laneRegionHeight - dotY }}
+          />
+        ) : null}
+        <span
+          className="lane-strand"
+          style={{ left: oldestX, width: Math.max(rightX - oldestX, 0), top: dotY, background: ghost }}
+        />
+        {overflow > 0 ? (
+          <span className="lane-overflow" style={{ left: overflowX, top: dotY }}>
+            +{overflow}
+          </span>
+        ) : null}
+        {lane.commits.slice(0, visible).map((commit, j) => (
+          <span
+            key={commit.hash}
+            className={`lane-dot${j === 0 ? " tip" : ""}`}
+            style={{ left: dotX(j), top: dotY, borderColor: ghost }}
+            title={`${lane.refName} · ${commit.shortHash} · ${commit.subject}`}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  function renderContextChips() {
+    if (contextLanes.length === 0) return null;
+    return (
+      <div className="timeline-context-bar">
+        {contextLanes.map((lane) => {
+          const inSync = lane.behind === 0 && lane.ahead === 0;
+          return (
+            <div
+              className={`context-chip${lane.behind > 0 ? " behind" : ""}`}
+              key={`chip-${lane.kind}-${lane.refName}`}
+            >
+              <GitBranch size={12} aria-hidden />
+              <span className="chip-ref">{lane.refName}</span>
+              {inSync ? (
+                <span className="chip-sync">in sync</span>
+              ) : (
+                <>
+                  {lane.behind > 0 ? (
+                    <span className="chip-count behind">
+                      <ArrowDown size={11} aria-hidden />
+                      {lane.behind}
+                    </span>
+                  ) : null}
+                  {lane.ahead > 0 ? (
+                    <span className="chip-count ahead">
+                      <ArrowUp size={11} aria-hidden />
+                      {lane.ahead}
+                    </span>
+                  ) : null}
+                </>
+              )}
+              {lane.behind > 0 && onUpdateFromBase ? (
+                <button
+                  type="button"
+                  className="chip-update"
+                  onClick={() => onUpdateFromBase(lane)}
+                  title={`Bring ${lane.refName} into your branch`}
+                >
+                  Update
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="history-timeline">
+      {renderContextChips()}
       <div className="timeline-scroller" onScroll={handleScroll} ref={scrollRef}>
-        <div className="timeline-track">
+        <div className="timeline-track-wrap" ref={wrapRef}>
+          {lanes.length > 0 ? (
+            <div
+              className="timeline-context-lanes"
+              style={{ height: laneRegionHeight }}
+              aria-hidden
+            >
+              {lanes.map((lane, index) => renderLane(lane, index))}
+            </div>
+          ) : null}
+          <div className="timeline-track">
           {ancestry.map((commit, index) =>
             renderCommitNode(
               commit,
@@ -348,6 +528,7 @@ export function HistoryTimeline({
               </span>
             </div>
           ) : null}
+          </div>
         </div>
       </div>
 

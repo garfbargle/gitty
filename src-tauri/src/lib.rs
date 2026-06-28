@@ -77,6 +77,27 @@ struct BranchEntry {
     behind_upstream: Option<u32>,
 }
 
+/// How the checked-out branch sits relative to one reference branch (the trunk,
+/// or this branch's own upstream), with the reference's divergent commits so the
+/// timeline can draw a "context lane" showing exactly how far behind you are.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BranchDivergence {
+    /// Display name of the reference (e.g. "main" or "origin/feature").
+    ref_name: String,
+    /// "integration" (the trunk you ship into) or "upstream" (this branch's remote).
+    kind: String,
+    /// Where HEAD and the reference last shared history. The lane forks here.
+    merge_base: Option<String>,
+    /// Commits the reference has that HEAD lacks — how far behind you are.
+    behind: u32,
+    /// Commits HEAD has that the reference lacks — how far ahead you are.
+    ahead: u32,
+    /// The reference's divergent commits since the merge-base, newest first and
+    /// capped. These render as the lane's ghost nodes.
+    commits: Vec<CommitEntry>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TagEntry {
@@ -104,6 +125,9 @@ struct RepoSnapshot {
     ahead_branch: Option<String>,
     remotes: Vec<RemoteEntry>,
     branches: Vec<BranchEntry>,
+    /// How the checked-out branch sits relative to the trunk and its own upstream,
+    /// for the working-tree timeline's branch-context lanes.
+    timeline_context: Vec<BranchDivergence>,
     tags: Vec<TagEntry>,
     unpushed_tags: Vec<String>,
 }
@@ -758,6 +782,94 @@ fn divergence(repo_path: &Path, left: &str, right: &str) -> Option<(u32, u32)> {
     Some((ahead, behind))
 }
 
+/// The project's trunk: a local `main`, else a local `master`. The branch the
+/// rest of the world expects a feature branch to stay current with.
+fn integration_branch(branches: &[BranchEntry]) -> Option<String> {
+    let locals: Vec<&str> = branches
+        .iter()
+        .filter(|b| !b.is_remote)
+        .map(|b| b.name.as_str())
+        .collect();
+    if locals.contains(&"main") {
+        Some("main".to_string())
+    } else if locals.contains(&"master") {
+        Some("master".to_string())
+    } else {
+        None
+    }
+}
+
+/// Divergence between HEAD and one reference branch, with the reference's
+/// commits HEAD is missing (newest first, capped) for the timeline lane.
+fn divergence_for_ref(
+    repo_path: &Path,
+    reference: &str,
+    display: &str,
+    kind: &str,
+    limit: u32,
+) -> Option<BranchDivergence> {
+    if !rev_exists(repo_path, reference) {
+        return None;
+    }
+    // ahead = commits HEAD has that the reference lacks; behind = the reverse.
+    let (ahead, behind) = divergence(repo_path, "HEAD", reference)?;
+    let merge_base = git(repo_path, &["merge-base", "HEAD", reference])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // Only the reference's side of the fork — what you'd gain by updating.
+    let commits = if behind > 0 {
+        let range = format!("HEAD..{reference}");
+        let limit_str = limit.clamp(1, 100).to_string();
+        commit_log_with_args(repo_path, &[&range, "-n", &limit_str])
+    } else {
+        Vec::new()
+    };
+
+    Some(BranchDivergence {
+        ref_name: display.to_string(),
+        kind: kind.to_string(),
+        merge_base,
+        behind,
+        ahead,
+        commits,
+    })
+}
+
+/// The reference branches the working-tree timeline draws context lanes for: the
+/// trunk (when you're not on it) and the current branch's own upstream. Only
+/// references that exist and actually diverge are returned.
+fn timeline_context(
+    repo_path: &Path,
+    branch: &str,
+    upstream: &Option<String>,
+    branches: &[BranchEntry],
+    limit: u32,
+) -> Vec<BranchDivergence> {
+    let mut lanes = Vec::new();
+
+    if let Some(trunk) = integration_branch(branches) {
+        if trunk != branch {
+            if let Some(d) = divergence_for_ref(repo_path, &trunk, &trunk, "integration", limit) {
+                lanes.push(d);
+            }
+        }
+    }
+
+    if let Some(up) = upstream {
+        // Skip a redundant lane when the upstream resolves to the trunk we already added.
+        let already = lanes.iter().any(|l| &l.ref_name == up);
+        if !already {
+            if let Some(d) = divergence_for_ref(repo_path, up, up, "upstream", limit) {
+                lanes.push(d);
+            }
+        }
+    }
+
+    lanes
+}
+
 fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
     let current = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
     let Ok(output) = git(
@@ -1005,6 +1117,30 @@ fn repo_snapshot_blocking(
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
 
+    // Branch-context lanes drive the working-tree view that even the lite snapshot
+    // renders, so compute them unconditionally. The cost is a handful of git calls —
+    // trivial next to `branch_list`, which already runs a divergence per branch in
+    // lite mode too. (Gating this behind `!lite` left the lanes empty on the first
+    // post-switch snapshot, so they only appeared after a manual refresh.)
+    let repo_path_ctx = repo_path.clone();
+    let branch_for_ctx = branch.clone();
+    let upstream_for_ctx = upstream.clone();
+    let branches_for_ctx = branches.clone();
+    let timeline_ctx = std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                timeline_context(
+                    &repo_path_ctx,
+                    &branch_for_ctx,
+                    &upstream_for_ctx,
+                    &branches_for_ctx,
+                    log_limit,
+                )
+            })
+            .join()
+            .unwrap()
+    });
+
     let (ahead_commits, ahead_branch, tags, unpushed_tag_names) = if lite {
         (Vec::new(), None, Vec::new(), Vec::new())
     } else {
@@ -1047,6 +1183,7 @@ fn repo_snapshot_blocking(
         ahead_branch,
         remotes,
         branches,
+        timeline_context: timeline_ctx,
         tags,
         unpushed_tags: unpushed_tag_names,
     })

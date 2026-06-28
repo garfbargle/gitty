@@ -8,3 +8,7 @@ src-tauri/target/
 
 .env.macos-signing.local
 AuthKey_*.p8
+
+# Python
+__pycache__/
+*.pyc
