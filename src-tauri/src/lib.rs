@@ -1117,17 +1117,37 @@ fn repo_snapshot_blocking(
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
 
-    let (ahead_commits, ahead_branch, tags, unpushed_tag_names, timeline_ctx) = if lite {
-        (Vec::new(), None, Vec::new(), Vec::new(), Vec::new())
+    // Branch-context lanes drive the working-tree view that even the lite snapshot
+    // renders, so compute them unconditionally. The cost is a handful of git calls —
+    // trivial next to `branch_list`, which already runs a divergence per branch in
+    // lite mode too. (Gating this behind `!lite` left the lanes empty on the first
+    // post-switch snapshot, so they only appeared after a manual refresh.)
+    let repo_path_ctx = repo_path.clone();
+    let branch_for_ctx = branch.clone();
+    let upstream_for_ctx = upstream.clone();
+    let branches_for_ctx = branches.clone();
+    let timeline_ctx = std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                timeline_context(
+                    &repo_path_ctx,
+                    &branch_for_ctx,
+                    &upstream_for_ctx,
+                    &branches_for_ctx,
+                    log_limit,
+                )
+            })
+            .join()
+            .unwrap()
+    });
+
+    let (ahead_commits, ahead_branch, tags, unpushed_tag_names) = if lite {
+        (Vec::new(), None, Vec::new(), Vec::new())
     } else {
         let repo_path_ahead = repo_path.clone();
         let repo_path_tags = repo_path.clone();
-        let repo_path_ctx = repo_path.clone();
         let commits_for_ahead = commits.clone();
         let branch_for_ahead = branch.clone();
-        let branch_for_ctx = branch.clone();
-        let upstream_for_ctx = upstream.clone();
-        let branches_for_ctx = branches.clone();
         std::thread::scope(|scope| {
             let ahead_handle = scope.spawn(move || {
                 ahead_commits(
@@ -1143,19 +1163,9 @@ fn repo_snapshot_blocking(
                 let tags = tag_list(&repo_path_tags, &unpushed_set);
                 (tags, unpushed)
             });
-            let ctx_handle = scope.spawn(move || {
-                timeline_context(
-                    &repo_path_ctx,
-                    &branch_for_ctx,
-                    &upstream_for_ctx,
-                    &branches_for_ctx,
-                    log_limit,
-                )
-            });
             let (ahead_commits, ahead_branch) = ahead_handle.join().unwrap();
             let (tags, unpushed) = tags_handle.join().unwrap();
-            let timeline_ctx = ctx_handle.join().unwrap();
-            (ahead_commits, ahead_branch, tags, unpushed, timeline_ctx)
+            (ahead_commits, ahead_branch, tags, unpushed)
         })
     };
 
