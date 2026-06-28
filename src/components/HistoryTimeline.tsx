@@ -13,11 +13,15 @@ const SCROLLBAR_HIDE_DELAY_MS = 800;
 
 // Branch-context lane geometry. Ghost commits cluster near the right edge (most
 // recent) above the working tree, so "the base has moved ahead of you" stays
-// visible even when the timeline is scrolled to the present.
-const GHOST_SPACING = 26;
+// visible even when the timeline is scrolled to the present. The lanes live in
+// their own region that occupies real layout space above the commit track, so a
+// lane can never overlap the commit row. LANE_BOTTOM_PAD is the clear air between
+// the lowest lane and that row.
+const GHOST_SPACING = 28;
 const MAX_GHOST_DOTS = 8;
-const LANE_BAND_H = 32;
-const LANE_TOP_PAD = 6;
+const LANE_BAND_H = 30;
+const LANE_TOP_PAD = 12;
+const LANE_BOTTOM_PAD = 12;
 
 type HistoryTimelineProps = {
   commits: CommitEntry[];
@@ -111,7 +115,8 @@ export function HistoryTimeline({
     () => contextLanes.filter((lane) => lane.behind > 0 && lane.commits.length > 0),
     [contextLanes],
   );
-  const laneRegionHeight = lanes.length > 0 ? LANE_TOP_PAD + lanes.length * LANE_BAND_H : 0;
+  const laneRegionHeight =
+    lanes.length > 0 ? LANE_TOP_PAD + lanes.length * LANE_BAND_H + LANE_BOTTOM_PAD : 0;
 
   // Fork x (merge-base node centre) per lane, plus the right anchor (working-tree
   // node centre) the ghost commits hang above — all in wrap-content coordinates,
@@ -345,15 +350,16 @@ export function HistoryTimeline({
 
   const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
 
-  // One ghost lane: the reference's recent commits cluster above the working
-  // tree (the present), with a faint strand back to where you forked.
+  // One ghost lane, drawn inside the dedicated lane region that sits *above* the
+  // commit track in normal flow (so it can never overlap the commits). The
+  // reference's recent commits cluster above the working tree (the present), with
+  // a faint strand and a downward stub back to where you forked.
   function renderLane(lane: BranchDivergence, index: number) {
     const rightX = geom.rightX;
     if (rightX === null) return null;
 
     const bandTop = LANE_TOP_PAD + index * LANE_BAND_H;
-    const dotY = bandTop + 20;
-    const trackDotY = laneRegionHeight + 9;
+    const dotY = bandTop + Math.round(LANE_BAND_H / 2);
     const visible = Math.min(lane.behind, MAX_GHOST_DOTS);
     const overflow = lane.behind - visible;
     // j = 0 is the reference tip (newest), pinned above the working tree.
@@ -361,10 +367,14 @@ export function HistoryTimeline({
     const oldestX = dotX(visible - 1);
     const overflowX = dotX(visible);
     const forkX = geom.forks[index];
-    const ghost = "var(--text-muted)";
+    const ghost = "var(--text-secondary)";
 
     return (
       <div className="context-lane" key={`${lane.kind}-${lane.refName}`}>
+        <span className="lane-tag" style={{ left: oldestX, top: dotY }}>
+          <GitBranch size={10} aria-hidden />
+          {lane.refName}
+        </span>
         {forkX !== null && forkX < oldestX - 2 ? (
           <span
             className="lane-strand faded"
@@ -372,7 +382,10 @@ export function HistoryTimeline({
           />
         ) : null}
         {forkX !== null ? (
-          <span className="lane-fork-stub" style={{ left: forkX, top: dotY, height: trackDotY - dotY }} />
+          <span
+            className="lane-fork-stub"
+            style={{ left: forkX, top: dotY, height: laneRegionHeight - dotY }}
+          />
         ) : null}
         <span
           className="lane-strand"
@@ -391,10 +404,6 @@ export function HistoryTimeline({
             title={`${lane.refName} · ${commit.shortHash} · ${commit.subject}`}
           />
         ))}
-        <span className="lane-label" style={{ left: rightX, top: bandTop + 2 }}>
-          <GitBranch size={11} aria-hidden />
-          {lane.refName}
-        </span>
       </div>
     );
   }
@@ -453,11 +462,15 @@ export function HistoryTimeline({
       <div className="timeline-scroller" onScroll={handleScroll} ref={scrollRef}>
         <div className="timeline-track-wrap" ref={wrapRef}>
           {lanes.length > 0 ? (
-            <div className="timeline-context-layer" aria-hidden>
+            <div
+              className="timeline-context-lanes"
+              style={{ height: laneRegionHeight }}
+              aria-hidden
+            >
               {lanes.map((lane, index) => renderLane(lane, index))}
             </div>
           ) : null}
-          <div className="timeline-track" style={{ marginTop: laneRegionHeight }}>
+          <div className="timeline-track">
           {ancestry.map((commit, index) =>
             renderCommitNode(
               commit,

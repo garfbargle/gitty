@@ -1917,15 +1917,38 @@ button:focus-visible {
 
 /* ── Branch-context lanes (ghost commits above the working tree) ── */
 .timeline-track-wrap {
+  display: flex;
+  flex-direction: column;
   min-width: min-content;
   position: relative;
 }
 
-.timeline-context-layer {
-  inset: 0;
+/* Owns real vertical space above the commit track, so a lane can never overlap
+   the commits. Children are positioned by measured node offsets. */
+.timeline-context-lanes {
+  flex-shrink: 0;
   pointer-events: none;
+  position: relative;
+  width: 100%;
+}
+
+.context-lane {
+  position: static;
+}
+
+.lane-tag {
+  align-items: center;
+  background: var(--bg-panel);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 10px;
+  font-weight: 600;
+  gap: 3px;
+  padding: 1px 7px 1px 5px;
   position: absolute;
-  z-index: 0;
+  transform: translate(calc(-100% - 8px), -50%);
+  white-space: nowrap;
 }
 
 .lane-strand {
@@ -1953,7 +1976,7 @@ button:focus-visible {
 
 .lane-dot {
   background: var(--bg-panel);
-  border: 2px solid var(--text-muted);
+  border: 2px solid var(--text-secondary);
   border-radius: 50%;
   box-sizing: border-box;
   height: 11px;
@@ -1963,13 +1986,14 @@ button:focus-visible {
 }
 
 .lane-dot.tip {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 16%, transparent);
+  background: color-mix(in srgb, var(--text-secondary) 28%, var(--bg-panel));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-secondary) 18%, transparent);
 }
 
 .lane-overflow {
   background: var(--bg-panel);
   border-radius: 999px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 9px;
   font-weight: 700;
   padding: 0 3px;
@@ -1977,17 +2001,6 @@ button:focus-visible {
   transform: translate(-50%, -50%);
 }
 
-.lane-label {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  font-size: 10px;
-  font-weight: 600;
-  gap: 3px;
-  position: absolute;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
 
 /* ── Workspace grid ── */
 .workspace-grid {
