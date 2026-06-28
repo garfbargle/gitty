@@ -509,31 +509,34 @@ fn ahead_behind(repo_path: &Path, branch: &str, upstream: &Option<String>) -> (u
 }
 
 fn changed_files(repo_path: &Path) -> Vec<FileChange> {
-    let Ok(output) = git(repo_path, &["status", "--porcelain=v1", "-uall"]) else {
+    // `-z` gives NUL-separated records with raw, unquoted paths. Without it git
+    // C-quotes any path containing spaces or non-ASCII bytes (e.g. `"a b/c.png"`),
+    // and those literal quotes/escapes would then be passed back to `git add`.
+    let Ok(output) = git(repo_path, &["status", "--porcelain=v1", "-uall", "-z"]) else {
         return Vec::new();
     };
 
-    output
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 4 {
-                return None;
-            }
-
-            let status = line.get(0..2)?.to_string();
-            let raw_path = line.get(3..)?.trim().to_string();
-            let (path, old_path) = raw_path
-                .split_once(" -> ")
-                .map(|(old_path, path)| (path.to_string(), Some(old_path.to_string())))
-                .unwrap_or((raw_path, None));
-
-            Some(FileChange {
-                status,
-                path,
-                old_path,
-            })
-        })
-        .collect()
+    let mut changes = Vec::new();
+    let mut fields = output.split('\0');
+    while let Some(entry) = fields.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = entry[0..2].to_string();
+        let path = entry[3..].to_string();
+        // Renames/copies emit the original path as the next NUL-separated field.
+        let old_path = if status.starts_with('R') || status.starts_with('C') {
+            fields.next().map(str::to_string)
+        } else {
+            None
+        };
+        changes.push(FileChange {
+            status,
+            path,
+            old_path,
+        });
+    }
+    changes
 }
 
 const COMMIT_LOG_PRETTY: &str = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e";
@@ -1157,43 +1160,12 @@ fn commit_files(repo_path: &Path, commit: &str) -> Result<Vec<FileChange>, Strin
             "--name-status".to_string(),
             "--pretty=format:".to_string(),
             "--find-renames".to_string(),
+            "-z".to_string(),
             commit.to_string(),
         ],
     )?;
 
-    Ok(output
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-
-            let mut parts = line.split('\t');
-            let status_part = parts.next()?;
-            let status_code = status_part.chars().next().unwrap_or('M');
-
-            match status_code {
-                'R' | 'C' => {
-                    let old_path = parts.next().map(|value| value.to_string());
-                    let path = parts.next()?.to_string();
-                    Some(FileChange {
-                        status: format!("{status_code} "),
-                        path,
-                        old_path,
-                    })
-                }
-                _ => {
-                    let path = parts.next()?.to_string();
-                    Some(FileChange {
-                        status: format!("{status_code} "),
-                        path,
-                        old_path: None,
-                    })
-                }
-            }
-        })
-        .collect())
+    Ok(parse_name_status_z(&output))
 }
 
 #[tauri::command]
@@ -1676,39 +1648,49 @@ fn merge_branch(path: String, branch: String) -> Result<ActionResult, String> {
     })
 }
 
-/// Parses a `git diff --name-status` block into FileChange entries.
-fn parse_name_status(output: &str) -> Vec<FileChange> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-            let mut parts = line.split('\t');
-            let status_part = parts.next()?;
-            let status_code = status_part.chars().next().unwrap_or('M');
-            match status_code {
-                'R' | 'C' => {
-                    let old_path = parts.next().map(|value| value.to_string());
-                    let path = parts.next()?.to_string();
-                    Some(FileChange {
-                        status: format!("{status_code} "),
-                        path,
-                        old_path,
-                    })
-                }
-                _ => {
-                    let path = parts.next()?.to_string();
-                    Some(FileChange {
-                        status: format!("{status_code} "),
-                        path,
-                        old_path: None,
-                    })
+/// Parses `git diff`/`git show --name-status -z` output into FileChange entries.
+///
+/// `-z` produces NUL-separated fields with raw, unquoted paths: a status field
+/// followed by one path field (or two — old then new — for renames and copies).
+fn parse_name_status_z(output: &str) -> Vec<FileChange> {
+    let mut changes = Vec::new();
+    let mut fields = output.split('\0');
+    while let Some(status_part) = fields.next() {
+        if status_part.is_empty() {
+            continue;
+        }
+        let status_code = status_part.chars().next().unwrap_or('M');
+        let change = match status_code {
+            'R' | 'C' => {
+                let old_path = match fields.next() {
+                    Some(value) => value,
+                    None => break,
+                };
+                let path = match fields.next() {
+                    Some(value) => value,
+                    None => break,
+                };
+                FileChange {
+                    status: format!("{status_code} "),
+                    path: path.to_string(),
+                    old_path: Some(old_path.to_string()),
                 }
             }
-        })
-        .collect()
+            _ => {
+                let path = match fields.next() {
+                    Some(value) => value,
+                    None => break,
+                };
+                FileChange {
+                    status: format!("{status_code} "),
+                    path: path.to_string(),
+                    old_path: None,
+                }
+            }
+        };
+        changes.push(change);
+    }
+    changes
 }
 
 fn rev_exists(repo_path: &Path, rev: &str) -> bool {
@@ -1803,9 +1785,12 @@ fn merge_analysis_blocking(
 
     // Files the merge would touch (changes on source since the merge base).
     let three_dot = format!("{target}...{source}");
-    let files = git(&repo_path, &["diff", "--name-status", "--find-renames", &three_dot])
-        .map(|output| parse_name_status(&output))
-        .unwrap_or_default();
+    let files = git(
+        &repo_path,
+        &["diff", "--name-status", "--find-renames", "-z", &three_dot],
+    )
+    .map(|output| parse_name_status_z(&output))
+    .unwrap_or_default();
 
     // Fast-forward possible when target is an ancestor of source.
     let fast_forward = !already_up_to_date && is_ancestor(&repo_path, &target, &source);
