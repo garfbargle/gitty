@@ -1957,6 +1957,19 @@ function App() {
     void commit(changeSummary);
   }
 
+  // ⌘↵ with staged changes but no message/summary yet: start preparing the AI
+  // commit message so a second ⌘↵ can accept it. Triggered explicitly by the
+  // shortcut, so it runs regardless of the auto-summarize-on-focus setting.
+  function prepareCommitSummary() {
+    if (!snapshot || snapshot.changes.length === 0) return;
+    if (nvidiaApiKeyConfigured) {
+      summaryHiddenUntilNewRef.current = false;
+      void summarizeChanges("staged", false);
+    } else if (!summaryHiddenUntilNewRef.current) {
+      setChangeSummaryVisible(true);
+    }
+  }
+
   async function fetchRepo() {
     const result = await run(() => invoke<ActionResult>("fetch_repo", { path: selectedPath }));
     if (result) {
@@ -2776,6 +2789,7 @@ function App() {
                       onMessageFocus={handleCommitMessageFocus}
                       onUseSummary={useChangeSummary}
                       onUseSummaryAndCommit={useChangeSummaryAndCommit}
+                      onGenerateSummary={prepareCommitSummary}
                       onDismissSummary={dismissChangeSummary}
                       onResummarizeStaged={() => void resummarizeStagedChanges()}
                       onSummarizeAllChanges={() => void summarizeAllChanges()}

@@ -43,6 +43,7 @@ type CommitPanelProps = {
   onMessageFocus: () => void;
   onUseSummary: () => void;
   onUseSummaryAndCommit: () => void;
+  onGenerateSummary: () => void;
   onDismissSummary: () => void;
   onResummarizeStaged: () => void;
   onSummarizeAllChanges: () => void;
@@ -89,6 +90,7 @@ export function CommitPanel({
   onMessageFocus,
   onUseSummary,
   onUseSummaryAndCommit,
+  onGenerateSummary,
   onDismissSummary,
   onResummarizeStaged,
   onSummarizeAllChanges,
@@ -111,6 +113,13 @@ export function CommitPanel({
     nvidiaApiKeyConfigured &&
     (stagedCount > 0 || amend) &&
     !changeSummaryLoading;
+  // First ⌘↵ with staged changes but no message/summary yet: kick off the AI
+  // summary so a second ⌘↵ can accept it and commit.
+  const canPrepareSummary =
+    !message.trim() &&
+    !changeSummary?.trim() &&
+    !changeSummaryLoading &&
+    (stagedCount > 0 || amend);
   const localBranches = branches.filter((b) => !b.isRemote);
   const resetLabel = resetMode === "soft" ? "Soft Reset" : "Hard Reset";
   const showSummaryPanel =
@@ -139,6 +148,9 @@ export function CommitPanel({
       } else if (canUseSummaryAndCommit) {
         event.preventDefault();
         onUseSummaryAndCommit();
+      } else if (canPrepareSummary) {
+        event.preventDefault();
+        onGenerateSummary();
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -146,9 +158,11 @@ export function CommitPanel({
   }, [
     canCommit,
     canUseSummaryAndCommit,
+    canPrepareSummary,
     disabled,
     onCommit,
     onUseSummaryAndCommit,
+    onGenerateSummary,
     showCommitSection,
   ]);
 
