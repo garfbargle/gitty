@@ -4,7 +4,7 @@
 
 No Electron bloat. No background polling. No embedded Git library. Gitty calls your system `git` directly and refreshes only when you need it — select a repo, hit refresh, or finish an action. The result is a client that feels snappy on large repos and stays responsive all day.
 
-![Gitty showing the repo sidebar, commit timeline, diff viewer, and commit panel](docs/screenshot.png)
+![Gitty's Changes view — staged and unstaged files, a syntax-highlighted diff, and the commit panel with a free AI commit summary](docs/changes.png)
 
 ## Why Gitty
 
@@ -65,6 +65,12 @@ Summaries are generated from staged diff content sent to NVIDIA's API — only e
 - Inspect any commit's files and full diff
 - Soft or hard reset to a selected commit
 - Ahead/behind counts relative to upstream
+
+![Gitty's History view — a branch graph with merge commits, hashes, dates, and authors](docs/history.png)
+
+The working-tree timeline keeps branch context in view: how far ahead and behind you are of `main` and your upstream, with ghost commits showing what you'd pull in.
+
+![Gitty's commit timeline with branch-divergence context against main and the upstream](docs/timeline.png)
 
 ### Remotes and push
 - Add, update, or remove remotes from repo settings
