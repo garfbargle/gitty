@@ -1771,6 +1771,41 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
     })
 }
 
+/// Create a branch at the current HEAD and switch to it. Any uncommitted work
+/// comes along automatically — this is how you move changes off the trunk onto a
+/// branch where they belong, without committing or stashing first.
+#[tauri::command]
+fn create_branch(path: String, name: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Branch name is required.".to_string());
+    }
+    let repo_path = Path::new(&repo.path);
+
+    // Reject up front so the user gets a clean message instead of git's plumbing
+    // error, and so we never half-create a ref under an unusable name.
+    if git(repo_path, &["check-ref-format", "--branch", &name]).is_err() {
+        return Err(format!("\"{name}\" isn't a valid branch name."));
+    }
+    if git(
+        repo_path,
+        &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{name}")],
+    )
+    .is_ok()
+    {
+        return Err(format!("A branch named \"{name}\" already exists."));
+    }
+
+    let output = git(repo_path, &["switch", "-c", &name])
+        .or_else(|_| git(repo_path, &["checkout", "-b", &name]))?;
+
+    Ok(ActionResult {
+        message: format!("Created {name} from this point."),
+        output,
+    })
+}
+
 #[tauri::command]
 fn merge_branch(path: String, branch: String) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
@@ -2703,6 +2738,7 @@ pub fn run() {
             discard_hunk,
             file_image_preview,
             checkout_branch,
+            create_branch,
             merge_branch,
             merge_analysis,
             merge_execute,

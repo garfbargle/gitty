@@ -21,6 +21,7 @@ import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
 import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialog";
 import { TagCreateDialog } from "./components/TagCreateDialog";
+import { BranchCreateDialog } from "./components/BranchCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
 import {
   VisitCommitDialog,
@@ -209,6 +210,7 @@ function App() {
   const [discardFilesOpen, setDiscardFilesOpen] = useState(false);
   const [discardFilesTarget, setDiscardFilesTarget] = useState<string[]>([]);
   const [tagCreateCommit, setTagCreateCommit] = useState<CommitEntry | null>(null);
+  const [branchCreateOpen, setBranchCreateOpen] = useState(false);
   const [tagDeleteTarget, setTagDeleteTarget] = useState<{
     commit: CommitEntry;
     name: string;
@@ -1363,6 +1365,25 @@ function App() {
       setDiff(emptyDiff);
       await refreshRepo();
     }
+  }
+
+  async function createBranch(name: string) {
+    if (!selectedPath || !name.trim()) return;
+    if (visitSession) {
+      setError("Return to latest before starting a branch.");
+      return;
+    }
+    const result = await run(() =>
+      invoke<ActionResult>("create_branch", { path: selectedPath, name }),
+    );
+    if (!result) return;
+    setBranchCreateOpen(false);
+    setMessage(result.message);
+    setViewingCommit(null);
+    setCommitFiles([]);
+    setFocus(null);
+    setDiff(emptyDiff);
+    await refreshRepo();
   }
 
   async function resumeBranch() {
@@ -2775,6 +2796,7 @@ function App() {
                       showCommitSection={showCommitSection}
                       showResetSection={showResetSection}
                       showSetupRemote={showSetupRemote}
+                      showStartBranch={showCommitSection && onIntegrationBranch && changeCount > 0}
                       nvidiaApiKey={nvidiaApiKey}
                       nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
                       changeSummary={changeSummary}
@@ -2802,6 +2824,7 @@ function App() {
                       onCommit={() => void commit()}
                       onReset={() => void reset()}
                       onSetupRemote={() => openRepoSettings()}
+                      onStartBranch={() => setBranchCreateOpen(true)}
                       disabled={loading}
                     />
                     )}
@@ -2894,6 +2917,14 @@ function App() {
               setDiscardFilesOpen(false);
               setDiscardFilesTarget([]);
             }}
+          />
+          <BranchCreateDialog
+            open={branchCreateOpen}
+            fromBranch={snapshot.branch}
+            changes={snapshot.changes ?? []}
+            loading={loading}
+            onConfirm={(name) => void createBranch(name)}
+            onCancel={() => setBranchCreateOpen(false)}
           />
           <TagCreateDialog
             open={!!tagCreateCommit}

@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  GitBranch,
   GitCommitHorizontal,
   Link2,
   Loader2,
@@ -29,6 +30,9 @@ type CommitPanelProps = {
   showCommitSection?: boolean;
   showResetSection?: boolean;
   showSetupRemote?: boolean;
+  /// You're committing onto the trunk with uncommitted work — offer to move it
+  /// to a branch first.
+  showStartBranch?: boolean;
   nvidiaApiKey?: string;
   nvidiaApiKeyConfigured?: boolean;
   changeSummary?: string | null;
@@ -56,6 +60,7 @@ type CommitPanelProps = {
   onCommit: () => void;
   onReset: () => void;
   onSetupRemote: () => void;
+  onStartBranch?: () => void;
   disabled?: boolean;
 };
 
@@ -76,6 +81,7 @@ export function CommitPanel({
   showCommitSection = true,
   showResetSection = false,
   showSetupRemote = false,
+  showStartBranch = false,
   nvidiaApiKey = "",
   nvidiaApiKeyConfigured = false,
   changeSummary = null,
@@ -103,6 +109,7 @@ export function CommitPanel({
   onCommit,
   onReset,
   onSetupRemote,
+  onStartBranch,
   disabled,
 }: CommitPanelProps) {
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -181,6 +188,26 @@ export function CommitPanel({
 
   return (
     <aside className="commit-panel">
+      {showStartBranch ? (
+        <div className="start-branch-nudge">
+          <div className="start-branch-nudge-body">
+            <GitBranch size={14} />
+            <p>
+              You're working on <strong>{branch}</strong>. Move these changes to a branch to keep{" "}
+              {branch} clean.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="start-branch-btn"
+            onClick={onStartBranch}
+            disabled={disabled}
+          >
+            Start a branch
+          </button>
+        </div>
+      ) : null}
+
       {showCommitSection ? (
         <section className="panel-block">
           <header className="panel-title">

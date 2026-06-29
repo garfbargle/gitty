@@ -1,4 +1,4 @@
-import type { BranchEntry } from "../types";
+import type { BranchEntry, FileChange } from "../types";
 
 /// Branches other than the one you're on, worth showing in the working-tree
 /// view: locals always, plus any remote branch not already represented by a
@@ -27,4 +27,36 @@ export function otherActiveBranches(
 
   rows.sort((a, b) => (b.lastCommitDate ?? "").localeCompare(a.lastCommitDate ?? ""));
   return rows.slice(0, limit);
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+/// A starting-point branch name guessed from what's currently changed, used only
+/// as a placeholder hint. When several files share a top-level folder we name the
+/// work after it (e.g. "checkout"); otherwise we fall back to the first file's
+/// stem. Returns null when there's nothing useful to suggest.
+export function suggestBranchName(changes: FileChange[] | undefined): string | null {
+  const paths = (changes ?? []).map((c) => c.path).filter(Boolean);
+  if (paths.length === 0) return null;
+
+  const topFolders = new Set(
+    paths.map((p) => (p.includes("/") ? p.split("/")[0] : "")).filter(Boolean),
+  );
+  if (topFolders.size === 1) {
+    const folder = [...topFolders][0];
+    const slug = slugify(folder);
+    if (slug) return slug;
+  }
+
+  const first = paths[0];
+  const file = first.split("/").pop() ?? first;
+  const stem = file.replace(/\.[^.]+$/, "");
+  const slug = slugify(stem);
+  return slug || null;
 }

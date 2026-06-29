@@ -4650,3 +4650,82 @@ button:focus-visible {
     grid-template-columns: 180px minmax(0, 1fr) 250px;
   }
 }
+
+/* Start-a-branch nudge — shown atop the commit panel when you have
+   uncommitted work sitting on the trunk. */
+.start-branch-nudge {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+}
+
+.start-branch-nudge-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.start-branch-nudge-body svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warning);
+}
+
+.start-branch-nudge-body p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.start-branch-nudge-body strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.start-branch-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.start-branch-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--warning) 65%, transparent);
+}
+
+.start-branch-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* "Use <suggestion>" shortcut under the branch-name field. */
+.branch-suggestion {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.branch-suggestion:hover {
+  color: var(--text-secondary);
+}
+
+.branch-suggestion strong {
+  color: var(--accent);
+  font-weight: 600;
+}
