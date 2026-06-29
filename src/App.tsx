@@ -2465,7 +2465,6 @@ function App() {
               selectedPath={selectedPath}
               branch="…"
               branches={["…"]}
-              commits={[]}
               changeCount={0}
               viewMode={viewMode}
               loading
@@ -2476,7 +2475,6 @@ function App() {
               onBranchChange={() => {}}
               onToggleView={() => {}}
               onReturnToWorkingTree={() => {}}
-              onSelectCommit={() => {}}
               onRefresh={() => {}}
             />
             <div className="repo-loading-state" aria-busy="true" aria-live="polite">
@@ -2493,8 +2491,6 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
-              branchEntries={displaySnapshot.branches}
-              commits={displaySnapshot.commits}
               aheadCommits={displaySnapshot.aheadCommits ?? []}
               aheadBranch={displaySnapshot.aheadBranch}
               changeCount={displaySnapshot.changes.length}
@@ -2509,12 +2505,8 @@ function App() {
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
-              onMergeIn={(name) =>
-                openMerge({ source: name, target: displaySnapshot.branch })
-              }
               viewingCommit={viewingCommit}
               visitSession={visitSession}
-              onSelectCommit={(commit) => void inspectCommit(commit)}
               onVisitCommit={() => requestVisitCommit()}
               onReturnFromVisit={() => void returnFromVisit()}
               onResumeBranch={() => void resumeBranch()}

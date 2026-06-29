@@ -12,18 +12,15 @@ import {
   Settings,
   X,
 } from "lucide-react";
-import type { BranchEntry, CommitEntry, RepoEntry, VisitSession } from "../types";
+import type { CommitEntry, RepoEntry, VisitSession } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
-import { WorkingTreePicker } from "./WorkingTreePicker";
 
 type TopBarProps = {
   repos: RepoEntry[];
   selectedPath: string;
   branch: string;
   branches: string[];
-  branchEntries?: BranchEntry[];
-  commits: CommitEntry[];
   aheadCommits?: CommitEntry[];
   aheadBranch?: string | null;
   changeCount: number;
@@ -39,10 +36,8 @@ type TopBarProps = {
   hasRemotes?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
-  onMergeIn?: (branch: string) => void;
   onToggleView: () => void;
   onReturnToWorkingTree: () => void;
-  onSelectCommit: (commit: CommitEntry) => void;
   onVisitCommit?: () => void;
   onReturnFromVisit?: () => void;
   onResumeBranch?: () => void;
@@ -74,8 +69,6 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
-  branchEntries,
-  commits,
   aheadCommits = [],
   aheadBranch,
   changeCount,
@@ -91,10 +84,8 @@ export function TopBar({
   hasRemotes = false,
   onRepoChange,
   onBranchChange,
-  onMergeIn,
   onToggleView,
   onReturnToWorkingTree,
-  onSelectCommit,
   onVisitCommit,
   onReturnFromVisit,
   onResumeBranch,
@@ -132,8 +123,6 @@ export function TopBar({
     viewMode === "working";
   // A partner is chosen → we have a real source→target pair to act on.
   const hasPair = !!mergeSource && !!mergeTargetName;
-  const upstreamLabel =
-    branchEntries?.find((entry) => entry.name === branch && !entry.isRemote)?.upstream ?? null;
 
   return (
     <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
@@ -171,18 +160,6 @@ export function TopBar({
           </select>
           <ChevronDown size={14} className="select-chevron" />
         </div>
-
-        {!branch.includes("detached") && (ahead > 0 || behind > 0) ? (
-          <span
-            className="branch-divergence"
-            title={`${ahead} ahead, ${behind} behind${
-              upstreamLabel ? ` vs ${upstreamLabel}` : ""
-            }`}
-          >
-            {ahead > 0 ? <span className="branch-divergence-ahead">↑{ahead}</span> : null}
-            {behind > 0 ? <span className="branch-divergence-behind">↓{behind}</span> : null}
-          </span>
-        ) : null}
 
         <div className="view-mode-switch" role="tablist" aria-label="View">
           <button
@@ -323,21 +300,6 @@ export function TopBar({
                 </div>
               </>
             ) : null}
-            <span className="breadcrumb-sep">›</span>
-            <WorkingTreePicker
-              commits={commits}
-              aheadCommits={aheadCommits}
-              aheadBranch={aheadBranch}
-              branch={branch}
-              branchEntries={branchEntries}
-              viewingCommit={viewingCommit}
-              changeCount={changeCount}
-              onSelectWorkingTree={onReturnToWorkingTree}
-              onSelectCommit={onSelectCommit}
-              onResumeBranch={onResumeBranch}
-              onCheckoutBranch={onBranchChange}
-              onMergeBranch={onMergeIn}
-            />
           </>
         ) : null}
       </div>

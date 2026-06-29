@@ -1113,24 +1113,6 @@ button:focus-visible {
   color: var(--accent);
 }
 
-/* Persistent ahead/behind pill beside the branch selector. */
-.branch-divergence {
-  align-items: center;
-  display: inline-flex;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  gap: 6px;
-  padding: 0 2px;
-}
-
-.branch-divergence-ahead {
-  color: var(--success);
-}
-
-.branch-divergence-behind {
-  color: var(--warning);
-}
-
 .option-ahead-badge {
   background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
   border-radius: 999px;
@@ -1778,6 +1760,29 @@ button:focus-visible {
 
 .timeline-node.working-tree.active .node-dot.working {
   background: var(--success-soft);
+}
+
+/* The present, always within reach: the working-tree node sticks to the right
+   edge of the scroller so it stays one click away even at ancient history. The
+   left fade lets older commits tuck softly underneath it. */
+.timeline-node.working-tree.pinned {
+  background: var(--bg-panel);
+  box-shadow: -18px 0 16px -12px var(--bg-panel);
+  position: sticky;
+  right: 0;
+  z-index: 3;
+}
+
+/* Uncommitted work waiting — solid dot and a brighter label make the node read
+   as a live call-to-action rather than just an anchor. */
+.timeline-node.working-tree.has-changes .node-dot.working {
+  background: var(--success);
+  border-style: solid;
+}
+
+.timeline-node.working-tree.has-changes .node-subject {
+  color: var(--success);
+  font-weight: 600;
 }
 
 .node-hash {

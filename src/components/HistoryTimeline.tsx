@@ -350,6 +350,12 @@ export function HistoryTimeline({
 
   const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
 
+  // Pin the working-tree node to the right edge while history scrolls under it,
+  // but only when it's the last node on the track — once you have ahead commits
+  // or a merge preview sitting to its right, it's no longer "the present" and a
+  // sticky overlay would cover them.
+  const pinWorkingTree = ahead.length === 0 && !mergePreview;
+
   // One ghost lane, drawn inside the dedicated lane region that sits *above* the
   // commit track in normal flow (so it can never overlap the commits). The
   // reference's recent commits cluster above the working tree (the present), with
@@ -481,7 +487,7 @@ export function HistoryTimeline({
           )}
 
           <button
-            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""}`}
+            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""}`}
             type="button"
             ref={(node) => {
               if (node) nodeRefs.current.set("working-tree", node);
