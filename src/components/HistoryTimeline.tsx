@@ -554,8 +554,12 @@ export function HistoryTimeline({
             onClick={selectWorkingTree}
           >
             <span className="node-dot working" />
-            <span className="node-hash">Working Tree</span>
-            <span className="node-subject">{changeCount} change{changeCount === 1 ? "" : "s"}</span>
+            <span className="node-hash">Now</span>
+            <span className="node-subject">
+              {changeCount === 0
+                ? "no changes"
+                : `${changeCount} unsaved change${changeCount === 1 ? "" : "s"}`}
+            </span>
             {ahead.length > 0 ? <span className="node-connector ahead-bridge" /> : null}
           </button>
 

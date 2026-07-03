@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { Check, FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
@@ -21,10 +22,6 @@ import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialo
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
-import {
-  VisitCommitDialog,
-  type VisitCommitDialogAction,
-} from "./components/VisitCommitDialog";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
@@ -41,7 +38,6 @@ import type {
   RepoEnrichment,
   RepoSnapshot,
   SelectionAnchor,
-  VisitSession,
   MergeOutcome,
   MergeStatus,
   UpdateOutcome,
@@ -180,9 +176,6 @@ function App() {
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
   const [viewingCommit, setViewingCommit] = useState<CommitEntry | null>(null);
   const [viewingCommitMessage, setViewingCommitMessage] = useState("");
-  const [visitSession, setVisitSession] = useState<VisitSession | null>(null);
-  const [visitCommitDialogOpen, setVisitCommitDialogOpen] = useState(false);
-  const [visitCommitTarget, setVisitCommitTarget] = useState<CommitEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   // The one integration operation in flight: rebasing the current branch onto
   // main ("update"), or merging it into main ("merge"). Null when idle.
@@ -252,13 +245,11 @@ function App() {
   }, []);
 
   const selectedCommit =
-    viewingCommit ??
-    visitSession?.visitedCommit ??
-    (focus?.kind === "commit" ? focus.commit : null);
+    viewingCommit ?? (focus?.kind === "commit" ? focus.commit : null);
   const selectedFile = focus?.kind === "file" ? focus.file : null;
   const selectedFileKey =
     focus?.kind === "file" ? `${focus.section}:${focus.file.path}` : undefined;
-  const workingTreeActive = !viewingCommit && !visitSession;
+  const workingTreeActive = !viewingCommit;
 
   const branchNames = useMemo(() => {
     const branches = snapshot?.branches ?? [];
@@ -295,7 +286,7 @@ function App() {
 
   // The two moves, offered only off the trunk, on a real branch, when idle.
   const canIntegrate =
-    !!integrationBranch && !onIntegrationBranch && !branchDetached && !visitSession;
+    !!integrationBranch && !onIntegrationBranch && !branchDetached;
   const canUpdateFromMain = canIntegrate && behindMain > 0;
   const canMergeIntoMain = canIntegrate && aheadOfMain > 0;
 
@@ -604,9 +595,6 @@ function App() {
     snapshotGenerationRef.current += 1;
     setViewingCommit(null);
     setViewingCommitMessage("");
-    setVisitSession(null);
-    setVisitCommitDialogOpen(false);
-    setVisitCommitTarget(null);
     setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
@@ -1127,149 +1115,26 @@ function App() {
     [selectedPath, viewingCommit, diffSelection],
   );
 
-  async function captureReturnTarget(path = selectedPath): Promise<{
-    returnBranch: string;
-    returnHead?: string;
-  } | null> {
-    if (!path || !snapshot) return null;
-    const isDetached = snapshot.branch.includes("detached");
-    if (!isDetached) {
-      return { returnBranch: snapshot.branch };
-    }
+  // Open an old commit's files in a throwaway worktree and reveal the folder —
+  // no detached HEAD, no stash, nothing to undo. Your checkout is untouched.
+  async function openCommitInFolder(commit?: CommitEntry) {
+    const target = commit ?? viewingCommit;
+    if (!target || !selectedPath) return;
+    const dir = await run(() =>
+      invoke<string>("open_commit_worktree", { path: selectedPath, commit: target.hash }),
+    );
+    if (!dir) return;
     try {
-      const head = await invoke<string>("rev_parse_head", { path });
-      return { returnBranch: snapshot.branch, returnHead: head };
+      await openPath(dir);
     } catch (err) {
       setError(String(err));
-      return null;
-    }
-  }
-
-  async function executeVisitCheckout(commit: CommitEntry, stashed: boolean) {
-    if (!selectedPath || !snapshot) return false;
-
-    const returnTarget = await captureReturnTarget();
-    if (!returnTarget) return false;
-
-    const result = await run(() =>
-      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: commit.hash }),
-    );
-    if (!result) return false;
-
-    setMessage(result.message);
-    setVisitSession({
-      returnBranch: returnTarget.returnBranch,
-      returnHead: returnTarget.returnHead,
-      visitedCommit: commit,
-      stashed,
-    });
-    setViewingCommit(null);
-    setViewingCommitMessage("");
-    setCommitFiles([]);
-    setFocus(null);
-    setDiff(emptyDiff);
-    setVisitCommitDialogOpen(false);
-    setVisitCommitTarget(null);
-    await refreshRepo();
-    return true;
-  }
-
-  function requestVisitCommit(commit?: CommitEntry) {
-    const target = commit ?? viewingCommit;
-    if (!target || !selectedPath || !snapshot || visitSession) return;
-
-    if (!snapshot.isClean) {
-      setVisitCommitTarget(target);
-      setVisitCommitDialogOpen(true);
       return;
     }
-
-    if (
-      !window.confirm(
-        `Visit ${target.shortHash}? Your working tree will match that point in history.`,
-      )
-    ) {
-      return;
-    }
-
-    void executeVisitCheckout(target, false);
-  }
-
-  async function handleVisitCommitDialogAction(action: VisitCommitDialogAction) {
-    const commit = visitCommitTarget;
-    if (!commit || !selectedPath || !snapshot) {
-      setVisitCommitDialogOpen(false);
-      setVisitCommitTarget(null);
-      return;
-    }
-
-    if (action === "cancel" || action === "keep") {
-      setVisitCommitDialogOpen(false);
-      setVisitCommitTarget(null);
-      return;
-    }
-
-    if (action === "discard") {
-      const untracked = snapshot.changes.some((change) => change.status.includes("?"));
-      const resetResult = await run(() =>
-        invoke<ActionResult>("reset_working_tree", {
-          path: selectedPath,
-          includeUntracked: untracked,
-        }),
-      );
-      if (!resetResult) return;
-      setMessage(resetResult.message);
-      await executeVisitCheckout(commit, false);
-      return;
-    }
-
-    const stashResult = await run(() =>
-      invoke<ActionResult>("stash_push", {
-        path: selectedPath,
-        message: `gitty-visit-${commit.shortHash}`,
-      }),
-    );
-    if (!stashResult) return;
-    setMessage(stashResult.message);
-    await executeVisitCheckout(commit, true);
-  }
-
-  async function returnFromVisit() {
-    if (!visitSession || !selectedPath) return;
-
-    const { returnBranch, returnHead, stashed } = visitSession;
-    const checkoutTarget = returnBranch.includes("detached")
-      ? returnHead ?? visitSession.visitedCommit.hash
-      : returnBranch;
-
-    if (!checkoutTarget) {
-      setError("Could not determine where to return from time travel.");
-      return;
-    }
-
-    const checkoutResult = await run(() =>
-      invoke<ActionResult>("checkout_branch", { path: selectedPath, branch: checkoutTarget }),
-    );
-    if (!checkoutResult) return;
-
-    if (stashed) {
-      const popResult = await run(() => invoke<ActionResult>("stash_pop", { path: selectedPath }));
-      if (!popResult) return;
-      setMessage(popResult.message);
-    } else {
-      setMessage(checkoutResult.message);
-    }
-
-    setVisitSession(null);
-    await selectWorkingTree({ refresh: true });
+    setMessage(`Opened ${target.shortHash} in a folder.`);
   }
 
   async function checkoutBranch(branch: string) {
     if (!selectedPath || !branch) return;
-    if (visitSession) {
-      setError("Return to latest before switching branches.");
-      return;
-    }
 
     // Picking a remote-tracking branch (e.g. "github/main") with a plain
     // checkout detaches HEAD. If a local branch already tracks it — or shares
@@ -1302,10 +1167,6 @@ function App() {
 
   async function createBranch(name: string) {
     if (!selectedPath || !name.trim()) return;
-    if (visitSession) {
-      setError("Return to latest before starting a branch.");
-      return;
-    }
     const result = await run(() =>
       invoke<ActionResult>("create_branch", { path: selectedPath, name }),
     );
@@ -1317,45 +1178,6 @@ function App() {
     setFocus(null);
     setDiff(emptyDiff);
     await refreshRepo();
-  }
-
-  async function resumeBranch() {
-    if (visitSession) {
-      setError("Return to latest before resuming the branch.");
-      return;
-    }
-    const branch = snapshot?.aheadBranch;
-    const tip = snapshot?.aheadCommits?.[0];
-    if (!selectedPath || !branch || !tip) return;
-
-    const isDetached = snapshot.branch.includes("detached");
-    if (isDetached) {
-      await checkoutBranch(branch);
-      await selectWorkingTree({ refresh: true });
-      return;
-    }
-
-    if (
-      snapshot.changes.length > 0 &&
-      !window.confirm(`Hard reset to latest commit on ${branch}? Uncommitted changes will be lost.`)
-    ) {
-      return;
-    }
-    const result = await run(() =>
-      invoke<ActionResult>("reset_to_commit", {
-        path: selectedPath,
-        commit: tip.hash,
-        mode: "hard",
-      }),
-    );
-    if (!result) return;
-    setMessage(result.message);
-    setViewingCommit(null);
-    setCommitFiles([]);
-    setFocus(null);
-    setDiff(emptyDiff);
-    const snap = await refreshRepo();
-    if (snap) await selectWorkingTree({ snapshot: snap });
   }
 
   // ── Integrate with main (update / merge) ────────────────────────────────
@@ -2118,7 +1940,7 @@ function App() {
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
   const showCommitSection = workingTreeActive && !integrationOp;
-  const showResetSection = !!visitSession;
+  const showResetSection = false;
 
   useEffect(() => {
     if (!viewingCommit || !selectedPath) {
@@ -2355,8 +2177,6 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
-              aheadCommits={displaySnapshot.aheadCommits ?? []}
-              aheadBranch={displaySnapshot.aheadBranch}
               changeCount={displaySnapshot.changes.length}
               loading={loading}
               pushPhase={pushPhase}
@@ -2369,10 +2189,7 @@ function App() {
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
-              visitSession={visitSession}
-              onVisitCommit={() => requestVisitCommit()}
-              onReturnFromVisit={() => void returnFromVisit()}
-              onResumeBranch={() => void resumeBranch()}
+              onOpenVersion={() => void openCommitInFolder()}
               onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
@@ -2400,7 +2217,7 @@ function App() {
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
-                  onVisitCommit={(commit) => requestVisitCommit(commit)}
+                  onVisitCommit={(commit) => void openCommitInFolder(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                   integrationPreview={
@@ -2688,13 +2505,6 @@ function App() {
 
       {snapshot ? (
         <>
-          <VisitCommitDialog
-            open={visitCommitDialogOpen}
-            commit={visitCommitTarget}
-            changes={snapshot.changes}
-            loading={loading}
-            onAction={(action) => void handleVisitCommitDialogAction(action)}
-          />
           <ResetAllConfirmDialog
             open={resetAllOpen}
             repoName={snapshot.repo.name}

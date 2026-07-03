@@ -7,7 +7,7 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import type { CommitEntry, RepoEntry, VisitSession } from "../types";
+import type { CommitEntry, RepoEntry } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
 
@@ -16,11 +16,8 @@ type TopBarProps = {
   selectedPath: string;
   branch: string;
   branches: string[];
-  aheadCommits?: CommitEntry[];
-  aheadBranch?: string | null;
   changeCount: number;
   viewingCommit?: CommitEntry | null;
-  visitSession?: VisitSession | null;
   loading?: boolean;
   pushPhase?: PushPhase;
   repoSwitching?: boolean;
@@ -31,9 +28,7 @@ type TopBarProps = {
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onReturnToWorkingTree: () => void;
-  onVisitCommit?: () => void;
-  onReturnFromVisit?: () => void;
-  onResumeBranch?: () => void;
+  onOpenVersion?: () => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
@@ -48,11 +43,8 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
-  aheadCommits = [],
-  aheadBranch,
   changeCount,
   viewingCommit,
-  visitSession,
   loading,
   pushPhase = "idle",
   repoSwitching = false,
@@ -63,9 +55,7 @@ export function TopBar({
   onRepoChange,
   onBranchChange,
   onReturnToWorkingTree,
-  onVisitCommit,
-  onReturnFromVisit,
-  onResumeBranch,
+  onOpenVersion,
   onRefresh,
   onPush,
   onForcePush,
@@ -74,13 +64,11 @@ export function TopBar({
   sidebarVisible = true,
   onToggleSidebar,
 }: TopBarProps) {
-  const inTimeTravel = !!visitSession;
-  const inPreview = !!viewingCommit && !inTimeTravel;
+  const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
-  const timeTravelCommit = visitSession?.visitedCommit;
 
   return (
-    <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
+    <header className={`top-bar${inPreview ? " preview-mode" : ""}`}>
       <div className="top-bar-left">
         {onToggleSidebar ? (
           <button
@@ -104,7 +92,7 @@ export function TopBar({
           <select
             className="top-select branch-select-top"
             value={branch}
-            disabled={repoSwitching || loading || inTimeTravel}
+            disabled={repoSwitching || loading}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
             {branches.map((name) => (
@@ -116,78 +104,46 @@ export function TopBar({
           <ChevronDown size={14} className="select-chevron" />
         </div>
 
-        {inTimeTravel && timeTravelCommit ? (
-          <>
-            <span className="breadcrumb-sep">›</span>
-            <div className="time-travel-banner" role="status">
-              <span className="time-travel-label">Time Travel</span>
-              <code>{timeTravelCommit.shortHash}</code>
-            </div>
-          </>
-        ) : inPreview && viewingCommit ? (
+        {inPreview && viewingCommit ? (
           <>
             <span className="breadcrumb-sep">›</span>
             <div className="preview-banner" role="status">
               <span className="preview-label">Viewing</span>
               <code>{viewingCommit.shortHash}</code>
-              <span className="preview-meta">· workspace on {previewBranchLabel}</span>
+              <span className="preview-meta">· now on {previewBranchLabel}</span>
             </div>
           </>
         ) : null}
       </div>
 
       <div className="top-bar-right">
-        {inTimeTravel && onReturnFromVisit ? (
-          <button
-            type="button"
-            className="return-to-latest-btn"
-            title="Return to your latest branch and restore stashed changes if any"
-            disabled={loading}
-            onClick={onReturnFromVisit}
-          >
-            Return to Latest
-          </button>
-        ) : null}
-        {!inTimeTravel && aheadCommits.length > 0 && aheadBranch && onResumeBranch ? (
-          <button
-            type="button"
-            className="resume-branch-btn"
-            title={`Return to latest commit on ${aheadBranch}`}
-            disabled={loading}
-            onClick={onResumeBranch}
-          >
-            <GitBranch size={14} />
-            Return to {aheadBranch}
-            <em>{aheadCommits.length}</em>
-          </button>
-        ) : null}
-        {inPreview && onVisitCommit ? (
+        {inPreview && onOpenVersion ? (
           <button
             type="button"
             className="visit-commit-btn"
-            title="Check out this commit on disk (detached HEAD)"
+            title="Open this version's files in a folder"
             disabled={loading}
-            onClick={onVisitCommit}
+            onClick={onOpenVersion}
           >
-            Visit Commit
+            Open in folder
           </button>
         ) : null}
         {inPreview ? (
           <button
             type="button"
             className="return-to-changes-btn"
-            title="Return to current working tree"
+            title="Back to your current work"
             onClick={onReturnToWorkingTree}
           >
             <span className="working-dot" />
-            Back to Working Tree
+            Back to now
             {changeCount > 0 ? <em>{changeCount}</em> : null}
           </button>
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>
-        {onPush && onForcePush && !repoSwitching && !inTimeTravel ? (
+        {onPush && onForcePush && !repoSwitching ? (
           <PushButton
             ahead={ahead}
             behind={behind}

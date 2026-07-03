@@ -158,31 +158,6 @@ export type DiffFocus =
   | { kind: "file"; file: FileChange; section: ChangeSection }
   | null;
 
-export type VisitSession = {
-  returnBranch: string;
-  returnHead?: string;
-  visitedCommit: CommitEntry;
-  stashed: boolean;
-};
-
-export type MergeAnalysis = {
-  source: string;
-  target: string;
-  commits: CommitEntry[];
-  files: FileChange[];
-  conflictFiles: string[];
-  hasConflicts: boolean;
-  conflictsKnown: boolean;
-  workingTreeClean: boolean;
-  targetBehind: number;
-  targetHasUpstream: boolean;
-  alreadyUpToDate: boolean;
-  sourceBehind: number;
-  fastForward: boolean;
-  sourceIsCurrent: boolean;
-  targetIsCurrent: boolean;
-};
-
 export type MergeOutcome = {
   status: "merged" | "fast_forward" | "conflicts" | "up_to_date";
   conflictFiles: string[];
@@ -221,19 +196,4 @@ export type ConflictSides = {
   result: string;
   oursExists: boolean;
   theirsExists: boolean;
-};
-
-// Direction of a merge in the UI: shipping the current branch into the base,
-// or pulling the base back into the current branch.
-export type MergeDirection = "ship" | "update";
-
-export type MergePhase = "preview" | "merging" | "conflicts" | "done";
-
-export type MergeSession = {
-  source: string;
-  target: string;
-  direction: MergeDirection;
-  phase: MergePhase;
-  /// Branch to return to when the session ends (the branch the user started on).
-  returnBranch: string;
 };

@@ -209,22 +209,43 @@ clean-path happy cases.
 
 **Shipped as:** "two verbs" release (pending live check).
 
-## Phase 4 — Kill the modes, fix the words
+## Phase 4 — Kill the modes, fix the words — DONE (needs live check)
 
-- [ ] "Visit Commit" / Time Travel → **"Open this version in a folder"** via
-      `open_commit_worktree`. Delete `visitSession`, `VisitCommitDialog.tsx`
-      (~139 lines), "Return to Latest", the stash bookkeeping, and the three
-      "return to latest before…" guards.
-- [ ] Delete `resumeBranch` (the hard reset) and the `aheadCommits` /
-      `aheadBranch` resume machinery in snapshot + `repo_enrich` — detached
-      HEAD no longer happens, so the cure goes with the disease.
-- [ ] Replace remaining `window.confirm` calls with the app's dialog
-      components, worded around outcomes ("Throw away 4 unsaved changes?"),
-      not mechanisms ("hard reset").
-- [ ] Apply the copy table everywhere (labels, tooltips, dialogs, empty
-      states).
+- [x] "Visit Commit" / Time Travel → **"Open in folder"** via
+      `open_commit_worktree` + `openPath` (from `@tauri-apps/plugin-opener`).
+      Deleted `visitSession` + `visitCommitDialogOpen` + `visitCommitTarget`
+      state, `VisitCommitDialog.tsx` (~139 lines), `executeVisitCheckout`,
+      `requestVisitCommit`, `handleVisitCommitDialogAction`, `returnFromVisit`,
+      `captureReturnTarget`, "Return to Latest", the stash bookkeeping, and the
+      "return to latest before…" guards in `checkoutBranch` / `createBranch`.
+      `workingTreeActive` is now just `!viewingCommit`.
+- [x] Deleted `resumeBranch` (the `window.confirm` hard reset) and the
+      "Return to {branch}" button. (Backend `ahead_commits` / `aheadBranch`
+      machinery still populates the snapshot but is now inert — detached HEAD
+      never happens; its removal is a Phase 5 item.)
+- [x] Added `opener:allow-open-path` to `capabilities/default.json` so
+      `openPath` is permitted at runtime (validated by `cargo check`).
+- [x] Copy pass (below): timeline node "Working Tree · N changes" → "Now · N
+      unsaved changes"; "Visit Commit" → "Open in folder"; "Back to Working
+      Tree" → "Back to now"; preview meta "workspace on X" → "now on X". Merge
+      conflict labels already read as branch names (main / your branch).
+- [x] `tsc` + `npm run build` clean; JS bundle 324 → 319 KB.
 
-### Copy table
+### Not done / deferred
+- [ ] `showResetSection` is hard-wired `false` (reset-to-commit was only
+      reachable via time-travel). The `reset()` / `resetMode` plumbing is inert
+      but still wired to `CommitPanel` — prune in Phase 5, or restore
+      reset-to-commit as a first-class action if wanted.
+- [ ] The remaining `window.confirm` calls outside the visit flow (if any) —
+      audit in Phase 5.
+
+### NEEDS LIVE VERIFICATION
+"Open in folder" (worktree + `openPath`) is only smoke-tested at the git level
+(Phase 1 scenario 4). Confirm in the running app that clicking a commit →
+"Open in folder" actually reveals the version's files, and that the capability
+grants `openPath`.
+
+### Copy table (applied)
 
 | Today | For humans |
 |---|---|
@@ -241,16 +262,27 @@ clean-path happy cases.
 
 **Ships as:** "for humans" release.
 
-## Phase 5 — Sweep
+## Phase 5 — Sweep — PARTIAL (rest deferred until after live check)
 
-- [ ] One source of truth for ahead/behind (the timeline); `PushButton` keeps
-      only its push count.
-- [ ] Prune `types.ts`: `VisitSession`, `MergeDirection`, `MergeAnalysis`,
-      dead snapshot fields.
-- [ ] Prune dead Rust commands + `invoke_handler` list; `cargo check` clean.
-- [ ] Re-count `App.tsx` state — target ≤ 25 `useState` (from 40).
-- [ ] Update README (features, keyboard table, project structure) and refresh
-      screenshots with the storefront demo repo scripts.
+- [x] Pruned dead `types.ts`: `VisitSession`, `MergeSession`,
+      `MergeDirection`, `MergePhase`, `MergeAnalysis`.
+- [ ] Prune dead Rust: `merge_execute`, `merge_branch`, `merge_analysis`
+      (+ `merge_analysis_blocking`, `predict_conflicts`, `MergeAnalysis`
+      struct) and their `invoke_handler` entries. **Held** — inert but might be
+      referenced if the merge flow needs rework after live testing; also the
+      `ahead_commits` / `aheadBranch` resume machinery (now inert).
+- [ ] Remove the inert `reset()` / `resetMode` / `showResetSection` plumbing
+      from `App.tsx` + `CommitPanel`.
+- [ ] Dead CSS: `.time-travel-*`, `.merge-strip*`, `.merge-panel*`,
+      HistoryTable styles + the stale comment referencing `HistoryTable.tsx`.
+- [ ] Re-count `App.tsx` state — target ≤ 25 `useState` (was 40; already well
+      down after removing view-mode, merge-session, and visit state).
+- [ ] Update README + refresh screenshots (needs the running app + storefront
+      demo scripts).
+
+Deferred deliberately: the remaining sweeps are cosmetic/cleanup and are best
+done *after* Phases 1–4 are confirmed working live, so nothing gets deleted
+that a fix might want back.
 
 ---
 
