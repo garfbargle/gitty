@@ -42,12 +42,18 @@ type HistoryTimelineProps = {
   siblingTip?: SiblingTip | null;
   /// Switch to the sibling branch.
   onSwitchSibling?: (name: string) => void;
-  /// Pull the given reference branch into the current branch ("update").
-  onUpdateFromBase?: (lane: BranchDivergence) => void;
-  mergePreview?: {
-    source: string;
-    target: string;
-    merged: boolean;
+  /// The two moves against the trunk: rebase your branch onto it, or merge in.
+  canUpdateFromMain?: boolean;
+  canMergeIntoMain?: boolean;
+  integrationBusy?: boolean;
+  onUpdateFromMain?: () => void;
+  onMergeIntoMain?: () => void;
+  /// A live integration op, drawn as a preview node on the track.
+  integrationPreview?: {
+    kind: "update" | "merge";
+    branch: string;
+    onto: string;
+    done: boolean;
     conflicts: boolean;
   } | null;
 };
@@ -68,8 +74,12 @@ export function HistoryTimeline({
   contextLanes = [],
   siblingTip,
   onSwitchSibling,
-  onUpdateFromBase,
-  mergePreview,
+  canUpdateFromMain,
+  canMergeIntoMain,
+  integrationBusy,
+  onUpdateFromMain,
+  onMergeIntoMain,
+  integrationPreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -264,7 +274,7 @@ export function HistoryTimeline({
 
   useLayoutEffect(() => {
     measureLanes();
-  }, [measureLanes, headHash, ancestry.length, ahead.length, changeCount, !!mergePreview]);
+  }, [measureLanes, headHash, ancestry.length, ahead.length, changeCount, !!integrationPreview]);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
@@ -360,7 +370,7 @@ export function HistoryTimeline({
   // but only when it's the last node on the track — once you have ahead commits
   // or a merge preview sitting to its right, it's no longer "the present" and a
   // sticky overlay would cover them.
-  const pinWorkingTree = ahead.length === 0 && !mergePreview;
+  const pinWorkingTree = ahead.length === 0 && !integrationPreview;
 
   // One ghost lane, drawn inside the dedicated lane region that sits *above* the
   // commit track in normal flow (so it can never overlap the commits). The
@@ -442,8 +452,11 @@ export function HistoryTimeline({
     );
   }
 
+  const showActions =
+    (canUpdateFromMain && !!onUpdateFromMain) || (canMergeIntoMain && !!onMergeIntoMain);
+
   function renderContextChips() {
-    if (contextLanes.length === 0 && !siblingTip) return null;
+    if (contextLanes.length === 0 && !siblingTip && !showActions) return null;
     return (
       <div className="timeline-context-bar">
         {renderSiblingChip()}
@@ -474,19 +487,35 @@ export function HistoryTimeline({
                   ) : null}
                 </>
               )}
-              {lane.behind > 0 && onUpdateFromBase ? (
-                <button
-                  type="button"
-                  className="chip-update"
-                  onClick={() => onUpdateFromBase(lane)}
-                  title={`Bring ${lane.refName} into your branch`}
-                >
-                  Update
-                </button>
-              ) : null}
             </div>
           );
         })}
+        {showActions ? (
+          <div className="timeline-actions">
+            {canUpdateFromMain && onUpdateFromMain ? (
+              <button
+                type="button"
+                className="timeline-action update"
+                disabled={integrationBusy}
+                onClick={onUpdateFromMain}
+              >
+                <ArrowDown size={13} aria-hidden />
+                Update from main
+              </button>
+            ) : null}
+            {canMergeIntoMain && onMergeIntoMain ? (
+              <button
+                type="button"
+                className="timeline-action merge"
+                disabled={integrationBusy}
+                onClick={onMergeIntoMain}
+              >
+                <ArrowUp size={13} aria-hidden />
+                Merge into main
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -534,32 +563,38 @@ export function HistoryTimeline({
             renderCommitNode(
               commit,
               ancestry.length + index,
-              index < ahead.length - 1 || !!mergePreview,
+              index < ahead.length - 1 || !!integrationPreview,
               true,
             ),
           )}
 
-          {mergePreview ? (
+          {integrationPreview ? (
             <div
               className={`timeline-node merge-preview${
-                mergePreview.merged ? " merged" : ""
-              }${mergePreview.conflicts ? " conflicts" : ""}`}
+                integrationPreview.done ? " merged" : ""
+              }${integrationPreview.conflicts ? " conflicts" : ""}`}
               title={
-                mergePreview.merged
-                  ? `Merged ${mergePreview.source} into ${mergePreview.target}`
-                  : mergePreview.conflicts
-                    ? `Merge ${mergePreview.source} into ${mergePreview.target} — conflicts`
-                    : `Preview: merge ${mergePreview.source} into ${mergePreview.target}`
+                integrationPreview.kind === "merge"
+                  ? integrationPreview.done
+                    ? `Merged ${integrationPreview.branch} into ${integrationPreview.onto}`
+                    : integrationPreview.conflicts
+                      ? `Merge ${integrationPreview.branch} into ${integrationPreview.onto} — conflicts`
+                      : `Merging ${integrationPreview.branch} into ${integrationPreview.onto}`
+                  : integrationPreview.conflicts
+                    ? `Update ${integrationPreview.branch} from ${integrationPreview.onto} — conflicts`
+                    : `Updating ${integrationPreview.branch} from ${integrationPreview.onto}`
               }
             >
               <span className="node-dot merge-preview-dot" />
-              <span className="node-hash">{mergePreview.target}</span>
+              <span className="node-hash">{integrationPreview.onto}</span>
               <span className="node-subject">
-                {mergePreview.merged
+                {integrationPreview.done
                   ? "merged"
-                  : mergePreview.conflicts
+                  : integrationPreview.conflicts
                     ? "conflicts"
-                    : "merge preview"}
+                    : integrationPreview.kind === "merge"
+                      ? "merging"
+                      : "updating"}
               </span>
             </div>
           ) : null}

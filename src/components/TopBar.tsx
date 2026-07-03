@@ -1,14 +1,11 @@
 import {
   ChevronDown,
-  ChevronRight,
   GitBranch,
-  GitMerge,
   Link2,
   PanelLeft,
   PanelLeftClose,
   RefreshCw,
   Settings,
-  X,
 } from "lucide-react";
 import type { CommitEntry, RepoEntry, VisitSession } from "../types";
 import { PushButton, type PushPhase } from "./PushButton";
@@ -44,20 +41,6 @@ type TopBarProps = {
   onOpenRepoSettings?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
-  mergeStripAvailable?: boolean;
-  mergeIncoming?: boolean;
-  mergeSource?: string | null;
-  mergeTargetName?: string | null;
-  mergePartner?: string | null;
-  mergeCandidates?: string[];
-  onMergePartnerChange?: (name: string) => void;
-  onClearMerge?: () => void;
-  mergeActive?: boolean;
-  aheadOfBase?: number | null;
-  baseBehind?: number | null;
-  mergeConflictState?: "clean" | "conflicts" | "unknown" | "checking";
-  onOpenMerge?: () => void;
-  onExitMerge?: () => void;
 };
 
 export function TopBar({
@@ -90,32 +73,11 @@ export function TopBar({
   onOpenRepoSettings,
   sidebarVisible = true,
   onToggleSidebar,
-  mergeStripAvailable = false,
-  mergeIncoming = false,
-  mergeSource,
-  mergeTargetName,
-  mergePartner,
-  mergeCandidates = [],
-  onMergePartnerChange,
-  onClearMerge,
-  mergeActive = false,
-  aheadOfBase,
-  baseBehind,
-  mergeConflictState = "unknown",
-  onOpenMerge,
-  onExitMerge,
 }: TopBarProps) {
   const inTimeTravel = !!visitSession;
   const inPreview = !!viewingCommit && !inTimeTravel;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
   const timeTravelCommit = visitSession?.visitedCommit;
-  const showMergeStrip =
-    mergeStripAvailable &&
-    !branch.includes("detached") &&
-    !inTimeTravel &&
-    !inPreview;
-  // A partner is chosen → we have a real source→target pair to act on.
-  const hasPair = !!mergeSource && !!mergeTargetName;
 
   return (
     <header className={`top-bar${inTimeTravel ? " time-travel-mode" : ""}${inPreview ? " preview-mode" : ""}`}>
@@ -171,101 +133,7 @@ export function TopBar({
               <span className="preview-meta">· workspace on {previewBranchLabel}</span>
             </div>
           </>
-        ) : (
-          <>
-            {showMergeStrip ? (
-              <>
-                <ChevronRight size={14} className="merge-strip-arrow" />
-                <div
-                  className={`merge-strip${mergeActive ? " active" : ""}${
-                    hasPair ? "" : " compact"
-                  }`}
-                >
-                  <GitMerge size={13} className="merge-strip-icon" />
-                  {(() => {
-                    // The partner branch is the editable side; the current
-                    // branch is fixed. On the trunk the partner is the source
-                    // (merged in); elsewhere it's the target (shipped to).
-                    const PartnerPicker = (
-                      <span className="merge-strip-select-wrap">
-                        <select
-                          className="merge-strip-select"
-                          value={mergePartner ?? ""}
-                          title="Choose a branch to merge"
-                          disabled={mergeActive || !onMergePartnerChange}
-                          onChange={(event) =>
-                            onMergePartnerChange?.(event.currentTarget.value)
-                          }
-                        >
-                          {!mergePartner ? (
-                            <option value="" disabled>
-                              Merge…
-                            </option>
-                          ) : null}
-                          {mergeCandidates.map((name) => (
-                            <option key={name} value={name}>
-                              {name}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown size={11} className="merge-strip-chevron" />
-                      </span>
-                    );
-
-                    if (!hasPair) return PartnerPicker;
-
-                    // The current branch is already shown in the branch picker,
-                    // so only render the partner side plus a direction arrow.
-                    // Incoming (on the trunk): partner → current. Ship: → partner.
-                    return mergeIncoming ? (
-                      <>
-                        {PartnerPicker}
-                        <ChevronRight size={12} className="merge-strip-into" />
-                        <span className="merge-strip-base">{mergeTargetName}</span>
-                      </>
-                    ) : (
-                      <>
-                        <ChevronRight size={12} className="merge-strip-into" />
-                        {PartnerPicker}
-                      </>
-                    );
-                  })()}
-
-                  {hasPair ? (
-                    mergeConflictState === "checking" ? (
-                      <span className="merge-chip neutral">checking…</span>
-                    ) : (
-                      <>
-                        {typeof aheadOfBase === "number" && aheadOfBase > 0 ? (
-                          <span className="merge-chip ahead">{aheadOfBase} ahead</span>
-                        ) : null}
-                        {typeof baseBehind === "number" && baseBehind > 0 ? (
-                          <span className="merge-chip behind">{baseBehind} behind</span>
-                        ) : null}
-                        {mergeConflictState === "clean" ? (
-                          <span className="merge-chip ok">no conflicts</span>
-                        ) : mergeConflictState === "conflicts" ? (
-                          <span className="merge-chip danger">conflicts</span>
-                        ) : null}
-                      </>
-                    )
-                  ) : null}
-                  {hasPair && !mergeActive && onClearMerge ? (
-                    <button
-                      type="button"
-                      className="merge-strip-clear"
-                      title="Clear merge selection"
-                      aria-label="Clear merge selection"
-                      onClick={onClearMerge}
-                    >
-                      <X size={12} />
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
+        ) : null}
       </div>
 
       <div className="top-bar-right">
@@ -315,30 +183,6 @@ export function TopBar({
             Back to Working Tree
             {changeCount > 0 ? <em>{changeCount}</em> : null}
           </button>
-        ) : null}
-        {showMergeStrip && onOpenMerge ? (
-          mergeActive ? (
-            <button
-              type="button"
-              className={`merge-action-btn${mergeConflictState === "conflicts" ? " danger" : " active"}`}
-              title="Close merge mode"
-              onClick={onExitMerge}
-            >
-              <GitMerge size={14} />
-              {mergeConflictState === "conflicts" ? "Resolving" : "Merging"}
-            </button>
-          ) : hasPair ? (
-            <button
-              type="button"
-              className="merge-action-btn"
-              title={`Merge ${mergeSource} into ${mergeTargetName}`}
-              disabled={loading}
-              onClick={onOpenMerge}
-            >
-              <GitMerge size={14} />
-              Merge
-            </button>
-          ) : null
         ) : null}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />

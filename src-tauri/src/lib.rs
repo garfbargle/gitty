@@ -2947,6 +2947,39 @@ async fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
         .map_err(|err| format!("Push task failed: {err}"))?
 }
 
+fn push_branch_blocking(path: String, branch: String, force: bool) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let branch = branch.trim().to_string();
+    if branch.is_empty() {
+        return Err("A branch is required.".to_string());
+    }
+    let remote = default_remote_name(repo_path)
+        .ok_or_else(|| "Add a remote before pushing.".to_string())?;
+    // Push a named local ref regardless of which branch is checked out — refs are
+    // shared across worktrees, so this ships `main` even while you sit on a branch.
+    let mut args = vec!["push".to_string()];
+    if force {
+        args.push("--force-with-lease".to_string());
+    }
+    args.push(remote.clone());
+    args.push(format!("{branch}:{branch}"));
+    let output = git_owned(repo_path, args)?;
+    Ok(ActionResult {
+        message: format!("Pushed {branch} to {remote}."),
+        output,
+    })
+}
+
+/// Push a specific local branch to its remote, from any checkout. Used to ship
+/// `main` after a merge-into-trunk without switching onto it.
+#[tauri::command]
+async fn push_branch(path: String, branch: String, force: bool) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || push_branch_blocking(path, branch, force))
+        .await
+        .map_err(|err| format!("Push task failed: {err}"))?
+}
+
 #[tauri::command]
 fn create_tag(path: String, name: String, commit: Option<String>) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
@@ -3262,6 +3295,7 @@ pub fn run() {
             fetch_repo,
             remove_remote,
             push_repo,
+            push_branch,
             create_tag,
             delete_tag,
             discard_files,

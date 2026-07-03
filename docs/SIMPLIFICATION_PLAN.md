@@ -148,38 +148,66 @@ changes out from under them.
 - Dead HistoryTable CSS (and a comment referencing the deleted file) remain in
   `App.css` — Phase 5 sweep.
 
-## Phase 3 — Merge and update collapse to two buttons
+## Phase 3 — Merge and update collapse to two buttons — DONE (needs live check)
 
-On any branch that isn't main, the timeline shows exactly two actions:
+On any branch that isn't main, the timeline context bar shows exactly two
+actions:
 
-- **Update from main** → `update_branch` (Phase 1). No direction picker, no
-  swap link, no wizard, no step checklist.
-- **Merge into main** → `merge_into_trunk` (Phase 1). User never leaves their
-  branch. Success = one line + a Push button.
+- **Update from main** → `update_branch` (rebase). Enabled when behind main.
+- **Merge into main** → `merge_into_trunk` (worktree). Enabled when ahead of
+  main. You never leave your branch. Clean success → a done card with
+  "Push main"; conflicts → the resolver.
 
-Conflicts are the only state that gets a dedicated surface: keep
-`ConflictResolver`, rewire it to work in the trunk worktree, apply the copy
-table below.
+- [x] Replaced the whole merge subsystem with one `integrationOp` state
+      (`kind: "update" | "merge"`, `phase: "conflicts" | "done"`, `onto`,
+      `branch`, `worktree?`, `pushable?`) + `integrationRunning`. Removed
+      `mergeSession`, `mergeTarget`, `mergeAnalysis`, `mergeAnalysisLoading`,
+      `mergeRunning`, `mergePushed`, `mergeAnalysisKeyRef` (7 state slots + a
+      ref gone).
+- [x] Removed derived merge machinery: `mergeCandidates`, `mergeIncoming`,
+      `mergePartner`, `mergePair`, `mergeStripAvailable`, `pairAnalysis`,
+      `aheadOfBase`, `baseBehind`, `mergeConflictState`, and the background
+      merge-analysis effect + auto-open effect. Availability now reads straight
+      off the timeline's integration lane (`behindMain` / `aheadOfMain`).
+- [x] New handlers: `updateFromMain`, `mergeIntoMain`, `completeIntegration`
+      (commit for merge / `update_continue` loop for rebase),
+      `cancelIntegration`, `pushMainAfterMerge`, `dismissIntegration`,
+      `refreshConflictStatus`. Conflict commands target `conflictPath`
+      (`op.worktree ?? selectedPath`) so the same `ConflictResolver` works for
+      both a worktree merge and an in-place rebase — no component changes.
+      Conflict labels are consistent: ours = main (`onto`), theirs = your
+      branch (holds for both merge and rebase — verified the git semantics).
+- [x] Deleted `MergePanel.tsx` (~346 lines). Deleted the TopBar merge strip +
+      right-side merge button (~190 lines) and all 16 merge-strip props.
+      Replaced with a slim inline integration panel (title, remaining count,
+      Complete/Cancel) in the conflict grid, and a done card (Push main / Done)
+      in the workspace slot.
+- [x] Two timeline buttons wired into `HistoryTimeline` context bar
+      (`canUpdateFromMain` / `canMergeIntoMain` / `onUpdateFromMain` /
+      `onMergeIntoMain` / `integrationBusy`), plus an `integrationPreview` node
+      on the track. Removed `onUpdateFromBase` / `mergePreview`.
+- [x] Added backend `push_branch(path, branch, force)` — pushes a named local
+      ref from any checkout, so "Push main" ships main without switching onto
+      it. `⌘↵` finishes the integration when all conflicts are resolved.
+- [x] `cargo check` + `tsc` + `npm run build` all clean. JS bundle 333→324 KB.
+      Git-level smoke of `push_branch` (push main from a feature checkout to a
+      bare remote, staying on feature) passes.
 
-- [ ] Add the two buttons to the timeline band (shown when current ≠ trunk;
-      "Update" only enabled when behind, "Merge" only when ahead).
-- [ ] Delete `MergePanel.tsx` (~346 lines).
-- [ ] Delete the TopBar merge strip (~190 lines: partner `<select>`, direction
-      arrow, chips, clear button) and its props
-      (`mergeStripAvailable/mergeIncoming/mergeSource/mergeTargetName/
-      mergePartner/mergeCandidates/onMergePartnerChange/onClearMerge/
-      mergeActive/aheadOfBase/baseBehind/mergeConflictState/onOpenMerge/
-      onExitMerge`).
-- [ ] Remove `MergeSession.returnBranch`, `mergeTarget`, `mergePushed`,
-      `mergeAnalysis*` pre-flight machinery, `MergeDirection`, and the
-      background conflict pre-check effect (~8 `useState`s). Merge/update
-      outcomes come from running the verb, not from predicting it.
-- [ ] Delete `merge_execute`'s `git switch <target>` path and `merge_branch` /
-      `merge_analysis` commands once nothing calls them.
-- [ ] Verify: merge with conflicts → resolver appears (in trunk worktree) →
-      complete → push. Update with conflicts → resolver → continue/abort.
+### Not done here
+- [ ] Deleting the now-dead Rust `merge_execute` / `merge_branch` /
+      `merge_analysis` / `predict_conflicts` / `MergeAnalysis` — they compile
+      cleanly and are still registered, so removal is pure cleanup. Moved to
+      **Phase 5 sweep** to keep this diff focused on behavior.
 
-**Ships as:** "two verbs" release.
+### NEEDS LIVE VERIFICATION
+The React orchestration (state transitions, the conflict grid swap, the done
+card) is **build-verified but not click-tested** — I can't drive the native
+Tauri window from here. All git command *sequences* it issues are smoke-tested,
+but a real run should confirm: update-with-conflicts → resolve → continue;
+merge-with-conflicts → resolve in worktree → complete → push main; and the
+clean-path happy cases.
+
+**Shipped as:** "two verbs" release (pending live check).
 
 ## Phase 4 — Kill the modes, fix the words
 

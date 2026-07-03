@@ -1858,6 +1858,53 @@ button:focus-visible {
   padding: 0 2px 10px;
 }
 
+.timeline-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.timeline-action {
+  align-items: center;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 5px;
+  padding: 4px 12px;
+  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease, transform 80ms ease;
+}
+
+.timeline-action:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.timeline-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.timeline-action.update {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+
+.timeline-action.update:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.timeline-action.merge {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff;
+}
+
+.timeline-action.merge:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
 .context-chip {
   align-items: center;
   background: var(--bg-hover);
@@ -4355,6 +4402,41 @@ button.context-chip.sibling:disabled {
   flex: 1;
   grid-template-columns: 220px minmax(0, 1fr) 280px;
   min-height: 0;
+}
+
+.integration-panel {
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.integration-panel-title {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 6px;
+}
+
+.integration-panel-title strong {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.integration-panel-sub {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 0;
+}
+
+.integration-panel.done .integration-panel-title {
+  color: var(--success);
 }
 
 .conflict-file-list {

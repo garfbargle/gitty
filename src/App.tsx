@@ -3,10 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
+import { Check, FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
 import { CommitPanel } from "./components/CommitPanel";
-import { MergePanel } from "./components/MergePanel";
 import { ConflictResolver } from "./components/ConflictResolver";
 import { DiffViewer } from "./components/DiffViewer";
 import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
@@ -43,10 +42,10 @@ import type {
   RepoSnapshot,
   SelectionAnchor,
   VisitSession,
-  MergeAnalysis,
   MergeOutcome,
   MergeStatus,
-  MergeSession,
+  UpdateOutcome,
+  UpdateStatus,
   ConflictSides,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
@@ -99,6 +98,21 @@ function upsertDiscoveredRepo(
 }
 
 type NavZone = "timeline" | "files";
+
+// The single "integrate with main" operation. `update` rebases the current
+// branch onto main; `merge` merges it into main inside a hidden worktree.
+type IntegrationOp = {
+  kind: "update" | "merge";
+  /// Trunk name we're integrating with (the "other" side; "ours" in conflicts).
+  onto: string;
+  /// The current branch being integrated ("theirs" in conflicts).
+  branch: string;
+  /// For a `merge` with conflicts: the trunk worktree where resolution happens.
+  worktree?: string;
+  phase: "conflicts" | "done";
+  /// A finished merge left main ahead of its remote — offer to push it.
+  pushable?: boolean;
+};
 
 function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement;
@@ -170,12 +184,10 @@ function App() {
   const [visitCommitDialogOpen, setVisitCommitDialogOpen] = useState(false);
   const [visitCommitTarget, setVisitCommitTarget] = useState<CommitEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
-  const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
-  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
-  const [mergeAnalysis, setMergeAnalysis] = useState<MergeAnalysis | null>(null);
-  const [mergeAnalysisLoading, setMergeAnalysisLoading] = useState(false);
-  const [mergeRunning, setMergeRunning] = useState(false);
-  const [mergePushed, setMergePushed] = useState(false);
+  // The one integration operation in flight: rebasing the current branch onto
+  // main ("update"), or merging it into main ("merge"). Null when idle.
+  const [integrationOp, setIntegrationOp] = useState<IntegrationOp | null>(null);
+  const [integrationRunning, setIntegrationRunning] = useState(false);
   const [conflictFiles, setConflictFiles] = useState<string[]>([]);
   const [resolvedFiles, setResolvedFiles] = useState<string[]>([]);
   const [selectedConflict, setSelectedConflict] = useState<string | null>(null);
@@ -265,44 +277,27 @@ function App() {
     return null;
   }, [snapshot?.branches]);
 
-  // You're sitting on the trunk — there's nothing to "ship", so no merge strip.
+  // You're sitting on the trunk — there's nothing to update from or ship to it.
   const onIntegrationBranch =
     !!snapshot && !!integrationBranch && snapshot.branch === integrationBranch;
 
-  // Local branches the current branch could be merged into (excludes itself).
-  const mergeCandidates = useMemo(() => {
-    const current = snapshot?.branch;
-    return (snapshot?.branches ?? [])
-      .filter((b) => !b.isRemote && b.name !== current && !b.name.includes("detached"))
-      .map((b) => b.name);
-  }, [snapshot?.branches, snapshot?.branch]);
+  const branchDetached = snapshot?.branch.includes("detached") ?? false;
 
-  // On the trunk you pull a sibling IN; elsewhere you ship the current branch UP.
-  const mergeIncoming = onIntegrationBranch;
+  // How the current branch sits against the trunk, from the timeline's own
+  // integration lane: `behind` = commits main has that you lack (update to get
+  // them), `ahead` = your commits main lacks (merge to ship them).
+  const integrationLane = useMemo(
+    () => (snapshot?.timelineContext ?? []).find((lane) => lane.kind === "integration"),
+    [snapshot?.timelineContext],
+  );
+  const behindMain = integrationLane?.behind ?? 0;
+  const aheadOfMain = integrationLane?.ahead ?? 0;
 
-  // The "other" branch in the relationship. There is no default in either
-  // direction — the strip stays a neutral "Merge…" picker until you explicitly
-  // pick a branch, and clearing the pick returns it to that resting state. A
-  // saved pick is honored only while it's still a valid candidate.
-  const mergePartner = useMemo(() => {
-    if (mergeTarget && mergeCandidates.includes(mergeTarget)) return mergeTarget;
-    return null;
-  }, [mergeTarget, mergeCandidates]);
-
-  // Resolved source → target. On the trunk the partner is the source (merged
-  // in); on a feature branch the current branch is the source (shipped up).
-  const mergePair = useMemo(() => {
-    const current = snapshot?.branch;
-    if (!mergePartner || !current || current.includes("detached")) return null;
-    return mergeIncoming
-      ? { source: mergePartner, target: current }
-      : { source: current, target: mergePartner };
-  }, [mergePartner, mergeIncoming, snapshot?.branch]);
-
-  // The strip is available whenever there's at least one other local branch to
-  // merge with. When no partner is chosen yet it just shows a "Merge a branch…"
-  // picker — no forced target, no chips.
-  const mergeStripAvailable = mergeCandidates.length > 0;
+  // The two moves, offered only off the trunk, on a real branch, when idle.
+  const canIntegrate =
+    !!integrationBranch && !onIntegrationBranch && !branchDetached && !visitSession;
+  const canUpdateFromMain = canIntegrate && behindMain > 0;
+  const canMergeIntoMain = canIntegrate && aheadOfMain > 0;
 
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
@@ -621,15 +616,11 @@ function App() {
     setChangeSummaryVisible(false);
     setNavZone("files");
     setRepoSettingsOpen(false);
-    setMergeSession(null);
-    setMergeTarget(null);
-    setMergeAnalysis(null);
-    mergeAnalysisKeyRef.current = "";
+    setIntegrationOp(null);
     setConflictFiles([]);
     setResolvedFiles([]);
     setSelectedConflict(null);
     setConflictSides(null);
-    setMergePushed(false);
   }
 
   async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
@@ -1367,138 +1358,111 @@ function App() {
     if (snap) await selectWorkingTree({ snapshot: snap });
   }
 
-  // ── Merge mode ──────────────────────────────────────────────────────────
+  // ── Integrate with main (update / merge) ────────────────────────────────
 
-  const mergeAnalysisKeyRef = useRef("");
+  // Where conflict resolution happens: a merge resolves inside the trunk
+  // worktree; an update (rebase) resolves in the main checkout.
+  const conflictPath = integrationOp?.worktree ?? selectedPath;
 
-  async function fetchMergeAnalysis(source: string, target: string) {
-    return invoke<MergeAnalysis>("merge_analysis", {
-      path: selectedPath,
-      source,
-      target,
-    });
-  }
-
-  async function loadMergeAnalysis(session: MergeSession) {
-    setMergeAnalysisLoading(true);
-    try {
-      const result = await fetchMergeAnalysis(session.source, session.target);
-      setMergeAnalysis(result);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setMergeAnalysisLoading(false);
-    }
-  }
-
-  function openMerge(pair?: { source: string; target: string } | null) {
-    if (!selectedPath || !snapshot) return;
-    if (visitSession) {
-      setError("Return to latest before merging.");
-      return;
-    }
-    const { source, target } = pair ?? mergePair ?? {};
-    if (!source || !target || source === target || source.includes("detached")) return;
-
-    const current = snapshot.branch;
-    const session: MergeSession = {
-      source,
-      target,
-      // "ship" = current branch is the source; "update" = current is the target
-      // (the partner is being merged into us). Drives the panel's swap wording.
-      direction: current === target ? "update" : "ship",
-      phase: "preview",
-      returnBranch: current,
-    };
-    setViewingCommit(null);
-    setCommitFiles([]);
-    setFocus(null);
-    setDiff(emptyDiff);
-    setMergePushed(false);
+  function clearIntegration() {
+    setIntegrationOp(null);
     setConflictFiles([]);
     setResolvedFiles([]);
     setSelectedConflict(null);
     setConflictSides(null);
-    setMergeSession(session);
-    // Reuse cached analysis when it already matches this pair.
-    if (mergeAnalysis && mergeAnalysis.source === source && mergeAnalysis.target === target) {
-      // keep it
-    } else {
-      setMergeAnalysis(null);
-    }
-    void loadMergeAnalysis(session);
   }
 
-  function closeMerge() {
-    setMergeSession(null);
-    setMergeAnalysis(null);
-    mergeAnalysisKeyRef.current = "";
-    setConflictFiles([]);
+  // Move the conflicted-file list into a fresh op, selecting the first file.
+  function enterConflicts(op: IntegrationOp, files: string[]) {
+    setConflictFiles(files);
     setResolvedFiles([]);
-    setSelectedConflict(null);
-    setConflictSides(null);
-    setMergePushed(false);
+    setSelectedConflict(files[0] ?? null);
+    setIntegrationOp(op);
   }
 
-  function swapMergeDirection() {
-    if (!mergeSession) return;
-    openMerge({ source: mergeSession.target, target: mergeSession.source });
-  }
-
-  // A clean merge needs no further input — close the merge UI and drop straight
-  // back to the working tree. Git already left us on the target branch, so the
-  // merge result is in view and the top-bar Push button surfaces it normally.
-  async function concludeMerge() {
-    closeMerge();
+  async function dismissIntegration() {
+    clearIntegration();
     const snap = await refreshRepo();
     if (snap) await selectWorkingTree({ snapshot: snap });
   }
 
-  async function runMerge() {
-    if (!selectedPath || !mergeSession || mergeRunning) return;
-    if (mergeAnalysis && !mergeAnalysis.workingTreeClean) {
-      setError("Commit or stash your changes before merging.");
-      return;
-    }
-    setMergeRunning(true);
-    setMergeSession((prev) => (prev ? { ...prev, phase: "merging" } : prev));
+  // Bring main's new commits under your branch by rebasing onto it.
+  async function updateFromMain() {
+    if (!selectedPath || !snapshot || integrationRunning) return;
+    if (!integrationBranch || onIntegrationBranch) return;
+    const branch = snapshot.branch;
+    setIntegrationRunning(true);
     setError("");
     setMessage("");
     try {
-      const outcome = await invoke<MergeOutcome>("merge_execute", {
+      const outcome = await invoke<UpdateOutcome>("update_branch", {
         path: selectedPath,
-        source: mergeSession.source,
-        target: mergeSession.target,
-        updateFirst: (mergeAnalysis?.targetBehind ?? 0) > 0,
+        onto: integrationBranch,
       });
       if (outcome.status === "conflicts") {
         await refreshRepoQuiet(selectedPath);
-        setConflictFiles(outcome.conflictFiles);
-        setResolvedFiles([]);
-        setSelectedConflict(outcome.conflictFiles[0] ?? null);
-        setMergeSession((prev) => (prev ? { ...prev, phase: "conflicts" } : prev));
+        enterConflicts({ kind: "update", onto: integrationBranch, branch, phase: "conflicts" }, outcome.conflictFiles);
       } else {
         setMessage(outcome.message);
-        await concludeMerge();
+        await dismissIntegration();
       }
     } catch (err) {
       setError(String(err));
-      setMergeSession((prev) => (prev ? { ...prev, phase: "preview" } : prev));
     } finally {
-      setMergeRunning(false);
+      setIntegrationRunning(false);
     }
   }
 
-  async function refreshMergeStatus() {
-    if (!selectedPath) return;
+  // Ship your branch into main, merging inside a hidden worktree so you never
+  // leave your branch.
+  async function mergeIntoMain() {
+    if (!selectedPath || !snapshot || integrationRunning) return;
+    if (!integrationBranch || onIntegrationBranch) return;
+    const branch = snapshot.branch;
+    setIntegrationRunning(true);
+    setError("");
+    setMessage("");
     try {
-      const status = await invoke<MergeStatus>("merge_status", { path: selectedPath });
+      const outcome = await invoke<MergeOutcome>("merge_into_trunk", {
+        path: selectedPath,
+        source: branch,
+      });
+      if (outcome.status === "conflicts") {
+        await refreshRepoQuiet(selectedPath);
+        enterConflicts(
+          { kind: "merge", onto: integrationBranch, branch, worktree: outcome.worktree ?? undefined, phase: "conflicts" },
+          outcome.conflictFiles,
+        );
+      } else {
+        setMessage(outcome.message);
+        setIntegrationOp({
+          kind: "merge",
+          onto: integrationBranch,
+          branch,
+          phase: "done",
+          pushable: hasRemotes,
+        });
+        await refreshRepoQuiet(selectedPath);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIntegrationRunning(false);
+    }
+  }
+
+  // Re-read which files still conflict, from the right place for this op.
+  async function refreshConflictStatus() {
+    if (!integrationOp) return;
+    try {
+      const status =
+        integrationOp.kind === "update"
+          ? await invoke<UpdateStatus>("update_status", { path: selectedPath })
+          : await invoke<MergeStatus>("merge_status", { path: conflictPath });
       setConflictFiles(status.conflictFiles);
       setResolvedFiles(status.resolvedFiles);
       setSelectedConflict((prev) =>
-        prev && status.conflictFiles.includes(prev)
-          ? prev
-          : status.conflictFiles[0] ?? null,
+        prev && status.conflictFiles.includes(prev) ? prev : status.conflictFiles[0] ?? null,
       );
     } catch (err) {
       setError(String(err));
@@ -1506,89 +1470,89 @@ function App() {
   }
 
   async function resolveConflictFile(file: string, side: "ours" | "theirs") {
-    if (!selectedPath) return;
     const result = await run(() =>
-      invoke<ActionResult>("resolve_conflict", { path: selectedPath, file, side }),
+      invoke<ActionResult>("resolve_conflict", { path: conflictPath, file, side }),
     );
     if (!result) return;
-    await refreshMergeStatus();
-    await refreshChangesQuiet(selectedPath);
+    await refreshConflictStatus();
   }
 
   async function resolveConflictManual(content: string) {
-    if (!selectedPath || !selectedConflict) return;
+    if (!selectedConflict) return;
     const result = await run(() =>
       invoke<ActionResult>("resolve_conflict_manual", {
-        path: selectedPath,
+        path: conflictPath,
         file: selectedConflict,
         content,
       }),
     );
     if (!result) return;
-    await refreshMergeStatus();
-    await refreshChangesQuiet(selectedPath);
+    await refreshConflictStatus();
   }
 
-  async function completeMerge() {
-    if (!selectedPath) return;
+  // Finish resolving: commit the merge, or continue the rebase (which may pause
+  // again on the next conflicting commit).
+  async function completeIntegration() {
+    if (!integrationOp || conflictFiles.length > 0) return;
+    if (integrationOp.kind === "merge") {
+      const result = await run(() =>
+        invoke<ActionResult>("complete_merge", { path: conflictPath, message: null }),
+      );
+      if (!result) return;
+      setMessage(result.message);
+      setIntegrationOp((prev) =>
+        prev ? { ...prev, phase: "done", pushable: hasRemotes } : prev,
+      );
+      await refreshRepoQuiet(selectedPath);
+    } else {
+      const outcome = await run(() =>
+        invoke<UpdateOutcome>("update_continue", { path: selectedPath }),
+      );
+      if (!outcome) return;
+      if (outcome.status === "conflicts") {
+        await refreshRepoQuiet(selectedPath);
+        setConflictFiles(outcome.conflictFiles);
+        setResolvedFiles([]);
+        setSelectedConflict(outcome.conflictFiles[0] ?? null);
+      } else {
+        setMessage(outcome.message);
+        await dismissIntegration();
+      }
+    }
+  }
+
+  async function cancelIntegration() {
+    if (!integrationOp) return;
+    const command = integrationOp.kind === "merge" ? "abort_merge" : "update_abort";
+    const args =
+      integrationOp.kind === "merge"
+        ? { path: conflictPath, returnBranch: null }
+        : { path: selectedPath };
+    const result = await run(() => invoke<ActionResult>(command, args));
+    if (result) setMessage(result.message);
+    await dismissIntegration();
+  }
+
+  // Push main after a successful merge-into-trunk, without switching onto it.
+  async function pushMainAfterMerge() {
+    if (!integrationOp) return;
     const result = await run(() =>
-      invoke<ActionResult>("complete_merge", { path: selectedPath, message: null }),
+      invoke<ActionResult>("push_branch", {
+        path: selectedPath,
+        branch: integrationOp.onto,
+        force: false,
+      }),
     );
     if (!result) return;
     setMessage(result.message);
-    await concludeMerge();
-  }
-
-  async function abortMerge() {
-    if (!selectedPath) return;
-    const returnBranch = mergeSession?.returnBranch ?? null;
-    const result = await run(() =>
-      invoke<ActionResult>("abort_merge", { path: selectedPath, returnBranch }),
-    );
-    closeMerge();
-    if (result) setMessage(result.message);
-    const snap = await refreshRepo();
-    if (snap) await selectWorkingTree({ snapshot: snap });
-  }
-
-  async function mergePush() {
-    const ok = await push(false);
-    if (ok) setMergePushed(true);
-  }
-
-  async function finishMerge() {
-    const returnBranch = mergeSession?.returnBranch;
-    closeMerge();
-    if (returnBranch && snapshot && snapshot.branch !== returnBranch) {
-      await run(() =>
-        invoke<ActionResult>("checkout_branch", {
-          path: selectedPath,
-          branch: returnBranch,
-        }),
-      );
-    }
-    const snap = await refreshRepo();
-    if (snap) await selectWorkingTree({ snapshot: snap });
-  }
-
-  function showMergeCommands() {
-    if (!mergeSession) return;
-    const { source, target } = mergeSession;
-    const lines = [
-      `git switch ${target}`,
-      (mergeAnalysis?.targetBehind ?? 0) > 0 ? `git pull --ff-only` : null,
-      `git merge ${source}`,
-      `git push`,
-    ].filter(Boolean);
-    setMessage(`Equivalent commands:\n${lines.join("\n")}`);
+    await dismissIntegration();
   }
 
   async function loadConflictSides(file: string) {
-    if (!selectedPath) return;
     setConflictSidesLoading(true);
     try {
       const sides = await invoke<ConflictSides>("conflict_sides", {
-        path: selectedPath,
+        path: conflictPath,
         file,
       });
       setConflictSides(sides);
@@ -1600,35 +1564,29 @@ function App() {
   }
 
   useEffect(() => {
-    if (mergeSession?.phase === "conflicts" && selectedConflict) {
+    if (integrationOp?.phase === "conflicts" && selectedConflict) {
       void loadConflictSides(selectedConflict);
     } else {
       setConflictSides(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConflict, mergeSession?.phase]);
+  }, [selectedConflict, integrationOp?.phase, conflictPath]);
 
+  // ⌘↵ finishes the integration once every conflict is resolved.
   useEffect(() => {
-    if (mergeSession) return;
-    if (!selectedPath || !snapshot || !mergePair) return;
-    const headHash = snapshot.commits[0]?.hash ?? "";
-    const key = `${selectedPath}|${mergePair.source}|${mergePair.target}|${headHash}`;
-    if (mergeAnalysisKeyRef.current === key) return;
-    mergeAnalysisKeyRef.current = key;
-    const { source, target } = mergePair;
-    let cancelled = false;
-    void fetchMergeAnalysis(source, target)
-      .then((res) => {
-        if (!cancelled) setMergeAnalysis(res);
-      })
-      .catch(() => {
-        mergeAnalysisKeyRef.current = "";
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (integrationOp?.phase !== "conflicts") return;
+    function onKey(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter" || event.shiftKey || event.altKey) {
+        return;
+      }
+      if (conflictFiles.length > 0) return;
+      event.preventDefault();
+      void completeIntegration();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPath, mergePair?.source, mergePair?.target, snapshot?.commits, mergeSession]);
+  }, [integrationOp?.phase, conflictFiles.length]);
 
   function openCreateTagDialog(commit: CommitEntry) {
     setTagCreateCommit(commit);
@@ -2159,35 +2117,8 @@ function App() {
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
-  const showCommitSection = workingTreeActive && !mergeSession;
+  const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = !!visitSession;
-
-  // Merge-strip chips reflect the resolved pair. Only meaningful when the cached
-  // analysis matches that pair. "ahead" = commits the source brings; "behind" =
-  // commits the target has that the source lacks.
-  const pairAnalysis =
-    mergeAnalysis &&
-    mergePair &&
-    mergeAnalysis.source === mergePair.source &&
-    mergeAnalysis.target === mergePair.target
-      ? mergeAnalysis
-      : null;
-  const aheadOfBase = pairAnalysis ? pairAnalysis.commits.length : null;
-  const baseBehind = pairAnalysis ? pairAnalysis.sourceBehind : null;
-  const mergeConflictState: "clean" | "conflicts" | "unknown" | "checking" =
-    mergeSession?.phase === "conflicts"
-      ? "conflicts"
-      : mergeAnalysisLoading && !pairAnalysis
-        ? "checking"
-        : pairAnalysis
-          ? pairAnalysis.alreadyUpToDate
-            ? "unknown"
-            : !pairAnalysis.conflictsKnown
-              ? "unknown"
-              : pairAnalysis.hasConflicts
-                ? "conflicts"
-                : "clean"
-          : "unknown";
 
   useEffect(() => {
     if (!viewingCommit || !selectedPath) {
@@ -2293,19 +2224,15 @@ function App() {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== "m") return;
       if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!mergePair) return;
+      if (!canMergeIntoMain || integrationOp || integrationRunning) return;
       event.preventDefault();
-      if (mergeSession) {
-        if (mergeSession.phase === "preview") closeMerge();
-      } else {
-        openMerge(mergePair);
-      }
+      void mergeIntoMain();
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergePair?.source, mergePair?.target, mergeSession]);
+  }, [canMergeIntoMain, integrationOp, integrationRunning]);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -2451,40 +2378,6 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onSetupRemote={() => openRepoSettings()}
-              mergeStripAvailable={mergeStripAvailable}
-              mergeIncoming={mergeIncoming}
-              mergeSource={mergePair?.source ?? null}
-              mergeTargetName={mergePair?.target ?? null}
-              mergePartner={mergePartner}
-              mergeCandidates={mergeCandidates}
-              onMergePartnerChange={(name) => {
-                setMergeTarget(name);
-                if (mergeSession && mergeSession.phase === "preview") {
-                  closeMerge();
-                }
-              }}
-              onClearMerge={() => {
-                setMergeTarget(null);
-                if (mergeSession && mergeSession.phase === "preview") {
-                  closeMerge();
-                }
-              }}
-              mergeActive={!!mergeSession}
-              aheadOfBase={aheadOfBase}
-              baseBehind={baseBehind}
-              mergeConflictState={mergeConflictState}
-              onOpenMerge={() => openMerge()}
-              onExitMerge={() => {
-                if (mergeSession?.phase === "conflicts") {
-                  setError("Resolve or abort the merge before leaving.");
-                  return;
-                }
-                if (mergeSession?.phase === "done") {
-                  void finishMerge();
-                } else {
-                  closeMerge();
-                }
-              }}
             />
 
             <div className="working-view">
@@ -2499,28 +2392,31 @@ function App() {
                   contextLanes={displaySnapshot.timelineContext ?? []}
                   siblingTip={displaySnapshot.siblingTip}
                   onSwitchSibling={(name) => void checkoutBranch(name)}
-                  onUpdateFromBase={(lane) =>
-                    openMerge({ source: lane.refName, target: displaySnapshot.branch })
-                  }
+                  canUpdateFromMain={canUpdateFromMain && !integrationOp}
+                  canMergeIntoMain={canMergeIntoMain && !integrationOp}
+                  integrationBusy={integrationRunning}
+                  onUpdateFromMain={() => void updateFromMain()}
+                  onMergeIntoMain={() => void mergeIntoMain()}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
                   onVisitCommit={(commit) => requestVisitCommit(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
-                  mergePreview={
-                    mergeSession
+                  integrationPreview={
+                    integrationOp
                       ? {
-                          target: mergeSession.target,
-                          source: mergeSession.source,
-                          merged: mergeSession.phase === "done",
-                          conflicts: mergeSession.phase === "conflicts",
+                          kind: integrationOp.kind,
+                          branch: integrationOp.branch,
+                          onto: integrationOp.onto,
+                          done: integrationOp.phase === "done",
+                          conflicts: integrationOp.phase === "conflicts",
                         }
                       : null
                   }
                 />
 
-                {mergeSession && mergeSession.phase === "conflicts" ? (
+                {integrationOp && integrationOp.phase === "conflicts" ? (
                   <div className="merge-conflict-grid">
                     <div className="conflict-file-list">
                       <header className="conflict-list-head">
@@ -2529,7 +2425,8 @@ function App() {
                       </header>
                       {conflictFiles.length === 0 ? (
                         <p className="conflict-list-empty">
-                          All conflicts resolved. Complete the merge.
+                          All conflicts resolved. Finish{" "}
+                          {integrationOp.kind === "merge" ? "the merge" : "the update"}.
                         </p>
                       ) : (
                         <ul>
@@ -2572,8 +2469,8 @@ function App() {
                       file={selectedConflict}
                       sides={conflictSides}
                       loading={conflictSidesLoading}
-                      oursLabel={mergeSession.target}
-                      theirsLabel={mergeSession.source}
+                      oursLabel={integrationOp.onto}
+                      theirsLabel={integrationOp.branch}
                       resolved={
                         !!selectedConflict && resolvedFiles.includes(selectedConflict)
                       }
@@ -2588,28 +2485,38 @@ function App() {
                       onSaveManual={(content) => void resolveConflictManual(content)}
                     />
 
-                    <MergePanel
-                      analysis={mergeAnalysis}
-                      source={mergeSession.source}
-                      target={mergeSession.target}
-                      currentBranch={mergeSession.returnBranch}
-                      phase={mergeSession.phase}
-                      loading={loading}
-                      running={mergeRunning}
-                      hasRemotes={hasRemotes}
-                      conflictCount={conflictFiles.length}
-                      pushed={mergePushed}
-                      onMerge={() => void runMerge()}
-                      onCancel={closeMerge}
-                      onSwapDirection={swapMergeDirection}
-                      onCompleteMerge={() => void completeMerge()}
-                      onAbort={() => void abortMerge()}
-                      onPush={() => void mergePush()}
-                      onShowCommands={showMergeCommands}
-                      onBackToWorkingTree={() => void finishMerge()}
-                    />
+                    <aside className="integration-panel">
+                      <header className="integration-panel-title">
+                        {integrationOp.kind === "merge" ? (
+                          <>Merge <strong>{integrationOp.branch}</strong> into <strong>{integrationOp.onto}</strong></>
+                        ) : (
+                          <>Update <strong>{integrationOp.branch}</strong> from <strong>{integrationOp.onto}</strong></>
+                        )}
+                      </header>
+                      <p className="integration-panel-sub">
+                        {conflictFiles.length > 0
+                          ? `${conflictFiles.length} file${conflictFiles.length === 1 ? "" : "s"} to resolve`
+                          : "All resolved — ready to finish."}
+                      </p>
+                      <button
+                        type="button"
+                        className="commit-primary"
+                        disabled={conflictFiles.length > 0 || loading}
+                        onClick={() => void completeIntegration()}
+                      >
+                        {integrationOp.kind === "merge" ? "Complete merge" : "Continue update"}
+                        <kbd>⌘↵</kbd>
+                      </button>
+                      <button
+                        type="button"
+                        className="merge-secondary danger"
+                        onClick={() => void cancelIntegration()}
+                      >
+                        Cancel
+                      </button>
+                    </aside>
                   </div>
-                ) : showGittyEmptyState && !mergeSession ? (
+                ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
@@ -2678,27 +2585,34 @@ function App() {
                       }
                     />
 
-                    {mergeSession ? (
-                      <MergePanel
-                        analysis={mergeAnalysis}
-                        source={mergeSession.source}
-                        target={mergeSession.target}
-                        currentBranch={mergeSession.returnBranch}
-                        phase={mergeSession.phase}
-                        loading={mergeAnalysisLoading}
-                        running={mergeRunning}
-                        hasRemotes={hasRemotes}
-                        conflictCount={conflictFiles.length}
-                        pushed={mergePushed}
-                        onMerge={() => void runMerge()}
-                        onCancel={closeMerge}
-                        onSwapDirection={swapMergeDirection}
-                        onCompleteMerge={() => void completeMerge()}
-                        onAbort={() => void abortMerge()}
-                        onPush={() => void mergePush()}
-                        onShowCommands={showMergeCommands}
-                        onBackToWorkingTree={() => void finishMerge()}
-                      />
+                    {integrationOp && integrationOp.phase === "done" ? (
+                      <aside className="integration-panel done">
+                        <header className="integration-panel-title">
+                          <Check size={15} />
+                          Merged {integrationOp.branch} into {integrationOp.onto}
+                        </header>
+                        <p className="integration-panel-sub">
+                          {integrationOp.onto} now includes {integrationOp.branch}.
+                          {integrationOp.pushable ? " Push it to share." : ""}
+                        </p>
+                        {integrationOp.pushable ? (
+                          <button
+                            type="button"
+                            className="commit-primary"
+                            disabled={loading}
+                            onClick={() => void pushMainAfterMerge()}
+                          >
+                            Push {integrationOp.onto}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="merge-secondary"
+                          onClick={() => void dismissIntegration()}
+                        >
+                          Done
+                        </button>
+                      </aside>
                     ) : (
                     <CommitPanel
                       message={commitMessage}
