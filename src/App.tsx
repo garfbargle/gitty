@@ -10,9 +10,8 @@ import { MergePanel } from "./components/MergePanel";
 import { ConflictResolver } from "./components/ConflictResolver";
 import { DiffViewer } from "./components/DiffViewer";
 import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
-import { HistoryTable } from "./components/HistoryTable";
 import { HistoryTimeline } from "./components/HistoryTimeline";
-import { SplitPane, type SplitOrientation } from "./components/SplitPane";
+import { SplitPane } from "./components/SplitPane";
 import { AppSettingsDrawer } from "./components/AppSettingsDrawer";
 import { RepoSettingsDrawer } from "./components/RepoSettingsDrawer";
 import { RepoSidebar } from "./components/RepoSidebar";
@@ -52,18 +51,12 @@ import type {
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
-import {
-  appendUniqueCommits,
-  COMMIT_PAGE_SIZE,
-  commitsPageHasMore,
-  INITIAL_COMMIT_LIMIT,
-} from "./lib/commits";
+import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
 import {
   buildTimelineItems,
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
-import { pickerCommits } from "./lib/commitDisplay";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -105,7 +98,6 @@ function upsertDiscoveredRepo(
   return next;
 }
 
-type ViewMode = "working" | "history";
 type NavZone = "timeline" | "files";
 
 function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
@@ -172,7 +164,6 @@ function App() {
   const [reposLoaded, setReposLoaded] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [snapshot, setSnapshot] = useState<RepoSnapshot | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("working");
   const [viewingCommit, setViewingCommit] = useState<CommitEntry | null>(null);
   const [viewingCommitMessage, setViewingCommitMessage] = useState("");
   const [visitSession, setVisitSession] = useState<VisitSession | null>(null);
@@ -228,12 +219,8 @@ function App() {
   const [changeSummaryLoading, setChangeSummaryLoading] = useState(false);
   const [changeSummaryError, setChangeSummaryError] = useState<string | null>(null);
   const [changeSummaryVisible, setChangeSummaryVisible] = useState(false);
-  const [historySplit, setHistorySplit] = useState(0.55);
-  const [historyOrientation, setHistoryOrientation] = useState<SplitOrientation>("vertical");
   const [workspaceSplit, setWorkspaceSplit] = useState(0.3);
   const [loading, setLoading] = useState(false);
-  const [loadingMoreCommits, setLoadingMoreCommits] = useState(false);
-  const [commitsHasMore, setCommitsHasMore] = useState(false);
   const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -326,15 +313,13 @@ function App() {
     repos.find((repo) => repo.path === selectedPath)?.name ?? "repository";
   const discoveryStarted = useRef(false);
   const selectRepoRequestRef = useRef(0);
-  const loadingMoreCommitsRef = useRef(false);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
   const focusRefreshContextRef = useRef({
     selectedPath,
-    viewMode,
     viewingCommit,
     focus,
   });
-  focusRefreshContextRef.current = { selectedPath, viewMode, viewingCommit, focus };
+  focusRefreshContextRef.current = { selectedPath, viewingCommit, focus };
   const changesListRef = useRef<ChangesListHandle>(null);
   const selectionPreserveRef = useRef(0);
   const loadDiffRequestRef = useRef(0);
@@ -353,14 +338,6 @@ function App() {
     () => (snapshot ? buildTimelineItems(snapshot.commits, snapshot.aheadCommits ?? []) : []),
     [snapshot?.commits, snapshot?.aheadCommits],
   );
-  const historyCommits = useMemo(
-    () =>
-      snapshot
-        ? pickerCommits(snapshot.graphCommits ?? snapshot.commits, snapshot.aheadCommits ?? [])
-        : [],
-    [snapshot?.graphCommits, snapshot?.commits, snapshot?.aheadCommits],
-  );
-
   const startDiscovery = useCallback((paths: string[]) => {
     void invoke("start_repo_discovery", { savedPaths: paths }).catch(() => {
       setDiscovering(false);
@@ -432,14 +409,14 @@ function App() {
   }, [savedPaths]);
 
   useEffect(() => {
-    if (!snapshot || viewMode !== "working") return;
+    if (!snapshot) return;
     if (snapshot.repo.path !== selectedPath) return;
     const first = snapshot.changes.find(isUnstaged) ?? snapshot.changes.find(isStaged);
     if (first) {
       const section: ChangeSection = isUnstaged(first) ? "unstaged" : "staged";
       void inspectFileQuiet(first, section, snapshot.repo.path);
     }
-  }, [snapshot?.repo.path, selectedPath, viewMode]);
+  }, [snapshot?.repo.path, selectedPath]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
     setLoading(true);
@@ -618,7 +595,6 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      setCommitsHasMore(commitsPageHasMore(result.graphCommits.length, INITIAL_COMMIT_LIMIT));
       void enrichRepoSnapshot(path, requestId);
       return;
     }
@@ -631,9 +607,6 @@ function App() {
 
   function applyRepoSwitchCleanup() {
     snapshotGenerationRef.current += 1;
-    setCommitsHasMore(false);
-    setLoadingMoreCommits(false);
-    loadingMoreCommitsRef.current = false;
     setViewingCommit(null);
     setViewingCommitMessage("");
     setVisitSession(null);
@@ -646,7 +619,6 @@ function App() {
     setAmend(false);
     resetSummaryCache();
     setChangeSummaryVisible(false);
-    setViewMode("working");
     setNavZone("files");
     setRepoSettingsOpen(false);
     setMergeSession(null);
@@ -684,35 +656,6 @@ function App() {
     }
   }
 
-  async function loadMoreCommits(): Promise<void> {
-    const path = selectedPath;
-    if (!path || !commitsHasMore || loadingMoreCommitsRef.current) return;
-
-    loadingMoreCommitsRef.current = true;
-    setLoadingMoreCommits(true);
-    try {
-      const skip = snapshot?.repo.path === path ? snapshot.graphCommits.length : 0;
-      const more = await invoke<CommitEntry[]>("repo_commits", {
-        path,
-        skip,
-        limit: COMMIT_PAGE_SIZE,
-      });
-      if (selectedPath !== path) return;
-      setCommitsHasMore(commitsPageHasMore(more.length, COMMIT_PAGE_SIZE));
-      if (more.length === 0) return;
-      setSnapshot((prev) =>
-        prev && prev.repo.path === path
-          ? { ...prev, graphCommits: appendUniqueCommits(prev.graphCommits, more) }
-          : prev,
-      );
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      loadingMoreCommitsRef.current = false;
-      setLoadingMoreCommits(false);
-    }
-  }
-
   async function refreshRepo(path = selectedPath): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const result = await run(() =>
@@ -725,7 +668,6 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      setCommitsHasMore(commitsPageHasMore(result.graphCommits.length, INITIAL_COMMIT_LIMIT));
       return result;
     }
     return null;
@@ -823,8 +765,8 @@ function App() {
     void getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (!focused || !active) return;
-        const { selectedPath, viewMode, viewingCommit } = focusRefreshContextRef.current;
-        if (!selectedPath || viewMode !== "working" || viewingCommit) return;
+        const { selectedPath, viewingCommit } = focusRefreshContextRef.current;
+        if (!selectedPath || viewingCommit) return;
         if (Date.now() - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
           return;
         }
@@ -1472,7 +1414,6 @@ function App() {
     setCommitFiles([]);
     setFocus(null);
     setDiff(emptyDiff);
-    setViewMode("working");
     setMergePushed(false);
     setConflictFiles([]);
     setResolvedFiles([]);
@@ -1669,7 +1610,6 @@ function App() {
 
   useEffect(() => {
     if (mergeSession) return;
-    if (viewMode !== "working") return;
     if (!selectedPath || !snapshot || !mergePair) return;
     const headHash = snapshot.commits[0]?.hash ?? "";
     const key = `${selectedPath}|${mergePair.source}|${mergePair.target}|${headHash}`;
@@ -1688,7 +1628,7 @@ function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPath, mergePair?.source, mergePair?.target, viewMode, snapshot?.commits, mergeSession]);
+  }, [selectedPath, mergePair?.source, mergePair?.target, snapshot?.commits, mergeSession]);
 
   function openCreateTagDialog(commit: CommitEntry) {
     setTagCreateCommit(commit);
@@ -2276,7 +2216,7 @@ function App() {
   const showGittyEmptyState = workingTreeActive && changeCount === 0;
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive) return;
+    if (!workingTreeActive) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
@@ -2289,7 +2229,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive]);
+  }, [workingTreeActive]);
 
   const canPush =
     hasRemotes && ((snapshot?.ahead ?? 0) > 0 || (snapshot?.unpushedTags?.length ?? 0) > 0);
@@ -2321,7 +2261,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (viewMode !== "working" || !workingTreeActive || loading) return;
+    if (!workingTreeActive || loading) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
@@ -2333,7 +2273,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [viewMode, workingTreeActive, loading]);
+  }, [workingTreeActive, loading]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -2368,7 +2308,7 @@ function App() {
   }, [mergePair?.source, mergePair?.target, mergeSession]);
 
   useEffect(() => {
-    if (viewMode !== "working" || !snapshot) return;
+    if (!snapshot) return;
     const currentSnapshot = snapshot;
 
     function onKeyDown(event: KeyboardEvent) {
@@ -2412,7 +2352,6 @@ function App() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [
-    viewMode,
     snapshot,
     navZone,
     timelineItems,
@@ -2466,14 +2405,12 @@ function App() {
               branch="…"
               branches={["…"]}
               changeCount={0}
-              viewMode={viewMode}
               loading
               repoSwitching
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={() => {}}
-              onToggleView={() => {}}
               onReturnToWorkingTree={() => {}}
               onRefresh={() => {}}
             />
@@ -2494,7 +2431,6 @@ function App() {
               aheadCommits={displaySnapshot.aheadCommits ?? []}
               aheadBranch={displaySnapshot.aheadBranch}
               changeCount={displaySnapshot.changes.length}
-              viewMode={viewMode}
               loading={loading}
               pushPhase={pushPhase}
               ahead={displaySnapshot.ahead}
@@ -2510,14 +2446,6 @@ function App() {
               onVisitCommit={() => requestVisitCommit()}
               onReturnFromVisit={() => void returnFromVisit()}
               onResumeBranch={() => void resumeBranch()}
-              onToggleView={() => {
-                if (viewMode === "history" && !viewingCommit) {
-                  setCommitFiles([]);
-                  setFocus(null);
-                  setDiff(emptyDiff);
-                }
-                setViewMode((mode) => (mode === "working" ? "history" : "working"));
-              }}
               onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
@@ -2559,8 +2487,7 @@ function App() {
               }}
             />
 
-            {viewMode === "working" ? (
-              <div className="working-view">
+            <div className="working-view">
                 <HistoryTimeline
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
@@ -2570,6 +2497,8 @@ function App() {
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
                   contextLanes={displaySnapshot.timelineContext ?? []}
+                  siblingTip={displaySnapshot.siblingTip}
+                  onSwitchSibling={(name) => void checkoutBranch(name)}
                   onUpdateFromBase={(lane) =>
                     openMerge({ source: lane.refName, target: displaySnapshot.branch })
                   }
@@ -2823,45 +2752,6 @@ function App() {
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="history-full">
-                <SplitPane
-                  orientation={historyOrientation}
-                  onOrientationChange={setHistoryOrientation}
-                  split={historySplit}
-                  onSplitChange={setHistorySplit}
-                  primary={
-                    <HistoryTable
-                      commits={historyCommits}
-                      currentBranch={displaySnapshot.branch}
-                      hasMore={commitsHasMore}
-                      loadingMore={loadingMoreCommits}
-                      onLoadMore={() => void loadMoreCommits()}
-                      aheadHashes={
-                        displaySnapshot.aheadCommits?.length
-                          ? new Set(displaySnapshot.aheadCommits.map((commit) => commit.hash))
-                          : undefined
-                      }
-                      unpushedTags={unpushedTagSet}
-                      selectedHash={selectedCommit?.hash}
-                      search=""
-                      onSelect={(commit) => void inspectCommit(commit)}
-                      onVisitCommit={(commit) => requestVisitCommit(commit)}
-                      onCreateTag={(commit) => openCreateTagDialog(commit)}
-                      onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
-                    />
-                  }
-                  secondary={
-                    <DiffViewer
-                      raw={diff}
-                      repoPath={selectedPath}
-                      commit={selectedCommit?.hash}
-                      emptyMessage={emptyDiff}
-                    />
-                  }
-                />
-              </div>
-            )}
           </>
         ) : (
           <div className="empty-state">

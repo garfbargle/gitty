@@ -2,9 +2,7 @@ import {
   ChevronDown,
   ChevronRight,
   GitBranch,
-  GitCompareArrows,
   GitMerge,
-  History,
   Link2,
   PanelLeft,
   PanelLeftClose,
@@ -24,7 +22,6 @@ type TopBarProps = {
   aheadCommits?: CommitEntry[];
   aheadBranch?: string | null;
   changeCount: number;
-  viewMode: "working" | "history";
   viewingCommit?: CommitEntry | null;
   visitSession?: VisitSession | null;
   loading?: boolean;
@@ -36,7 +33,6 @@ type TopBarProps = {
   hasRemotes?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
-  onToggleView: () => void;
   onReturnToWorkingTree: () => void;
   onVisitCommit?: () => void;
   onReturnFromVisit?: () => void;
@@ -72,7 +68,6 @@ export function TopBar({
   aheadCommits = [],
   aheadBranch,
   changeCount,
-  viewMode,
   viewingCommit,
   visitSession,
   loading,
@@ -84,7 +79,6 @@ export function TopBar({
   hasRemotes = false,
   onRepoChange,
   onBranchChange,
-  onToggleView,
   onReturnToWorkingTree,
   onVisitCommit,
   onReturnFromVisit,
@@ -119,8 +113,7 @@ export function TopBar({
     mergeStripAvailable &&
     !branch.includes("detached") &&
     !inTimeTravel &&
-    !inPreview &&
-    viewMode === "working";
+    !inPreview;
   // A partner is chosen → we have a real source→target pair to act on.
   const hasPair = !!mergeSource && !!mergeTargetName;
 
@@ -161,35 +154,6 @@ export function TopBar({
           <ChevronDown size={14} className="select-chevron" />
         </div>
 
-        <div className="view-mode-switch" role="tablist" aria-label="View">
-          <button
-            type="button"
-            role="tab"
-            className={`view-mode-segment${viewMode === "working" ? " active" : ""}`}
-            aria-selected={viewMode === "working"}
-            disabled={repoSwitching || inTimeTravel}
-            onClick={() => {
-              if (viewMode !== "working") onToggleView();
-            }}
-          >
-            <GitCompareArrows size={14} />
-            <span>Changes</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`view-mode-segment${viewMode === "history" ? " active" : ""}`}
-            aria-selected={viewMode === "history"}
-            disabled={repoSwitching || inTimeTravel}
-            onClick={() => {
-              if (viewMode !== "history") onToggleView();
-            }}
-          >
-            <History size={14} />
-            <span>History</span>
-          </button>
-        </div>
-
         {inTimeTravel && timeTravelCommit ? (
           <>
             <span className="breadcrumb-sep">›</span>
@@ -207,7 +171,7 @@ export function TopBar({
               <span className="preview-meta">· workspace on {previewBranchLabel}</span>
             </div>
           </>
-        ) : viewMode === "working" ? (
+        ) : (
           <>
             {showMergeStrip ? (
               <>
@@ -301,7 +265,7 @@ export function TopBar({
               </>
             ) : null}
           </>
-        ) : null}
+        )}
       </div>
 
       <div className="top-bar-right">

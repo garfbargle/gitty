@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
-import type { BranchDivergence, CommitEntry } from "../types";
+import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
 import { laneColor } from "../lib/graph";
@@ -38,6 +38,10 @@ type HistoryTimelineProps = {
   workingTreeActive?: boolean;
   /// Where the checked-out branch sits relative to the trunk and its upstream.
   contextLanes?: BranchDivergence[];
+  /// The most recently active other branch, shown as a single awareness chip.
+  siblingTip?: SiblingTip | null;
+  /// Switch to the sibling branch.
+  onSwitchSibling?: (name: string) => void;
   /// Pull the given reference branch into the current branch ("update").
   onUpdateFromBase?: (lane: BranchDivergence) => void;
   mergePreview?: {
@@ -62,6 +66,8 @@ export function HistoryTimeline({
   onDeleteTag,
   workingTreeActive,
   contextLanes = [],
+  siblingTip,
+  onSwitchSibling,
   onUpdateFromBase,
   mergePreview,
 }: HistoryTimelineProps) {
@@ -414,10 +420,33 @@ export function HistoryTimeline({
     );
   }
 
+  function renderSiblingChip() {
+    if (!siblingTip) return null;
+    return (
+      <button
+        type="button"
+        className="context-chip sibling"
+        title={`${siblingTip.name} · ${siblingTip.tip.subject}`}
+        onClick={() => onSwitchSibling?.(siblingTip.name)}
+        disabled={!onSwitchSibling}
+      >
+        <GitBranch size={12} aria-hidden />
+        <span className="chip-ref">{siblingTip.name}</span>
+        {siblingTip.ahead > 0 ? (
+          <span className="chip-count ahead">
+            <ArrowUp size={11} aria-hidden />
+            {siblingTip.ahead}
+          </span>
+        ) : null}
+      </button>
+    );
+  }
+
   function renderContextChips() {
-    if (contextLanes.length === 0) return null;
+    if (contextLanes.length === 0 && !siblingTip) return null;
     return (
       <div className="timeline-context-bar">
+        {renderSiblingChip()}
         {contextLanes.map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
           return (

@@ -109,29 +109,44 @@ changes out from under them.
 - `merge_into_trunk` resets a stale `MERGE_HEAD` in the trunk worktree before a
   fresh attempt — deterministic, since that worktree is gitty-owned scratch.
 
-## Phase 2 — One timeline, no view modes
+## Phase 2 — One timeline, no view modes — CORE DONE
 
-- [ ] Delete the Changes/History tab switch (`viewMode` in `App.tsx`, the
-      segmented control in `TopBar.tsx`). The timeline becomes a permanent band
-      at the top; the pane below shows the selection — your changes by default,
-      a commit's diff when clicked.
-- [ ] Promote the existing ghost-lane rendering (`HistoryTimeline.tsx`,
-      `renderLane`) to the primary visual: main as the upper lane, current
-      branch forked below, dashed dots = new on main, solid dots = yours,
-      working-tree node = "you are here". (See locked decision 2 for the third
-      lane.)
-- [ ] Draw the sibling lane (from `siblingTip`) as a slim labeled tip; click =
-      preview its head commit, double-click = switch to it.
-- [ ] Replace the context-chip *sentences* ("3 commits behind", "in sync") with
-      the visual: ghost dots already say "behind". Keep at most a small count
-      badge on the lane label.
-- [ ] Delete `HistoryTable.tsx` (~297 lines), `historySplit` /
-      `historyOrientation` state, `graphCommits` pagination
-      (`loadingMoreCommits`, `commitsHasMore`) if nothing else consumes it.
-- [ ] `npm run build` passes; keyboard nav (←/→ on timeline, ↑/↓ in files)
-      still works.
+- [x] Deleted the Changes/History tab switch: removed `viewMode` state + the
+      `ViewMode` type from `App.tsx`, and the segmented control from
+      `TopBar.tsx`. The timeline is now a permanent band; the pane below shows
+      the selection — changes by default, a commit's files+diff when clicked
+      (the working view already did this, so History was redundant).
+- [x] Removed all `viewMode !== "working"` guards from ~6 effects (auto-select
+      first file, focus-refresh, Enter/Mod-A/arrow keyboard handlers, merge
+      analysis) — with one view they were always true.
+- [x] Deleted `HistoryTable.tsx` (~297 lines), the `history-full` render
+      branch, `historySplit` / `historyOrientation` state, `historyCommits`
+      memo, and `graphCommits` pagination (`loadMoreCommits`, `commitsHasMore`,
+      `loadingMoreCommits`, `loadingMoreCommitsRef`) — nothing else consumed
+      them. Pruned now-unused imports (`appendUniqueCommits`, `COMMIT_PAGE_SIZE`,
+      `commitsPageHasMore`, `pickerCommits`, `SplitOrientation`).
+- [x] Wired `siblingTip` through to `HistoryTimeline` as a lightweight
+      awareness chip in the context bar (branch name + ahead count, click to
+      switch). `tsc` + `npm run build` clean; no dangling references.
 
-**Ships as:** "one screen" release.
+### Deferred to Phase 3 (needs the timeline rework + live visual verification)
+- [ ] Promote the ghost-lane rendering to the primary visual (main upper lane,
+      current forked below, dashed = new on main, solid = yours). Kept the
+      existing lanes as-is for now.
+- [ ] Draw the sibling as a full ghost *lane* (currently a chip) with
+      preview/switch on click.
+- [ ] Replace the remaining context-chip *sentences* ("in sync", "N behind")
+      with pure visual. These live alongside the merge-strip which Phase 3
+      removes, so do it together.
+
+**Shipped as:** "one screen" release. `viewMode` gone, one view, table deleted.
+
+### Note
+- Deep-history pagination is gone with the table. The timeline shows the recent
+  window (INITIAL_COMMIT_LIMIT). Accept for now; revisit if users need older
+  commits (parked in Later).
+- Dead HistoryTable CSS (and a comment referencing the deleted file) remain in
+  `App.css` — Phase 5 sweep.
 
 ## Phase 3 — Merge and update collapse to two buttons
 
