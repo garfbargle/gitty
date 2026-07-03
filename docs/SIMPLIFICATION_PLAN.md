@@ -51,45 +51,63 @@ changes out from under them.
 
 ---
 
-## Phase 1 — Backend primitives (Rust only, no UI change)
+## Phase 1 — Backend primitives (Rust only, no UI change) — DONE
 
-- [ ] Refactor `merge_execute`'s conflict/outcome plumbing into helpers
-      reusable by the new commands (conflict file listing, output joining).
-- [ ] `update_branch(path, onto)` — `git rebase --autostash <onto>` on the
-      current branch. Returns `UpdateOutcome { status: "updated" | "conflicts" |
-      "up_to_date", conflictFiles, message, output }`.
-- [ ] `update_continue(path)` / `update_abort(path)` / `update_status(path)` —
-      thin wrappers over `git rebase --continue / --abort` + `.git/rebase-merge`
-      detection. `update_status` also reported inside `repo_snapshot` so a
-      half-finished update survives app restart.
-- [ ] `ensure_trunk_worktree(path)` — lazily create (and reuse) a hidden
-      worktree for the trunk under the app data dir
-      (`app_data/worktrees/<repo-hash>/<branch>`). Handles: trunk already
-      checked out in the main folder (skip — operate in place), stale/locked
-      worktrees (`git worktree prune`), trunk renamed.
-- [ ] `merge_into_trunk(path, source)` — run the merge **inside the trunk
-      worktree**. The user's checkout, uncommitted changes, and branch are
-      untouched. Drops the "working tree must be clean" requirement for
-      shipping. Returns the same outcome shape as `merge_execute`. Conflict
-      resolution commands (`resolve_conflict`, `conflict_sides`,
-      `complete_merge`, `abort_merge`) gain an optional worktree path so the
-      resolver works there too.
-- [ ] `open_commit_worktree(path, hash)` — check a commit out into a temp
-      worktree and reveal it in Finder/Explorer. Replaces detached-HEAD "Time
-      Travel". `cleanup_commit_worktrees(path)` removes them (on app start and
-      via repo settings).
-- [ ] Upgrade `checkout_branch` → dirty switch either carries changes
-      (`git switch` succeeds with them) or returns a structured
-      `needs_attention` result the UI can turn into a plain-words dialog —
-      never a raw git error string.
-- [ ] Extend `repo_snapshot`: add `siblingTip` — the branch (name, tip commit,
-      divergence from main) whose tip is newest and newer than main's tip,
-      excluding current + trunk. Per-branch data already exists in
-      `branch_list`; this is selection, not new git calls.
-- [ ] `cargo check` passes; manual smoke: update with/without conflicts, merge
-      into trunk from dirty branch, open old commit, dirty switch.
+- [x] Shared helpers: `git_rebase` (editor-disabled runner), `combine_output`,
+      `rebase_in_progress`, `ensure_worktree`, `existing_worktree_for`,
+      `worktrees_root` / `repo_key` / `sanitize_ref`, `sibling_tip`.
+- [x] `update_branch(path, onto)` — `git rebase --autostash <onto>` (onto
+      defaults to trunk). Returns `UpdateOutcome { status: "updated" |
+      "conflicts" | "up_to_date", conflictFiles, message, output }`.
+- [x] `update_continue(path)` / `update_abort(path)` / `update_status(path)` —
+      wrappers over `git rebase --continue / --abort` + git-path detection of
+      `rebase-merge` / `rebase-apply`.
+- [x] `ensure_worktree(repo, branch)` — lazily create/reuse a linked worktree
+      under `<temp>/gitty-worktrees/<repo-key>/<branch>` (temp dir avoids
+      AppHandle plumbing; scratch space, recreated on demand). Handles: trunk
+      already checked out in the main folder (operate in place), git-known
+      existing worktree (reuse), stale dirs (`worktree prune` + remove).
+- [x] `merge_into_trunk(path, source)` — merge runs **inside the trunk
+      worktree**; user's checkout/branch/uncommitted work untouched. Returns
+      `MergeOutcome` with a `worktree` path. Because every conflict command
+      (`resolve_conflict`, `conflict_sides`, `complete_merge`, `abort_merge`)
+      already takes `path` and runs `normalize_repo` (which resolves a
+      worktree's own toplevel), they work against the worktree with **no
+      changes** — the frontend just passes `outcome.worktree` as `path`.
+- [x] `open_commit_worktree(path, hash)` → returns a detached worktree path
+      (frontend reveals via `@tauri-apps/plugin-opener`).
+      `cleanup_commit_worktrees(path)` removes them.
+- [x] `checkout_branch` dirty-switch: `git switch` carries non-conflicting
+      changes automatically; the one clobber case now returns a plain-words
+      error instead of git plumbing. (Full carry/set-aside dialog deferred to
+      Phase 4 with the mode work.)
+- [x] `repo_snapshot` gains `siblingTip` (name, tip commit, ahead/behind),
+      chosen from `branch_list` (already sorted newest-first) only when newer
+      than trunk's tip. No extra git calls beyond one divergence + tip log.
+- [x] `cargo check` clean; `tsc --noEmit` clean; TS types added
+      (`SiblingTip`, `UpdateOutcome`, `UpdateStatus`, `MergeOutcome.worktree`,
+      `RepoSnapshot.siblingTip`).
+- [x] Git-level smoke tests (6 scenarios, all pass): merge-into-trunk via
+      worktree while on feature; merge conflict → resolve → complete in
+      worktree; rebase `--autostash` with dirty tree → conflict → continue,
+      stash restored; detached commit worktree; dirty switch clobber → friendly
+      error; dirty switch non-conflicting → carried across.
 
-**Ships as:** invisible release. Nothing user-facing changes yet.
+**Registered commands:** `merge_into_trunk`, `update_branch`,
+`update_continue`, `update_abort`, `update_status`, `open_commit_worktree`,
+`cleanup_commit_worktrees`.
+
+**Shipped as:** invisible release. Nothing user-facing changed yet.
+
+### Notes for later phases
+- Pushing trunk after a worktree merge: the merge advances `main` *locally*;
+  the existing push flow pushes the *current* branch. Phase 3 needs a "push
+  main" affordance (can push from the main checkout — the ref is shared).
+- Rebase conflict completion uses `update_continue`, NOT `complete_merge`
+  (rebase has no `MERGE_HEAD`; it loops commit-by-commit). The ConflictResolver
+  must branch on merge-vs-update in Phase 3.
+- `merge_into_trunk` resets a stale `MERGE_HEAD` in the trunk worktree before a
+  fresh attempt — deterministic, since that worktree is gitty-owned scratch.
 
 ## Phase 2 — One timeline, no view modes
 

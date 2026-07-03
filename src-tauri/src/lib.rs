@@ -128,6 +128,10 @@ struct RepoSnapshot {
     /// How the checked-out branch sits relative to the trunk and its own upstream,
     /// for the working-tree timeline's branch-context lanes.
     timeline_context: Vec<BranchDivergence>,
+    /// The most recently active *other* branch, when it's newer than the trunk —
+    /// the single sibling lane the timeline draws.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sibling_tip: Option<SiblingTip>,
     tags: Vec<TagEntry>,
     unpushed_tags: Vec<String>,
 }
@@ -177,6 +181,46 @@ struct MergeOutcome {
     conflict_files: Vec<String>,
     message: String,
     output: String,
+    /// When the merge ran inside a linked worktree (merge-into-trunk), the path
+    /// to that worktree. Conflict resolution and completion target this path so
+    /// the user's own checkout is never touched. `None` for in-place merges.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree: Option<String>,
+}
+
+/// Outcome of updating the current branch by rebasing it onto another ref.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateOutcome {
+    /// "updated" | "conflicts" | "up_to_date"
+    status: String,
+    conflict_files: Vec<String>,
+    message: String,
+    output: String,
+}
+
+/// Whether a rebase (branch update) is mid-flight, so the UI can resume it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateStatus {
+    rebasing: bool,
+    conflict_files: Vec<String>,
+    /// Files that were conflicted but are now staged/resolved.
+    resolved_files: Vec<String>,
+}
+
+/// The most recently active *other* branch — a single context lane for the
+/// timeline. Chosen only when its tip is newer than the trunk's, so a stale
+/// branch never clutters the view.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SiblingTip {
+    name: String,
+    tip: CommitEntry,
+    /// Commits this branch has that HEAD lacks.
+    ahead: u32,
+    /// Commits HEAD has that this branch lacks.
+    behind: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1169,6 +1213,9 @@ fn repo_snapshot_blocking(
         })
     };
 
+    let trunk = integration_branch(&branches);
+    let sibling = sibling_tip(&repo_path, &branch, &branches, &trunk);
+
     Ok(RepoSnapshot {
         repo,
         branch,
@@ -1184,6 +1231,7 @@ fn repo_snapshot_blocking(
         remotes,
         branches,
         timeline_context: timeline_ctx,
+        sibling_tip: sibling,
         tags,
         unpushed_tags: unpushed_tag_names,
     })
@@ -1759,8 +1807,22 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
             (out, leaf.clone())
         }
     } else {
-        let out = git(repo_path, &["switch", &branch])
-            .or_else(|_| git(repo_path, &["checkout", &branch]))?;
+        // `git switch` carries uncommitted work across automatically; it only
+        // fails when local changes would be overwritten. Translate that one case
+        // from git's plumbing error into plain words.
+        let out = match git(repo_path, &["switch", &branch])
+            .or_else(|_| git(repo_path, &["checkout", &branch]))
+        {
+            Ok(out) => out,
+            Err(err) => {
+                if !changed_files(repo_path).is_empty() {
+                    return Err(format!(
+                        "Switching to {branch} would overwrite unsaved changes. Commit or set them aside first."
+                    ));
+                }
+                return Err(err);
+            }
+        };
         (out, branch.clone())
     };
 
@@ -1880,6 +1942,168 @@ fn unmerged_files(repo_path: &Path) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Runs git with editors disabled so rebase/commit steps never block on an
+/// interactive prompt. Used for the update (rebase) flow.
+fn git_rebase(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .output()
+        .map_err(|err| format!("Could not run git: {err}"))?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
+}
+
+/// True when a rebase (our "update from main") is paused, usually on conflicts.
+fn rebase_in_progress(repo_path: &Path) -> bool {
+    for dir in ["rebase-merge", "rebase-apply"] {
+        if let Ok(path) = git(repo_path, &["rev-parse", "--git-path", dir]) {
+            let candidate = Path::new(path.trim());
+            let resolved = if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                repo_path.join(candidate)
+            };
+            if resolved.exists() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Joins a merge/rebase's stdout+stderr into a single tidy blob for the UI.
+fn combine_output(stdout: &str, stderr: &str) -> String {
+    [stdout.trim_end(), stderr.trim_end()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A stable, filesystem-safe key for a repo path, so each repo gets its own
+/// worktree namespace under the temp dir.
+fn repo_key(repo_path: &Path) -> String {
+    let mut hash: u64 = 1469598103934665603; // FNV-1a offset basis
+    for byte in repo_path.to_string_lossy().as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{hash:016x}")
+}
+
+fn sanitize_ref(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect()
+}
+
+/// Root for all gitty-managed worktrees: `<temp>/gitty-worktrees/<repo-key>`.
+/// Scratch space — safe to delete; anything needed is recreated on demand.
+fn worktrees_root(repo_path: &Path) -> PathBuf {
+    std::env::temp_dir()
+        .join("gitty-worktrees")
+        .join(repo_key(repo_path))
+}
+
+/// Path of the worktree already checked out on `branch`, if git knows one.
+fn existing_worktree_for(repo_path: &Path, branch: &str) -> Option<PathBuf> {
+    let list = git(repo_path, &["worktree", "list", "--porcelain"]).ok()?;
+    let target = format!("refs/heads/{branch}");
+    let mut current: Option<PathBuf> = None;
+    for line in list.lines() {
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            current = Some(PathBuf::from(rest.trim()));
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            if rest.trim() == target {
+                return current.clone();
+            }
+        }
+    }
+    None
+}
+
+/// Ensures a linked worktree exists with `branch` checked out, reusing the main
+/// checkout when it is already on `branch`. Returns the directory to run git in.
+/// The result is gitty-managed scratch space; callers may reset its state.
+fn ensure_worktree(repo_path: &Path, branch: &str) -> Result<PathBuf, String> {
+    if current_branch(repo_path) == branch {
+        return Ok(repo_path.to_path_buf());
+    }
+    if let Some(existing) = existing_worktree_for(repo_path, branch) {
+        if existing.exists() {
+            return Ok(existing);
+        }
+    }
+    // Clear out git's memory of any worktree dirs we deleted underneath it.
+    let _ = git(repo_path, &["worktree", "prune"]);
+
+    let dir = worktrees_root(repo_path).join(sanitize_ref(branch));
+    if dir.exists() {
+        let _ = fs::remove_dir_all(&dir);
+        let _ = git(repo_path, &["worktree", "prune"]);
+    }
+    if let Some(parent) = dir.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Could not create worktree folder: {err}"))?;
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    git(repo_path, &["worktree", "add", &dir_str, branch])
+        .map_err(|err| format!("Could not prepare a workspace for {branch}.\n{err}"))?;
+    Ok(dir)
+}
+
+/// The most recently active branch other than the current one and the trunk,
+/// included only when its tip commit is strictly newer than the trunk's tip so
+/// the timeline never lights up for a stale branch.
+fn sibling_tip(
+    repo_path: &Path,
+    branch: &str,
+    branches: &[BranchEntry],
+    trunk: &Option<String>,
+) -> Option<SiblingTip> {
+    let trunk_date = trunk.as_ref().and_then(|t| {
+        branches
+            .iter()
+            .find(|b| !b.is_remote && &b.name == t)
+            .and_then(|b| b.last_commit_date.clone())
+    });
+
+    // branch_list is already sorted newest-first, so the first eligible local
+    // branch is the most recently active sibling.
+    let candidate = branches.iter().find(|b| {
+        !b.is_remote
+            && b.name != branch
+            && Some(&b.name) != trunk.as_ref()
+            && b.tip_hash.is_some()
+    })?;
+
+    if let (Some(cand_date), Some(trunk_date)) = (&candidate.last_commit_date, &trunk_date) {
+        if cand_date <= trunk_date {
+            return None;
+        }
+    }
+
+    let (ahead, behind) = divergence(repo_path, &candidate.name, "HEAD").unwrap_or((0, 0));
+    let tip = commit_log_with_args(repo_path, &[&candidate.name, "-n", "1"])
+        .into_iter()
+        .next()?;
+
+    Some(SiblingTip {
+        name: candidate.name.clone(),
+        tip,
+        ahead,
+        behind,
+    })
 }
 
 /// Predicts whether merging `source` into `target` would conflict, using
@@ -2064,6 +2288,7 @@ fn merge_execute(
             conflict_files: Vec::new(),
             message: format!("Merged {source} into {target}."),
             output,
+            worktree: None,
         });
     }
 
@@ -2082,6 +2307,7 @@ fn merge_execute(
         message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
         conflict_files,
         output,
+        worktree: None,
     })
 }
 
@@ -2248,6 +2474,279 @@ fn complete_merge(path: String, message: Option<String>) -> Result<ActionResult,
     Ok(ActionResult {
         message: "Merge completed.".to_string(),
         output,
+    })
+}
+
+/// Builds an UpdateOutcome from a finished `git rebase` invocation, mapping a
+/// paused rebase to a resolvable "conflicts" state.
+fn rebase_outcome(
+    repo_path: &Path,
+    onto: &str,
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Result<UpdateOutcome, String> {
+    let output = combine_output(stdout, stderr);
+    if success && !rebase_in_progress(repo_path) {
+        let up_to_date = output.contains("is up to date");
+        return Ok(UpdateOutcome {
+            status: if up_to_date { "up_to_date" } else { "updated" }.to_string(),
+            conflict_files: Vec::new(),
+            message: if up_to_date {
+                format!("Already up to date with {onto}.")
+            } else {
+                format!("Updated onto {onto}.")
+            },
+            output,
+        });
+    }
+
+    if rebase_in_progress(repo_path) {
+        let conflict_files = unmerged_files(repo_path);
+        return Ok(UpdateOutcome {
+            status: "conflicts".to_string(),
+            message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
+            conflict_files,
+            output,
+        });
+    }
+
+    Err(if output.is_empty() {
+        format!("Could not update onto {onto}.")
+    } else {
+        output
+    })
+}
+
+/// Update the current branch by rebasing it onto `onto` (defaults to the trunk),
+/// carrying any uncommitted work across with `--autostash`.
+#[tauri::command]
+fn update_branch(path: String, onto: Option<String>) -> Result<UpdateOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let branch = current_branch(repo_path);
+    if is_detached_branch(&branch) {
+        return Err("Switch to a branch before updating it.".to_string());
+    }
+
+    let onto = onto
+        .map(|o| o.trim().to_string())
+        .filter(|o| !o.is_empty())
+        .or_else(|| integration_branch(&branch_list(repo_path)))
+        .ok_or_else(|| "No main branch to update from.".to_string())?;
+
+    if onto == branch {
+        return Err("A branch can't be updated onto itself.".to_string());
+    }
+    if !rev_exists(repo_path, &onto) {
+        return Err(format!("{onto} could not be found."));
+    }
+
+    let (success, stdout, stderr) =
+        git_rebase(repo_path, &["rebase", "--autostash", &onto])?;
+    rebase_outcome(repo_path, &onto, success, &stdout, &stderr)
+}
+
+/// Continue a paused update (rebase) after conflicts have been staged. May pause
+/// again on the next conflicting commit, or finish.
+#[tauri::command]
+fn update_continue(path: String) -> Result<UpdateOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    if !rebase_in_progress(repo_path) {
+        return Err("No update is in progress.".to_string());
+    }
+    let remaining = unmerged_files(repo_path);
+    if !remaining.is_empty() {
+        return Err(format!(
+            "Resolve all conflicts first ({} remaining).",
+            remaining.len()
+        ));
+    }
+    let (success, stdout, stderr) = git_rebase(repo_path, &["rebase", "--continue"])?;
+    rebase_outcome(repo_path, "main", success, &stdout, &stderr)
+}
+
+/// Abandon a paused update (rebase), restoring the branch to where it started.
+#[tauri::command]
+fn update_abort(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let (_success, stdout, stderr) = git_rebase(repo_path, &["rebase", "--abort"])?;
+    Ok(ActionResult {
+        message: "Update cancelled.".to_string(),
+        output: combine_output(&stdout, &stderr),
+    })
+}
+
+/// Whether an update (rebase) is paused, and which files still need resolving —
+/// so a half-finished update survives an app restart.
+#[tauri::command]
+fn update_status(path: String) -> Result<UpdateStatus, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let rebasing = rebase_in_progress(repo_path);
+    let conflict_files = if rebasing {
+        unmerged_files(repo_path)
+    } else {
+        Vec::new()
+    };
+    let resolved_files = if rebasing {
+        git(repo_path, &["diff", "--name-only", "--cached", "--diff-filter=M"])
+            .map(|output| {
+                output
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Ok(UpdateStatus {
+        rebasing,
+        conflict_files,
+        resolved_files,
+    })
+}
+
+/// Merge `source` (defaults to the current branch) into the trunk, running the
+/// merge inside a linked worktree so the user's own checkout, branch, and
+/// uncommitted work are never disturbed. On conflicts, the returned `worktree`
+/// path is where resolution happens.
+#[tauri::command]
+fn merge_into_trunk(path: String, source: Option<String>) -> Result<MergeOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let trunk = integration_branch(&branch_list(repo_path))
+        .ok_or_else(|| "No main branch to merge into.".to_string())?;
+
+    let source = source
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| current_branch(repo_path));
+
+    if is_detached_branch(&source) {
+        return Err("Switch to a branch before merging it into main.".to_string());
+    }
+    if source == trunk {
+        return Err(format!("{source} is already the main branch."));
+    }
+    if !rev_exists(repo_path, &source) {
+        return Err(format!("Branch {source} could not be found."));
+    }
+
+    let worktree = ensure_worktree(repo_path, &trunk)?;
+    let wt = worktree.as_path();
+
+    // Start from a clean slate — the trunk worktree is gitty-managed scratch, so
+    // clear any half-finished merge left from a previous, abandoned attempt.
+    if rev_exists(wt, "MERGE_HEAD") {
+        let _ = git(wt, &["merge", "--abort"]);
+    }
+
+    let in_place = wt == repo_path;
+    let worktree_ref = if in_place {
+        None
+    } else {
+        Some(worktree.to_string_lossy().to_string())
+    };
+
+    let (success, stdout, stderr) = git_raw(wt, &["merge", "--no-edit", &source])?;
+    let output = combine_output(&stdout, &stderr);
+
+    if success {
+        let status = if output.contains("Fast-forward") {
+            "fast_forward"
+        } else if output.contains("Already up to date") {
+            "up_to_date"
+        } else {
+            "merged"
+        };
+        return Ok(MergeOutcome {
+            status: status.to_string(),
+            conflict_files: Vec::new(),
+            message: format!("Merged {source} into {trunk}."),
+            output,
+            worktree: worktree_ref,
+        });
+    }
+
+    let conflict_files = unmerged_files(wt);
+    if conflict_files.is_empty() {
+        return Err(if output.is_empty() {
+            format!("Could not merge {source} into {trunk}.")
+        } else {
+            output
+        });
+    }
+
+    Ok(MergeOutcome {
+        status: "conflicts".to_string(),
+        message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
+        conflict_files,
+        output,
+        worktree: worktree_ref,
+    })
+}
+
+/// Check `commit` out into a throwaway worktree and return its path, so the user
+/// can browse an old version on disk without detaching HEAD or touching their
+/// working tree. Replaces the old "time travel" checkout.
+#[tauri::command]
+fn open_commit_worktree(path: String, commit: String) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let commit = commit.trim().to_string();
+    if commit.is_empty() {
+        return Err("A commit is required.".to_string());
+    }
+    if !rev_exists(repo_path, &commit) {
+        return Err("That commit could not be found.".to_string());
+    }
+
+    let short = git(repo_path, &["rev-parse", "--short", &commit])
+        .unwrap_or_else(|_| sanitize_ref(&commit));
+    let dir = worktrees_root(repo_path).join(format!("commit-{}", sanitize_ref(&short)));
+    if dir.exists() {
+        let _ = fs::remove_dir_all(&dir);
+    }
+    let _ = git(repo_path, &["worktree", "prune"]);
+    if let Some(parent) = dir.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Could not create worktree folder: {err}"))?;
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    git(repo_path, &["worktree", "add", "--detach", &dir_str, &commit])
+        .map_err(|err| format!("Could not open that version.\n{err}"))?;
+    Ok(dir_str)
+}
+
+/// Remove all throwaway commit worktrees created by `open_commit_worktree`.
+#[tauri::command]
+fn cleanup_commit_worktrees(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let root = worktrees_root(repo_path);
+    let mut removed = 0;
+    if let Ok(entries) = fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with("commit-") {
+                if fs::remove_dir_all(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    let _ = git(repo_path, &["worktree", "prune"]);
+    Ok(ActionResult {
+        message: format!("Cleaned up {removed} version workspace(s)."),
+        output: String::new(),
     })
 }
 
@@ -2742,6 +3241,13 @@ pub fn run() {
             merge_branch,
             merge_analysis,
             merge_execute,
+            merge_into_trunk,
+            update_branch,
+            update_continue,
+            update_abort,
+            update_status,
+            open_commit_worktree,
+            cleanup_commit_worktrees,
             merge_status,
             abort_merge,
             resolve_conflict,

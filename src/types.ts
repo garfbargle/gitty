@@ -102,8 +102,22 @@ export type RepoSnapshot = {
   /// How the checked-out branch sits relative to the trunk and its own upstream,
   /// for the working-tree timeline's branch-context lanes.
   timelineContext: BranchDivergence[];
+  /// The most recently active other branch (newer than trunk), for the single
+  /// sibling lane on the timeline.
+  siblingTip?: SiblingTip | null;
   tags: TagEntry[];
   unpushedTags: string[];
+};
+
+/// The most recently active branch other than the current one and the trunk,
+/// surfaced only when its tip is newer than the trunk's.
+export type SiblingTip = {
+  name: string;
+  tip: CommitEntry;
+  /// Commits this branch has that HEAD lacks.
+  ahead: number;
+  /// Commits HEAD has that this branch lacks.
+  behind: number;
 };
 
 export type ActionResult = {
@@ -174,6 +188,24 @@ export type MergeOutcome = {
   conflictFiles: string[];
   message: string;
   output: string;
+  /// Set when the merge ran inside a linked worktree (merge into main). Conflict
+  /// resolution and completion should target this path, not the main checkout.
+  worktree?: string | null;
+};
+
+/// Outcome of updating (rebasing) the current branch onto another ref.
+export type UpdateOutcome = {
+  status: "updated" | "conflicts" | "up_to_date";
+  conflictFiles: string[];
+  message: string;
+  output: string;
+};
+
+/// Whether an update (rebase) is paused mid-flight, so the UI can resume it.
+export type UpdateStatus = {
+  rebasing: boolean;
+  conflictFiles: string[];
+  resolvedFiles: string[];
 };
 
 export type MergeStatus = {
