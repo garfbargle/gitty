@@ -129,7 +129,16 @@ export const RepoSidebar = memo(function RepoSidebar({
             >
               <RepoIcon path={repo.path} name={repo.name} size={18} className="repo-icon" />
               <div className="repo-text">
-                <span className="repo-name">{repo.name}</span>
+                <span className="repo-name-row">
+                  <span className="repo-name">{repo.name}</span>
+                  {repo.hasUncommittedChanges ? (
+                    <span
+                      className="repo-dirty-dot"
+                      title="Uncommitted changes"
+                      aria-label="Uncommitted changes"
+                    />
+                  ) : null}
+                </span>
                 <small>{shortenPath(repo.path)}</small>
               </div>
             </button>

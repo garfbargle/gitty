@@ -2,6 +2,7 @@ export type RepoEntry = {
   id: string;
   name: string;
   path: string;
+  hasUncommittedChanges?: boolean | null;
 };
 
 export type DiscoveredRepoEntry = RepoEntry & {

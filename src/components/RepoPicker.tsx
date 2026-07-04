@@ -52,7 +52,16 @@ export function RepoPicker({ repos, selectedPath, onChange }: RepoPickerProps) {
         onClick={() => setOpen((value) => !value)}
       >
         <RepoIcon path={selected.path} name={selected.name} size={18} />
-        <span className="repo-picker-name">{selected.name}</span>
+        <span className="repo-picker-name-row">
+          <span className="repo-picker-name">{selected.name}</span>
+          {selected.hasUncommittedChanges ? (
+            <span
+              className="repo-dirty-dot"
+              title="Uncommitted changes"
+              aria-label="Uncommitted changes"
+            />
+          ) : null}
+        </span>
         <ChevronDown size={14} className="picker-chevron" />
       </button>
 
@@ -70,7 +79,16 @@ export function RepoPicker({ repos, selectedPath, onChange }: RepoPickerProps) {
             >
               <RepoIcon path={repo.path} name={repo.name} size={18} />
               <span className="repo-picker-text">
-                <span className="repo-picker-item-name">{repo.name}</span>
+                <span className="repo-picker-name-row">
+                  <span className="repo-picker-item-name">{repo.name}</span>
+                  {repo.hasUncommittedChanges ? (
+                    <span
+                      className="repo-dirty-dot"
+                      title="Uncommitted changes"
+                      aria-label="Uncommitted changes"
+                    />
+                  ) : null}
+                </span>
                 <small>{shortenPath(repo.path)}</small>
               </span>
             </button>

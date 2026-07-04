@@ -561,6 +561,14 @@ function App() {
     setReposLoaded(true);
   }
 
+  function updateRepoDirtyState(path: string, hasUncommittedChanges: boolean) {
+    setRepos((current) =>
+      current.map((repo) =>
+        repo.path === path ? { ...repo, hasUncommittedChanges } : repo,
+      ),
+    );
+  }
+
   async function selectRepo(path: string): Promise<void> {
     if (path === selectedPath && contentPath === path) return;
 
@@ -581,6 +589,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      updateRepoDirtyState(result.repo.path, !result.isClean);
       void enrichRepoSnapshot(path, requestId);
       return;
     }
@@ -647,6 +656,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
+      updateRepoDirtyState(result.repo.path, !result.isClean);
       return result;
     }
     return null;
@@ -670,6 +680,7 @@ function App() {
         setSnapshot(result);
         setSelectedPath(result.repo.path);
       }
+      updateRepoDirtyState(result.repo.path, !result.isClean);
       return result;
     } catch (err) {
       if (isSupersededSnapshotError(err)) return null;
@@ -687,6 +698,7 @@ function App() {
           ? { ...prev, changes: result.changes, isClean: result.isClean }
           : prev,
       );
+      updateRepoDirtyState(path, !result.isClean);
       return result.changes;
     } catch (err) {
       setError(String(err));

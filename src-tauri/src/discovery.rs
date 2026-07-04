@@ -102,6 +102,7 @@ fn quick_repo_entry(path: &Path) -> Option<RepoEntry> {
         id: path_string.clone(),
         name,
         path: path_string,
+        has_uncommitted_changes: None,
     })
 }
 

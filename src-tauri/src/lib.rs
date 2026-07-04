@@ -25,6 +25,8 @@ pub struct RepoEntry {
     id: String,
     name: String,
     path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    has_uncommitted_changes: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -271,7 +273,16 @@ fn load_repos_from_disk(app: &AppHandle) -> Result<Vec<RepoEntry>, String> {
 
 fn save_repos_to_disk(app: &AppHandle, repos: &[RepoEntry]) -> Result<(), String> {
     let path = repos_file(app)?;
-    let data = serde_json::to_string_pretty(repos)
+    let persistent_repos = repos
+        .iter()
+        .map(|repo| RepoEntry {
+            id: repo.id.clone(),
+            name: repo.name.clone(),
+            path: repo.path.clone(),
+            has_uncommitted_changes: None,
+        })
+        .collect::<Vec<_>>();
+    let data = serde_json::to_string_pretty(&persistent_repos)
         .map_err(|err| format!("Could not serialize repo list: {err}"))?;
     fs::write(&path, data).map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
@@ -360,6 +371,7 @@ fn normalize_repo(path: &str) -> Result<RepoEntry, String> {
         id: path.clone(),
         name,
         path,
+        has_uncommitted_changes: None,
     })
 }
 
@@ -605,6 +617,17 @@ fn changed_files(repo_path: &Path) -> Vec<FileChange> {
         });
     }
     changes
+}
+
+fn repo_has_uncommitted_changes(repo_path: &Path) -> bool {
+    git(repo_path, &["status", "--porcelain=v1", "-uall", "-z"])
+        .map(|output| !output.is_empty())
+        .unwrap_or(false)
+}
+
+fn with_repo_status(mut repo: RepoEntry) -> RepoEntry {
+    repo.has_uncommitted_changes = Some(repo_has_uncommitted_changes(Path::new(&repo.path)));
+    repo
 }
 
 const COMMIT_LOG_PRETTY: &str = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e";
@@ -1091,7 +1114,10 @@ fn resolve_repo_icon(
 
 #[tauri::command]
 fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
-    load_repos_from_disk(&app)
+    Ok(load_repos_from_disk(&app)?
+        .into_iter()
+        .map(with_repo_status)
+        .collect())
 }
 
 #[tauri::command]
@@ -1131,7 +1157,7 @@ fn repo_snapshot_blocking(
     limit: Option<u32>,
     lite: bool,
 ) -> Result<RepoSnapshot, String> {
-    let repo = normalize_repo(&path)?;
+    let mut repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let log_limit = limit.unwrap_or(40);
 
@@ -1216,13 +1242,16 @@ fn repo_snapshot_blocking(
     let trunk = integration_branch(&branches);
     let sibling = sibling_tip(&repo_path, &branch, &branches, &trunk);
 
+    let is_clean = changes.is_empty();
+    repo.has_uncommitted_changes = Some(!is_clean);
+
     Ok(RepoSnapshot {
         repo,
         branch,
         upstream,
         ahead,
         behind,
-        is_clean: changes.is_empty(),
+        is_clean,
         changes,
         commits,
         graph_commits,

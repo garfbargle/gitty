@@ -294,6 +294,14 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
+.repo-picker-name-row,
+.repo-name-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
 .repo-picker-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -366,10 +374,21 @@ button:focus-visible {
 
 .repo-name {
   display: block;
+  min-width: 0;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repo-dirty-dot {
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 7px;
+  width: 7px;
 }
 
 .repo-item small {
