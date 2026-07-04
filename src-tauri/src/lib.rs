@@ -2062,6 +2062,42 @@ fn ensure_worktree(repo_path: &Path, branch: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Whether `path` lives under our scratch worktree namespace. Matches on the
+/// `gitty-worktrees` path component rather than an exact temp-dir prefix so it
+/// still recognizes a canonicalized path (macOS resolves the temp dir's
+/// `/var` symlink to `/private/var`, which a prefix check would miss).
+fn is_gitty_worktree(path: &Path) -> bool {
+    path.components()
+        .any(|part| part.as_os_str() == "gitty-worktrees")
+}
+
+/// The primary (non-linked) working tree of the repo `repo_path` belongs to,
+/// even when `repo_path` is itself a linked worktree. The first entry of
+/// `git worktree list --porcelain` is always the main checkout.
+fn main_worktree(repo_path: &Path) -> Option<PathBuf> {
+    let list = git(repo_path, &["worktree", "list", "--porcelain"]).ok()?;
+    list.lines()
+        .find_map(|line| line.strip_prefix("worktree ").map(|rest| PathBuf::from(rest.trim())))
+}
+
+/// Tears down a gitty-managed linked worktree once the operation that borrowed
+/// it has finished, freeing the branch it held so the user can check it out in
+/// their own checkout again. Safe no-op for the primary checkout or any path
+/// outside our scratch root — we only delete space we created. Runs from the
+/// primary checkout so pruning still works after the directory is gone.
+fn discard_worktree(worktree: &Path) {
+    if !is_gitty_worktree(worktree) {
+        return;
+    }
+    let admin = main_worktree(worktree).unwrap_or_else(|| worktree.to_path_buf());
+    let wt_str = worktree.to_string_lossy().to_string();
+    let _ = git(&admin, &["worktree", "remove", "--force", &wt_str]);
+    if worktree.exists() {
+        let _ = fs::remove_dir_all(worktree);
+    }
+    let _ = git(&admin, &["worktree", "prune"]);
+}
+
 /// The most recently active branch other than the current one and the trunk,
 /// included only when its tip commit is strictly newer than the trunk's tip so
 /// the timeline never lights up for a stale branch.
@@ -2362,6 +2398,10 @@ fn abort_merge(path: String, return_branch: Option<String>) -> Result<ActionResu
         }
     }
 
+    // Abandoned merges ran in the scratch worktree; release it so trunk is free
+    // to check out again. A no-op when the abort ran in the user's own checkout.
+    discard_worktree(repo_path);
+
     Ok(ActionResult {
         message: "Merge aborted.".to_string(),
         output,
@@ -2471,6 +2511,10 @@ fn complete_merge(path: String, message: Option<String>) -> Result<ActionResult,
         None => vec!["commit".to_string(), "--no-edit".to_string()],
     };
     let output = git_owned(repo_path, args)?;
+    // Resolution ran inside the scratch worktree; now that the merge is
+    // committed, release it so trunk is free to check out again. A no-op when
+    // the merge ran in-place (repo_path is the user's own checkout).
+    discard_worktree(repo_path);
     Ok(ActionResult {
         message: "Merge completed.".to_string(),
         output,
@@ -2667,12 +2711,18 @@ fn merge_into_trunk(path: String, source: Option<String>) -> Result<MergeOutcome
         } else {
             "merged"
         };
+        // The merge landed on trunk; release the scratch worktree so the branch
+        // is free to check out in the user's own repo. Only meaningful when we
+        // ran in a linked worktree (not in-place on trunk itself).
+        if !in_place {
+            discard_worktree(wt);
+        }
         return Ok(MergeOutcome {
             status: status.to_string(),
             conflict_files: Vec::new(),
             message: format!("Merged {source} into {trunk}."),
             output,
-            worktree: worktree_ref,
+            worktree: None,
         });
     }
 
