@@ -6,7 +6,23 @@ type Editor = {
   id: string;
   name: string;
   appPath: string;
+  icon: string;
 };
+
+function EditorGlyph({ editor, size }: { editor: Editor; size: number }) {
+  if (editor.icon) {
+    return (
+      <img
+        src={editor.icon}
+        alt=""
+        width={size}
+        height={size}
+        className="ide-picker-glyph"
+      />
+    );
+  }
+  return <Code2 size={size} className="ide-picker-item-icon" />;
+}
 
 const STORAGE_KEY = "gitty.defaultEditor";
 
@@ -93,7 +109,7 @@ export function IdePicker({ repoPath }: IdePickerProps) {
         disabled={busy || !repoPath}
         onClick={() => void openIn(current)}
       >
-        <Code2 size={15} />
+        <EditorGlyph editor={current} size={24} />
       </button>
       <button
         type="button"
@@ -118,7 +134,7 @@ export function IdePicker({ repoPath }: IdePickerProps) {
               className={`ide-picker-item ${editor.id === current.id ? "active" : ""}`}
               onClick={() => chooseDefault(editor)}
             >
-              <Code2 size={14} className="ide-picker-item-icon" />
+              <EditorGlyph editor={editor} size={16} />
               <span>{editor.name}</span>
             </button>
           ))}

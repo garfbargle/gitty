@@ -693,7 +693,7 @@ button:focus-visible {
 
 .ide-picker-main {
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  padding: 0 7px;
+  padding: 0 4px;
 }
 
 .ide-picker-caret {
@@ -754,6 +754,12 @@ button:focus-visible {
 .ide-picker-item-icon {
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+.ide-picker-glyph {
+  border-radius: 3px;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 /* Segmented Changes | History switch */

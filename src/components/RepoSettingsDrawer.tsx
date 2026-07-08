@@ -54,6 +54,22 @@ function prettySource(url: string): string {
     .replace(/\.git$/, "");
 }
 
+/// Normalize a clone URL so `git@host:a/b.git` and `https://host/a/b` compare
+/// equal — used to tell whether a git remote is really just a linked folder's
+/// backing source (and so shouldn't clutter the Remote URL list).
+function canonicalUrl(url: string): string {
+  return url
+    .trim()
+    .replace(/^git@/, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^ssh:\/\//, "")
+    .replace(/^git:\/\//, "")
+    .replace(":", "/")
+    .replace(/\.git$/, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+}
+
 function uniqueRemotes(remotes: RemoteEntry[]) {
   const unique = new Map<string, RemoteEntry>();
   remotes.forEach((remote) => {
@@ -228,11 +244,15 @@ function LinkedFoldersSection({
   repoPath,
   disabled,
   onUpdateFolder,
+  onSourcesChange,
 }: {
   open: boolean;
   repoPath: string;
   disabled?: boolean;
   onUpdateFolder: (prefix: string) => Promise<void>;
+  /// Report each linked folder's known source URL up so the parent can hide those
+  /// remotes from the Remote URL list — a subtree's backing remote belongs here.
+  onSourcesChange: (urls: string[]) => void;
 }) {
   const [folders, setFolders] = useState<LinkedFolder[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -253,10 +273,13 @@ function LinkedFoldersSection({
 
   async function reload() {
     try {
-      setFolders(await listLinkedFolders(repoPath));
+      const list = await listLinkedFolders(repoPath);
+      setFolders(list);
+      onSourcesChange(list.filter((folder) => folder.knownSource).map((folder) => folder.url));
     } catch (err) {
       setError(String(err));
       setFolders([]);
+      onSourcesChange([]);
     }
   }
 
@@ -265,6 +288,7 @@ function LinkedFoldersSection({
       closeForm();
       setError(null);
       setFolders(null);
+      onSourcesChange([]);
       return;
     }
     void reload();
@@ -496,6 +520,10 @@ export function RepoSettingsDrawer({
   const [baseline, setBaseline] = useState<RemoteDraft[]>(() => remotesToDrafts(remotes));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Canonical URLs of linked-folder sources, reported by the section below. A
+  // saved remote whose URL matches one is hidden here — it lives under Linked
+  // folders instead of masquerading as a repo remote.
+  const [subtreeUrls, setSubtreeUrls] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -508,6 +536,11 @@ export function RepoSettingsDrawer({
   const dirty = useMemo(() => draftsDirty(baseline, drafts), [baseline, drafts]);
   const canSave = dirty && validDrafts(drafts).length > 0 && !saving;
   const canFetch = uniqueRemotes(remotes).length > 0;
+
+  // Hide saved remotes that only back a linked folder; always keep unsaved rows.
+  const visibleDrafts = drafts.filter(
+    (draft) => !draft.existed || !subtreeUrls.has(canonicalUrl(draft.url)),
+  );
 
   function updateDraft(id: string, patch: Partial<Pick<RemoteDraft, "name" | "url">>) {
     setDrafts((current) =>
@@ -635,8 +668,8 @@ export function RepoSettingsDrawer({
         </div>
 
         <div className="settings-remote-list">
-          {drafts.map((draft) => {
-            const showNameField = draft.existed || drafts.length > 1;
+          {visibleDrafts.map((draft) => {
+            const showNameField = draft.existed || visibleDrafts.length > 1;
             return (
               <div className="settings-remote-item" key={draft.id}>
                 <div className="settings-remote-item-head">
@@ -686,6 +719,7 @@ export function RepoSettingsDrawer({
         repoPath={repoPath}
         disabled={disabled}
         onUpdateFolder={onUpdateFolder}
+        onSourcesChange={(urls) => setSubtreeUrls(new Set(urls.map(canonicalUrl)))}
       />
     </SettingsModal>
   );

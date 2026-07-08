@@ -273,6 +273,15 @@ unknown" even when the user had added the origin as a named git remote. Fixed:
   subtree added from a named remote, no manifest → split recovered → matched to
   the right remote's URL, unrelated remotes not matched.
 
+### Phase 2.2 — Hide subtree-backing remotes (from live feedback)
+A remote that exists only to back a linked folder was showing in the "Remote URL"
+list, reading as a repo push/pull remote. Now the Linked folders section reports
+its sources up (`onSourcesChange`), and the Remote URL list hides any *saved*
+remote whose URL matches one (`canonicalUrl` normalizes `git@host:a/b.git` vs
+`https://host/a/b`). The remote still exists in git — Fetch still refreshes it and
+inference still uses it — it just no longer masquerades as a repo remote. Unsaved
+draft rows are never hidden.
+
 ### Decisions taken during Phase 2
 - **Discovery must gate on presence.** History keeps a removed subtree's squash
   commits forever, so `list_linked_folders` now filters to prefixes whose folder
