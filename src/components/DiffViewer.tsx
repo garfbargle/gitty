@@ -160,6 +160,7 @@ function DiffFileSection({
   bundle,
   fileChange,
   section,
+  visibleScopes,
   repoPath,
   commit,
   showWorkingTreeBadges,
@@ -174,6 +175,7 @@ function DiffFileSection({
   bundle: DiffFileBundle;
   fileChange?: FileChange;
   section?: ChangeSection;
+  visibleScopes?: Set<DiffHunkScope>;
   showHeader?: boolean;
   repoPath?: string;
   commit?: string;
@@ -192,6 +194,11 @@ function DiffFileSection({
   const diffFile = bundle.file;
   const filePath = bundle.path;
   const staged = fileChange ? isFileStaged(fileChange) : false;
+  // When a specific staged/unstaged entry is selected, only show that scope's
+  // hunks — a partially-staged file otherwise shows both scopes at once.
+  const visibleHunks = visibleScopes
+    ? bundle.hunks.filter((scoped) => visibleScopes.has(scoped.scope))
+    : bundle.hunks;
   const showImagePreview =
     !!repoPath && !!filePath && diffFile.isBinary && isImagePath(filePath);
 
@@ -284,10 +291,10 @@ function DiffFileSection({
         ) : (
           <div className="diff-empty inline">Binary file — no text diff available.</div>
         )
-      ) : bundle.hunks.length === 0 ? (
+      ) : visibleHunks.length === 0 ? (
         <div className="diff-empty inline">No diff hunks for this file.</div>
       ) : (
-        bundle.hunks.map((scopedHunk, index) => (
+        visibleHunks.map((scopedHunk, index) => (
           <DiffHunkView
             scopedHunk={scopedHunk}
             filePath={filePath}
@@ -352,6 +359,24 @@ export function DiffViewer({
     return map;
   }, [file, section, selection]);
 
+  // Track which scopes (staged/unstaged) were actually selected for each path so
+  // a partially-staged file only shows the hunks matching the chosen entry.
+  const scopesByPath = useMemo(() => {
+    const map = new Map<string, Set<DiffHunkScope>>();
+    const add = (path: string, entrySection?: ChangeSection) => {
+      if (entrySection !== "staged" && entrySection !== "unstaged") return;
+      let scopes = map.get(path);
+      if (!scopes) {
+        scopes = new Set<DiffHunkScope>();
+        map.set(path, scopes);
+      }
+      scopes.add(entrySection);
+    };
+    for (const entry of selection) add(entry.file.path, entry.section);
+    if (file && section) add(file.path, section);
+    return map;
+  }, [file, section, selection]);
+
   const uniqueSelectionCount = useMemo(() => {
     const paths = new Set(selection.map((entry) => entry.file.path));
     if (file) paths.add(file.path);
@@ -413,6 +438,7 @@ export function DiffViewer({
               bundle={bundle}
               fileChange={meta?.file}
               section={meta?.section ?? section}
+              visibleScopes={scopesByPath.get(bundle.path)}
               repoPath={repoPath}
               commit={commit}
               showWorkingTreeBadges={showWorkingTreeBadges}
