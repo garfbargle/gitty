@@ -2250,6 +2250,11 @@ button.context-chip.sibling:disabled {
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  /* Grow to fill free space, but never taller than the content itself and
+     never more than an equal share when the other side also overflows. This
+     gives: empty/short sides collapse to their header, a lone big side takes
+     the whole panel, and two overflowing sides split 50/50. */
+  max-height: max-content;
 }
 
 .change-group + .change-group {
@@ -2259,6 +2264,7 @@ button.context-chip.sibling:disabled {
 .change-group-header {
   align-items: center;
   display: flex;
+  flex-shrink: 0;
   gap: 6px;
   justify-content: space-between;
   padding: 8px 12px 4px;
@@ -2272,11 +2278,15 @@ button.context-chip.sibling:disabled {
 }
 
 .change-group > h4 {
+  flex-shrink: 0;
   padding: 8px 12px 4px;
 }
 
 .change-items {
-  flex: 1;
+  /* Content-based basis so the group's max-content height (see .change-group)
+     includes the list, not just the header. Grows to fill the group and
+     scrolls when the group is capped shorter than its content. */
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
