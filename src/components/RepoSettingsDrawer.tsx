@@ -13,7 +13,12 @@ import type { LinkedFolder, RemoteEntry } from "../types";
 import { SettingsModal } from "./SettingsModal";
 import { RepoIcon } from "./RepoIcon";
 import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
-import { addLinkedFolder, listLinkedFolders, removeLinkedFolder } from "../lib/subtrees";
+import {
+  addLinkedFolder,
+  listLinkedFolders,
+  removeLinkedFolder,
+  setLinkedFolderSource,
+} from "../lib/subtrees";
 
 type RemoteDraft = {
   id: string;
@@ -232,8 +237,19 @@ function LinkedFoldersSection({
   const [folders, setFolders] = useState<LinkedFolder[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // `adding` = new folder form; `sourceFor` = set-source form for an existing,
+  // unknown-source folder (its prefix). At most one is active.
   const [adding, setAdding] = useState(false);
+  const [sourceFor, setSourceFor] = useState<string | null>(null);
   const [draft, setDraft] = useState({ folder: "", url: "", branch: "main" });
+
+  const formOpen = adding || sourceFor !== null;
+
+  function closeForm() {
+    setAdding(false);
+    setSourceFor(null);
+    setDraft({ folder: "", url: "", branch: "main" });
+  }
 
   async function reload() {
     try {
@@ -246,7 +262,7 @@ function LinkedFoldersSection({
 
   useEffect(() => {
     if (!open) {
-      setAdding(false);
+      closeForm();
       setError(null);
       setFolders(null);
       return;
@@ -257,17 +273,28 @@ function LinkedFoldersSection({
 
   const controlsDisabled = disabled || busy !== null;
 
-  async function submitAdd() {
-    const folder = draft.folder.trim();
+  function beginSetSource(folder: LinkedFolder) {
+    setAdding(false);
+    setSourceFor(folder.prefix);
+    setDraft({ folder: folder.prefix, url: folder.url, branch: folder.branch || "main" });
+    setError(null);
+  }
+
+  async function submitForm() {
     const url = draft.url.trim();
     const branch = draft.branch.trim() || "main";
-    if (!folder || !url) return;
-    setBusy("__add__");
+    if (!url) return;
+    setBusy("__form__");
     setError(null);
     try {
-      await addLinkedFolder(repoPath, folder, url, branch);
-      setAdding(false);
-      setDraft({ folder: "", url: "", branch: "main" });
+      if (sourceFor !== null) {
+        await setLinkedFolderSource(repoPath, sourceFor, url, branch);
+      } else {
+        const folder = draft.folder.trim();
+        if (!folder) return;
+        await addLinkedFolder(repoPath, folder, url, branch);
+      }
+      closeForm();
       await reload();
     } catch (err) {
       setError(String(err));
@@ -316,15 +343,19 @@ function LinkedFoldersSection({
         <button
           type="button"
           className="settings-inline-link"
-          disabled={controlsDisabled || adding}
-          onClick={() => setAdding(true)}
+          disabled={controlsDisabled || formOpen}
+          onClick={() => {
+            setSourceFor(null);
+            setDraft({ folder: "", url: "", branch: "main" });
+            setAdding(true);
+          }}
         >
           <Plus size={12} />
           Add linked folder
         </button>
       </div>
 
-      {adding ? (
+      {formOpen ? (
         <div className="subtree-add-form">
           <input
             className="settings-input settings-input-compact"
@@ -332,7 +363,8 @@ function LinkedFoldersSection({
             onChange={(event) => setDraft((d) => ({ ...d, folder: event.currentTarget.value }))}
             placeholder="folder, e.g. vendor/ui-kit"
             aria-label="Folder"
-            autoFocus
+            autoFocus={sourceFor === null}
+            disabled={sourceFor !== null}
             spellCheck={false}
           />
           <input
@@ -341,6 +373,7 @@ function LinkedFoldersSection({
             onChange={(event) => setDraft((d) => ({ ...d, url: event.currentTarget.value }))}
             placeholder="git@github.com:acme/ui-kit.git"
             aria-label="Source URL"
+            autoFocus={sourceFor !== null}
             spellCheck={false}
           />
           <div className="subtree-add-actions">
@@ -355,22 +388,23 @@ function LinkedFoldersSection({
             <button
               type="button"
               className="ghost-btn"
-              disabled={busy === "__add__"}
-              onClick={() => {
-                setAdding(false);
-                setDraft({ folder: "", url: "", branch: "main" });
-              }}
+              disabled={busy === "__form__"}
+              onClick={closeForm}
             >
               Cancel
             </button>
             <button
               type="button"
               className="settings-btn primary"
-              disabled={busy === "__add__" || !draft.folder.trim() || !draft.url.trim()}
-              onClick={() => void submitAdd()}
+              disabled={
+                busy === "__form__" ||
+                !draft.url.trim() ||
+                (sourceFor === null && !draft.folder.trim())
+              }
+              onClick={() => void submitForm()}
             >
-              {busy === "__add__" ? <Loader2 size={14} className="spin" /> : null}
-              Add
+              {busy === "__form__" ? <Loader2 size={14} className="spin" /> : null}
+              {sourceFor !== null ? "Save source" : "Add"}
             </button>
           </div>
         </div>
@@ -382,7 +416,7 @@ function LinkedFoldersSection({
           Loading…
         </div>
       ) : folders.length === 0 ? (
-        !adding ? (
+        !formOpen ? (
           <p className="settings-field-note">
             Mirror another repo into a folder. It stays real files in your repo — a clone just works.
           </p>
@@ -400,24 +434,32 @@ function LinkedFoldersSection({
                   {folder.dirty ? " · edited" : ""}
                 </span>
               </div>
-              <button
-                type="button"
-                className="settings-btn"
-                title={
-                  folder.knownSource
-                    ? "Pull the latest from the source"
-                    : "Source unknown — re-add this folder to set it"
-                }
-                disabled={controlsDisabled || !folder.knownSource}
-                onClick={() => void update(folder.prefix)}
-              >
-                {busy === folder.prefix ? (
-                  <Loader2 size={14} className="spin" />
-                ) : (
-                  <ArrowDownToLine size={14} />
-                )}
-                Update
-              </button>
+              {folder.knownSource ? (
+                <button
+                  type="button"
+                  className="settings-btn"
+                  title="Pull the latest from the source"
+                  disabled={controlsDisabled}
+                  onClick={() => void update(folder.prefix)}
+                >
+                  {busy === folder.prefix ? (
+                    <Loader2 size={14} className="spin" />
+                  ) : (
+                    <ArrowDownToLine size={14} />
+                  )}
+                  Update
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="settings-btn"
+                  title="Gitty couldn't find this folder's source — set it to enable Update"
+                  disabled={controlsDisabled}
+                  onClick={() => beginSetSource(folder)}
+                >
+                  Set source
+                </button>
+              )}
               <button
                 type="button"
                 className="icon-btn sm"

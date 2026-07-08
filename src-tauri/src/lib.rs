@@ -2833,10 +2833,10 @@ fn validate_prefix(prefix: &str) -> Result<String, String> {
     Ok(trimmed)
 }
 
-/// Discover the subtree folders recorded in history and the short SHA each was
-/// last synced to, from the `git-subtree-dir:` / `git-subtree-split:` trailers
-/// that `--squash` writes onto its squash commits. `git log` is newest-first, so
-/// the first split seen per folder is the current one.
+/// Discover the subtree folders recorded in history and the full split SHA each
+/// was last synced to, from the `git-subtree-dir:` / `git-subtree-split:`
+/// trailers that `--squash` writes onto its squash commits. `git log` is
+/// newest-first, so the first split seen per folder is the current one.
 fn discover_subtree_prefixes(repo_path: &Path) -> HashMap<String, Option<String>> {
     let mut found: HashMap<String, Option<String>> = HashMap::new();
     let log = match git(
@@ -2864,12 +2864,73 @@ fn discover_subtree_prefixes(repo_path: &Path) -> HashMap<String, Option<String>
             }
         }
         if let Some(dir) = dir.filter(|d| !d.is_empty()) {
-            found
-                .entry(dir)
-                .or_insert_with(|| split.map(|sha| sha.chars().take(9).collect::<String>()));
+            found.entry(dir).or_insert(split);
         }
     }
     found
+}
+
+/// A short display SHA (9 chars) from a full one.
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(9).collect()
+}
+
+/// Infer a subtree's origin from configured remotes: find a remote-tracking
+/// branch that contains the split commit and return that remote's URL + the
+/// branch name. Local-only — works whenever the source remote has been fetched,
+/// which covers subtrees added from the CLI against a named remote.
+fn infer_subtree_source(repo_path: &Path, split_sha: &str) -> Option<(String, String)> {
+    if split_sha.is_empty() {
+        return None;
+    }
+    let remotes = remote_list(repo_path);
+    if remotes.is_empty() {
+        return None;
+    }
+    // Prefer the fetch URL for a remote when both fetch/push rows are present.
+    let url_for = |name: &str| -> Option<String> {
+        remotes
+            .iter()
+            .find(|remote| remote.name == name && remote.kind == "fetch")
+            .or_else(|| remotes.iter().find(|remote| remote.name == name))
+            .map(|remote| remote.url.clone())
+            .filter(|url| !url.is_empty())
+    };
+
+    let listing = git(repo_path, &["branch", "-r", "--contains", split_sha]).ok()?;
+    for raw in listing.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.contains("->") {
+            continue;
+        }
+        // Match the longest remote-name prefix so a branch that itself contains
+        // slashes still resolves (remote "origin", branch "feature/x").
+        for remote in &remotes {
+            let needle = format!("{}/", remote.name);
+            if let Some(branch) = line.strip_prefix(&needle) {
+                if let Some(url) = url_for(&remote.name) {
+                    return Some((url, branch.to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a folder's source URL + branch: the manifest hint if present, else
+/// inferred from remotes via the split commit. Returns `(url, branch,
+/// from_manifest)`. `None` when neither is available (truly unknown).
+fn resolve_subtree_source(
+    repo_path: &Path,
+    prefix: &str,
+    split_sha: Option<&str>,
+    manifest: &[SubtreeManifestEntry],
+) -> Option<(String, String, bool)> {
+    if let Some(entry) = manifest.iter().find(|entry| entry.folder == prefix) {
+        return Some((entry.url.clone(), entry.branch.clone(), true));
+    }
+    let (url, branch) = infer_subtree_source(repo_path, split_sha?)?;
+    Some((url, branch, false))
 }
 
 /// List this repo's linked folders, merging what history records with the
@@ -2881,9 +2942,6 @@ fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
     let repo_path = Path::new(&repo.path);
 
     let manifest = read_subtree_manifest(repo_path);
-    let manifest_by_folder: HashMap<&str, &SubtreeManifestEntry> =
-        manifest.iter().map(|entry| (entry.folder.as_str(), entry)).collect();
-
     let discovered = discover_subtree_prefixes(repo_path);
 
     // Union of folders known to history and folders named in the manifest.
@@ -2901,15 +2959,20 @@ fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
         // presence means removing the files (staged `git rm`) drops it cleanly.
         .filter(|prefix| repo_path.join(prefix).exists())
         .map(|prefix| {
-            let hint = manifest_by_folder.get(prefix.as_str());
+            let split = discovered.get(&prefix).cloned().flatten();
+            let source = resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest);
             let dirty = git(repo_path, &["status", "--porcelain", "--", &prefix])
                 .map(|out| !out.trim().is_empty())
                 .unwrap_or(false);
+            let (url, branch, known_source) = match source {
+                Some((url, branch, _)) => (url, branch, true),
+                None => (String::new(), String::new(), false),
+            };
             LinkedFolder {
-                last_synced_short: discovered.get(&prefix).cloned().flatten(),
-                url: hint.map(|hint| hint.url.clone()).unwrap_or_default(),
-                branch: hint.map(|hint| hint.branch.clone()).unwrap_or_default(),
-                known_source: hint.is_some(),
+                last_synced_short: split.as_deref().map(short_sha),
+                url,
+                branch,
+                known_source,
                 dirty,
                 prefix,
             }
@@ -3036,11 +3099,14 @@ fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, S
     let repo_path = Path::new(&repo.path);
     let prefix = validate_prefix(&prefix)?;
 
-    let entry = read_subtree_manifest(repo_path)
-        .into_iter()
-        .find(|entry| entry.folder == prefix)
-        .ok_or_else(|| {
-            "Gitty doesn't know where this folder came from. Add its source URL first.".to_string()
+    let manifest = read_subtree_manifest(repo_path);
+    let split = discover_subtree_prefixes(repo_path)
+        .get(&prefix)
+        .cloned()
+        .flatten();
+    let (url, branch, _from_manifest) =
+        resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest).ok_or_else(|| {
+            "Gitty doesn't know where this folder came from. Set its source first.".to_string()
         })?;
 
     let dirty = git(repo_path, &["status", "--porcelain"])
@@ -3052,17 +3118,50 @@ fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, S
 
     let (success, stdout, stderr) = git_subtree(
         repo_path,
-        &[
-            "subtree",
-            "pull",
-            "--prefix",
-            &prefix,
-            &entry.url,
-            &entry.branch,
-            "--squash",
-        ],
+        &["subtree", "pull", "--prefix", &prefix, &url, &branch, "--squash"],
     )?;
     subtree_pull_outcome(repo_path, &prefix, success, &stdout, &stderr)
+}
+
+/// Manually record (or overwrite) a linked folder's source in the manifest. For
+/// folders whose origin Gitty couldn't infer from remotes — e.g. added from a
+/// bare URL that no remote-tracking branch covers.
+#[tauri::command]
+fn set_linked_folder_source(
+    path: String,
+    prefix: String,
+    url: String,
+    branch: String,
+) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let prefix = validate_prefix(&prefix)?;
+    let url = url.trim().to_string();
+    let branch = branch.trim().to_string();
+    if url.is_empty() {
+        return Err("Enter the source repository URL.".to_string());
+    }
+    if branch.is_empty() {
+        return Err("Enter the source branch to track.".to_string());
+    }
+    if !repo_path.join(&prefix).exists() {
+        return Err(format!("{prefix} isn't a folder in this repository."));
+    }
+
+    let mut manifest = read_subtree_manifest(repo_path);
+    manifest.retain(|entry| entry.folder != prefix);
+    manifest.push(SubtreeManifestEntry {
+        folder: prefix.clone(),
+        url,
+        branch,
+    });
+    manifest.sort_by(|a, b| a.folder.cmp(&b.folder));
+    write_subtree_manifest(repo_path, &manifest)?;
+
+    Ok(ActionResult {
+        message: format!("Connected {prefix} to its source."),
+        output: String::new(),
+    })
 }
 
 /// Stop tracking a linked folder: always drop its manifest entry. When
@@ -3785,6 +3884,7 @@ pub fn run() {
             list_linked_folders,
             add_linked_folder,
             update_linked_folder,
+            set_linked_folder_source,
             remove_linked_folder,
             open_commit_worktree,
             cleanup_commit_worktrees,

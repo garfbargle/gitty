@@ -17,6 +17,11 @@ export function updateLinkedFolder(path: string, prefix: string) {
   return invoke<UpdateOutcome>("update_linked_folder", { path, prefix });
 }
 
+/// Record a linked folder's source when Gitty couldn't infer it from remotes.
+export function setLinkedFolderSource(path: string, prefix: string, url: string, branch: string) {
+  return invoke<ActionResult>("set_linked_folder_source", { path, prefix, url, branch });
+}
+
 /// Stop tracking a linked folder; `deleteFiles` also stages its removal.
 export function removeLinkedFolder(path: string, prefix: string, deleteFiles: boolean) {
   return invoke<ActionResult>("remove_linked_folder", { path, prefix, deleteFiles });

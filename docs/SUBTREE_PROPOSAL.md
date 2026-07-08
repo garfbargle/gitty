@@ -256,6 +256,23 @@ Invisible release. Nothing user-facing changed yet.
 - [x] `tsc --noEmit` clean; `npm run build` clean (JS 327 KB); `cargo check` clean
       (the `.exists()` list filter — see below).
 
+### Phase 2.1 — Source inference (from live feedback)
+A CLI-created subtree has history markers but no manifest, so it listed as "source
+unknown" even when the user had added the origin as a named git remote. Fixed:
+- `infer_subtree_source` — matches the folder's `git-subtree-split` SHA against
+  remote-tracking branches (`git branch -r --contains`), then maps the winning
+  remote to its URL + branch. Local-only; works whenever the source remote has
+  been fetched (the common CLI case). `resolve_subtree_source` prefers the
+  manifest, falls back to inference. `list_linked_folders` and
+  `update_linked_folder` both use it, so an inferred folder shows connected and
+  Updates with no manifest at all.
+- `set_linked_folder_source` command + a **Set source** button (reusing the add
+  form, folder locked) for the rare folder inference can't resolve — writes the
+  manifest so it's remembered and shared.
+- Inference smoke test (6 checks, all pass) reproducing the reported scenario:
+  subtree added from a named remote, no manifest → split recovered → matched to
+  the right remote's URL, unrelated remotes not matched.
+
 ### Decisions taken during Phase 2
 - **Discovery must gate on presence.** History keeps a removed subtree's squash
   commits forever, so `list_linked_folders` now filters to prefixes whose folder

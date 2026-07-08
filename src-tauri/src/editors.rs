@@ -29,6 +29,7 @@ const CANDIDATES: &[Candidate] = &[
     Candidate { id: "windsurf", name: "Windsurf", bundles: &["Windsurf.app"] },
     Candidate { id: "sublime", name: "Sublime Text", bundles: &["Sublime Text.app"] },
     Candidate { id: "antigravity", name: "Antigravity", bundles: &["Antigravity.app"] },
+    Candidate { id: "antigravity-ide", name: "Antigravity IDE", bundles: &["Antigravity IDE.app"] },
     Candidate { id: "xcode", name: "Xcode", bundles: &["Xcode.app"] },
 ];
 
