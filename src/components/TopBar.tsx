@@ -8,6 +8,7 @@ import {
   Settings,
 } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
+import { IdePicker } from "./IdePicker";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
 
@@ -82,6 +83,8 @@ export function TopBar({
             {sidebarVisible ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
           </button>
         ) : null}
+
+        <IdePicker repoPath={selectedPath} />
 
         <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
 

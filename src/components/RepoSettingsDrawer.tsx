@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, ImageOff, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
-import type { RemoteEntry } from "../types";
+import {
+  ArrowDownToLine,
+  Download,
+  FolderGit2,
+  ImageOff,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
+import type { LinkedFolder, RemoteEntry } from "../types";
 import { SettingsModal } from "./SettingsModal";
 import { RepoIcon } from "./RepoIcon";
 import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
+import { addLinkedFolder, listLinkedFolders, removeLinkedFolder } from "../lib/subtrees";
 
 type RemoteDraft = {
   id: string;
@@ -22,8 +32,22 @@ type RepoSettingsDrawerProps = {
   onRemoveRemote: (name: string) => Promise<boolean>;
   onFetch: () => void;
   onRemoveRepo: () => void;
+  /// Pull a linked folder from its source. Owns conflict handling (may close this
+  /// drawer to show the resolver) and refreshing the repo.
+  onUpdateFolder: (prefix: string) => Promise<void>;
   disabled?: boolean;
 };
+
+/// Shorten a clone URL to something readable: "github.com/acme/ui-kit".
+function prettySource(url: string): string {
+  if (!url) return "source unknown";
+  return url
+    .replace(/^git@/, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/^ssh:\/\//, "")
+    .replace(":", "/")
+    .replace(/\.git$/, "");
+}
 
 function uniqueRemotes(remotes: RemoteEntry[]) {
   const unique = new Map<string, RemoteEntry>();
@@ -194,6 +218,225 @@ function RepoIconSection({
   );
 }
 
+function LinkedFoldersSection({
+  open,
+  repoPath,
+  disabled,
+  onUpdateFolder,
+}: {
+  open: boolean;
+  repoPath: string;
+  disabled?: boolean;
+  onUpdateFolder: (prefix: string) => Promise<void>;
+}) {
+  const [folders, setFolders] = useState<LinkedFolder[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState({ folder: "", url: "", branch: "main" });
+
+  async function reload() {
+    try {
+      setFolders(await listLinkedFolders(repoPath));
+    } catch (err) {
+      setError(String(err));
+      setFolders([]);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
+      setAdding(false);
+      setError(null);
+      setFolders(null);
+      return;
+    }
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, repoPath]);
+
+  const controlsDisabled = disabled || busy !== null;
+
+  async function submitAdd() {
+    const folder = draft.folder.trim();
+    const url = draft.url.trim();
+    const branch = draft.branch.trim() || "main";
+    if (!folder || !url) return;
+    setBusy("__add__");
+    setError(null);
+    try {
+      await addLinkedFolder(repoPath, folder, url, branch);
+      setAdding(false);
+      setDraft({ folder: "", url: "", branch: "main" });
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function update(prefix: string) {
+    setBusy(prefix);
+    setError(null);
+    try {
+      await onUpdateFolder(prefix);
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(folder: LinkedFolder) {
+    if (
+      !window.confirm(
+        `Remove ${folder.prefix}? This deletes the folder (staged for your next commit) and unlinks it.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(folder.prefix);
+    setError(null);
+    try {
+      await removeLinkedFolder(repoPath, folder.prefix, true);
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="settings-field">
+      <div className="settings-field-head">
+        <label>Linked folders</label>
+        <button
+          type="button"
+          className="settings-inline-link"
+          disabled={controlsDisabled || adding}
+          onClick={() => setAdding(true)}
+        >
+          <Plus size={12} />
+          Add linked folder
+        </button>
+      </div>
+
+      {adding ? (
+        <div className="subtree-add-form">
+          <input
+            className="settings-input settings-input-compact"
+            value={draft.folder}
+            onChange={(event) => setDraft((d) => ({ ...d, folder: event.currentTarget.value }))}
+            placeholder="folder, e.g. vendor/ui-kit"
+            aria-label="Folder"
+            autoFocus
+            spellCheck={false}
+          />
+          <input
+            className="settings-input"
+            value={draft.url}
+            onChange={(event) => setDraft((d) => ({ ...d, url: event.currentTarget.value }))}
+            placeholder="git@github.com:acme/ui-kit.git"
+            aria-label="Source URL"
+            spellCheck={false}
+          />
+          <div className="subtree-add-actions">
+            <input
+              className="settings-input settings-input-compact"
+              value={draft.branch}
+              onChange={(event) => setDraft((d) => ({ ...d, branch: event.currentTarget.value }))}
+              placeholder="main"
+              aria-label="Source branch"
+              spellCheck={false}
+            />
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={busy === "__add__"}
+              onClick={() => {
+                setAdding(false);
+                setDraft({ folder: "", url: "", branch: "main" });
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="settings-btn primary"
+              disabled={busy === "__add__" || !draft.folder.trim() || !draft.url.trim()}
+              onClick={() => void submitAdd()}
+            >
+              {busy === "__add__" ? <Loader2 size={14} className="spin" /> : null}
+              Add
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {folders === null ? (
+        <div className="settings-icon-empty">
+          <Loader2 size={16} className="spin" />
+          Loading…
+        </div>
+      ) : folders.length === 0 ? (
+        !adding ? (
+          <p className="settings-field-note">
+            Mirror another repo into a folder. It stays real files in your repo — a clone just works.
+          </p>
+        ) : null
+      ) : (
+        <div className="subtree-list">
+          {folders.map((folder) => (
+            <div className="subtree-item" key={folder.prefix}>
+              <FolderGit2 size={16} className="subtree-item-icon" />
+              <div className="subtree-item-body">
+                <span className="subtree-item-name">{folder.prefix}</span>
+                <span className="subtree-item-source">
+                  {prettySource(folder.url)}
+                  {folder.knownSource ? ` · ${folder.branch}` : ""}
+                  {folder.dirty ? " · edited" : ""}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="settings-btn"
+                title={
+                  folder.knownSource
+                    ? "Pull the latest from the source"
+                    : "Source unknown — re-add this folder to set it"
+                }
+                disabled={controlsDisabled || !folder.knownSource}
+                onClick={() => void update(folder.prefix)}
+              >
+                {busy === folder.prefix ? (
+                  <Loader2 size={14} className="spin" />
+                ) : (
+                  <ArrowDownToLine size={14} />
+                )}
+                Update
+              </button>
+              <button
+                type="button"
+                className="icon-btn sm"
+                aria-label={`Remove ${folder.prefix}`}
+                disabled={controlsDisabled}
+                onClick={() => void remove(folder)}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error ? <p className="settings-field-note error">{error}</p> : null}
+    </div>
+  );
+}
+
 export function RepoSettingsDrawer({
   open,
   repoName,
@@ -204,6 +447,7 @@ export function RepoSettingsDrawer({
   onRemoveRemote,
   onFetch,
   onRemoveRepo,
+  onUpdateFolder,
   disabled,
 }: RepoSettingsDrawerProps) {
   const [drafts, setDrafts] = useState<RemoteDraft[]>(() => remotesToDrafts(remotes));
@@ -394,6 +638,13 @@ export function RepoSettingsDrawer({
           <p className="settings-field-note">Changes are saved to this repo&apos;s git config.</p>
         ) : null}
       </div>
+
+      <LinkedFoldersSection
+        open={open}
+        repoPath={repoPath}
+        disabled={disabled}
+        onUpdateFolder={onUpdateFolder}
+      />
     </SettingsModal>
   );
 }

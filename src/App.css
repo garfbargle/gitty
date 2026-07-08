@@ -669,6 +669,93 @@ button:focus-visible {
   color: var(--text-primary);
 }
 
+/* IDE / editor split-button chooser */
+.ide-picker {
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  flex-shrink: 0;
+  height: 32px;
+  position: relative;
+}
+
+.ide-picker-main,
+.ide-picker-caret {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.ide-picker-main {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  padding: 0 7px;
+}
+
+.ide-picker-caret {
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0 3px;
+}
+
+.ide-picker-main:hover,
+.ide-picker-caret:hover,
+.ide-picker.open .ide-picker-caret {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ide-picker-main:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ide-picker-menu {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  left: 0;
+  min-width: 180px;
+  overflow: auto;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 50;
+}
+
+.ide-picker-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 9px;
+  padding: 7px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.ide-picker-item:hover {
+  background: var(--bg-hover);
+}
+
+.ide-picker-item.active {
+  background: var(--bg-active);
+}
+
+.ide-picker-item-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
 /* Segmented Changes | History switch */
 .view-mode-switch {
   align-items: center;
@@ -3692,6 +3779,80 @@ button.context-chip.sibling:disabled {
 
 .settings-remote-remove:hover:not(:disabled) {
   color: var(--danger);
+}
+
+/* Linked folders (git subtrees) */
+.subtree-list {
+  display: grid;
+  gap: 8px;
+}
+
+.subtree-item {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 10px;
+  padding: 9px 10px;
+}
+
+.subtree-item-icon {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.subtree-item-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.subtree-item-name {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtree-item-source {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtree-item .settings-btn {
+  flex: none;
+  margin-left: auto;
+}
+
+.subtree-add-form {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px;
+}
+
+.subtree-add-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.subtree-add-actions .settings-input-compact {
+  flex: 1;
+  min-width: 0;
+}
+
+.subtree-add-actions .ghost-btn {
+  margin-left: auto;
 }
 
 .confirm-overlay {

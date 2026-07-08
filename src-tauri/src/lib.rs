@@ -1,4 +1,5 @@
 mod discovery;
+mod editors;
 mod repo_icon;
 mod settings;
 mod summarize;
@@ -2895,6 +2896,10 @@ fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
 
     let folders = prefixes
         .into_iter()
+        // Only live folders. History keeps a removed subtree's old squash commits
+        // forever, so without this a deleted folder would haunt the list; gating on
+        // presence means removing the files (staged `git rm`) drops it cleanly.
+        .filter(|prefix| repo_path.join(prefix).exists())
         .map(|prefix| {
             let hint = manifest_by_folder.get(prefix.as_str());
             let dirty = git(repo_path, &["status", "--porcelain", "--", &prefix])
@@ -3813,7 +3818,9 @@ pub fn run() {
             set_nvidia_api_key,
             delete_nvidia_api_key,
             test_nvidia_api_key,
-            summarize_changes
+            summarize_changes,
+            editors::detect_editors,
+            editors::open_in_editor
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

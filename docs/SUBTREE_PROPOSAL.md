@@ -229,9 +229,53 @@ Invisible release. Nothing user-facing changed yet.
   without a manifest hint is still listed (Update disabled until the UI collects
   its URL). Wires up the graceful-degradation path from Locked Decision 4.
 
-**Phase 2 — The drawer.** "Linked folders" section in `RepoSettingsDrawer`, the
-Add dialog, the Update button, the status dot. Conflicts route to the existing
-resolver. *This is the shippable, useful feature.*
+**Phase 2 — The drawer. — DONE (needs live check)**
+
+- [x] `LinkedFoldersSection` inside `RepoSettingsDrawer` (under Remotes): loads via
+      `list_linked_folders`, lists each folder as `icon · prefix · source·branch ·
+      "edited"?` with an **Update** button and a remove (trash) button. Empty state
+      pitches the feature in plain words.
+- [x] Inline **Add linked folder** form (folder / URL / branch, branch defaults to
+      `main`) — the Remotes-draft idiom, not a stacked modal. Calls
+      `add_linked_folder`.
+- [x] `src/lib/subtrees.ts` — typed `invoke` wrappers (`listLinkedFolders`,
+      `addLinkedFolder`, `updateLinkedFolder`, `removeLinkedFolder`), mirroring
+      `lib/repoIcons.ts`.
+- [x] Conflict reuse with **no `ConflictResolver` changes**: `IntegrationOp` gains a
+      `"subtree"` kind (+ `prefix`). `runLinkedFolderUpdate` closes the drawer on
+      conflict and hands off to the shared resolver; a subtree pull is a merge, so
+      it *completes* via `complete_merge` and *aborts* via `abort_merge` (the merge
+      branches of `completeIntegration` / `cancelIntegration`), resolving in the
+      main checkout (`conflictPath` = the repo, no worktree). Labels read
+      "your work" vs "`<prefix>` source"; the panel says "Update `<prefix>` from
+      its source" / "Finish update".
+- [x] Subtree ops are gated out of the timeline `integrationPreview` — a folder
+      pull isn't a branch integration, so the one timeline is untouched.
+- [x] CSS for `.subtree-list` / `.subtree-item` / `.subtree-add-form`, all on the
+      existing tokens (light/dark parity free).
+- [x] `tsc --noEmit` clean; `npm run build` clean (JS 327 KB); `cargo check` clean
+      (the `.exists()` list filter — see below).
+
+### Decisions taken during Phase 2
+- **Discovery must gate on presence.** History keeps a removed subtree's squash
+  commits forever, so `list_linked_folders` now filters to prefixes whose folder
+  still exists on disk. This is what makes removal actually drop a folder from the
+  list.
+- **Remove = unlink + delete files** (one action, clear confirm): drops the
+  manifest entry *and* stages `git rm -r` for the user's next commit. Keeping files
+  while forgetting the source is a confusing half-state, so it isn't a button
+  (the backend still supports `deleteFiles: false`).
+- **Update requires a known source.** A folder recovered from history without a
+  manifest hint lists with its Update disabled and a "re-add to set the source"
+  tooltip. Inline source-editing is deferred.
+
+### NEEDS LIVE VERIFICATION
+Backend sequences are smoke-tested (Phase 1) and the React is build-verified, but
+the click-path can't be driven headlessly. A real run should confirm: Add a folder
+→ it appears + `.gitty/subtrees.json` shows in Changes; Update clean → toast +
+timeline gains a squash commit; Update with a conflict → drawer closes, resolver
+opens, Finish update commits and returns to now; Remove → folder leaves the list
+and a staged deletion appears.
 
 **Phase 3 — Awareness + Send changes back.** Optional behind-chip surfacing, and
 the gated `contribute_linked_folder`. Only after Phase 2 proves out.

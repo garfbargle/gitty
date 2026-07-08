@@ -98,7 +98,7 @@ type NavZone = "timeline" | "files";
 // The single "integrate with main" operation. `update` rebases the current
 // branch onto main; `merge` merges it into main inside a hidden worktree.
 type IntegrationOp = {
-  kind: "update" | "merge";
+  kind: "update" | "merge" | "subtree";
   /// Trunk name we're integrating with (the "other" side; "ours" in conflicts).
   onto: string;
   /// The current branch being integrated ("theirs" in conflicts).
@@ -108,6 +108,8 @@ type IntegrationOp = {
   phase: "conflicts" | "done";
   /// A finished merge left main ahead of its remote — offer to push it.
   pushable?: boolean;
+  /// For a `subtree` update: the linked folder being pulled (for labels).
+  prefix?: string;
 };
 
 function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
@@ -1285,6 +1287,37 @@ function App() {
     }
   }
 
+  // Pull a linked folder from its source. On conflicts, hand off to the shared
+  // resolver (a subtree pull is a merge, so it completes/aborts like one).
+  async function runLinkedFolderUpdate(prefix: string) {
+    if (!selectedPath || integrationRunning) return;
+    setIntegrationRunning(true);
+    setError("");
+    setMessage("");
+    try {
+      const outcome = await invoke<UpdateOutcome>("update_linked_folder", {
+        path: selectedPath,
+        prefix,
+      });
+      if (outcome.status === "conflicts") {
+        setRepoSettingsOpen(false);
+        await refreshRepoQuiet(selectedPath);
+        enterConflicts(
+          { kind: "subtree", onto: "your work", branch: `${prefix} source`, prefix, phase: "conflicts" },
+          outcome.conflictFiles,
+        );
+      } else {
+        setMessage(outcome.message);
+        await refreshRepoQuiet(selectedPath);
+      }
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    } finally {
+      setIntegrationRunning(false);
+    }
+  }
+
   // Re-read which files still conflict, from the right place for this op.
   async function refreshConflictStatus() {
     if (!integrationOp) return;
@@ -1328,17 +1361,7 @@ function App() {
   // again on the next conflicting commit).
   async function completeIntegration() {
     if (!integrationOp || conflictFiles.length > 0) return;
-    if (integrationOp.kind === "merge") {
-      const result = await run(() =>
-        invoke<ActionResult>("complete_merge", { path: conflictPath, message: null }),
-      );
-      if (!result) return;
-      setMessage(result.message);
-      setIntegrationOp((prev) =>
-        prev ? { ...prev, phase: "done", pushable: hasRemotes } : prev,
-      );
-      await refreshRepoQuiet(selectedPath);
-    } else {
+    if (integrationOp.kind === "update") {
       const outcome = await run(() =>
         invoke<UpdateOutcome>("update_continue", { path: selectedPath }),
       );
@@ -1352,16 +1375,33 @@ function App() {
         setMessage(outcome.message);
         await dismissIntegration();
       }
+    } else {
+      // A merge or a subtree pull both finish by committing the merge.
+      const result = await run(() =>
+        invoke<ActionResult>("complete_merge", { path: conflictPath, message: null }),
+      );
+      if (!result) return;
+      if (integrationOp.kind === "subtree") {
+        setMessage(`Updated ${integrationOp.prefix}.`);
+        await dismissIntegration();
+      } else {
+        setMessage(result.message);
+        setIntegrationOp((prev) =>
+          prev ? { ...prev, phase: "done", pushable: hasRemotes } : prev,
+        );
+        await refreshRepoQuiet(selectedPath);
+      }
     }
   }
 
   async function cancelIntegration() {
     if (!integrationOp) return;
-    const command = integrationOp.kind === "merge" ? "abort_merge" : "update_abort";
+    // A subtree pull is a merge; only a branch update is a rebase.
+    const command = integrationOp.kind === "update" ? "update_abort" : "abort_merge";
     const args =
-      integrationOp.kind === "merge"
-        ? { path: conflictPath, returnBranch: null }
-        : { path: selectedPath };
+      integrationOp.kind === "update"
+        ? { path: selectedPath }
+        : { path: conflictPath, returnBranch: null };
     const result = await run(() => invoke<ActionResult>(command, args));
     if (result) setMessage(result.message);
     await dismissIntegration();
@@ -2233,7 +2273,7 @@ function App() {
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                   integrationPreview={
-                    integrationOp
+                    integrationOp && integrationOp.kind !== "subtree"
                       ? {
                           kind: integrationOp.kind,
                           branch: integrationOp.branch,
@@ -2318,6 +2358,8 @@ function App() {
                       <header className="integration-panel-title">
                         {integrationOp.kind === "merge" ? (
                           <>Merge <strong>{integrationOp.branch}</strong> into <strong>{integrationOp.onto}</strong></>
+                        ) : integrationOp.kind === "subtree" ? (
+                          <>Update <strong>{integrationOp.prefix}</strong> from its source</>
                         ) : (
                           <>Update <strong>{integrationOp.branch}</strong> from <strong>{integrationOp.onto}</strong></>
                         )}
@@ -2333,7 +2375,11 @@ function App() {
                         disabled={conflictFiles.length > 0 || loading}
                         onClick={() => void completeIntegration()}
                       >
-                        {integrationOp.kind === "merge" ? "Complete merge" : "Continue update"}
+                        {integrationOp.kind === "merge"
+                          ? "Complete merge"
+                          : integrationOp.kind === "subtree"
+                            ? "Finish update"
+                            : "Continue update"}
                         <kbd>⌘↵</kbd>
                       </button>
                       <button
@@ -2570,6 +2616,7 @@ function App() {
             onRemoveRemote={removeRemote}
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
+            onUpdateFolder={runLinkedFolderUpdate}
             disabled={loading}
           />
         </>
