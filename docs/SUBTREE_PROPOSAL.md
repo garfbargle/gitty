@@ -282,6 +282,17 @@ remote whose URL matches one (`canonicalUrl` normalizes `git@host:a/b.git` vs
 inference still uses it — it just no longer masquerades as a repo remote. Unsaved
 draft rows are never hidden.
 
+### Phase 2.3 — Editable source, first-class (from live feedback)
+Rather than lean on inference + implicit remote-hiding to establish the source,
+the linked folder now *owns* it: every row has an **edit** (pencil) affordance
+that opens the inline editor prefilled with the current URL + branch, writing the
+manifest via `set_linked_folder_source`. Unknown folders keep the same editor
+behind "Set source". This unifies known/unknown into one model — the source is
+managed in one place, where the folder lives — and editing an inferred folder
+pins it into the manifest (so it survives even if the backing remote is removed).
+Inference and remote-hiding still run as conveniences underneath, but the visible,
+authoritative control is now the folder's own editable URL.
+
 ### Decisions taken during Phase 2
 - **Discovery must gate on presence.** History keeps a removed subtree's squash
   commits forever, so `list_linked_folders` now filters to prefixes whose folder

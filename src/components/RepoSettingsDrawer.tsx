@@ -5,6 +5,7 @@ import {
   FolderGit2,
   ImageOff,
   Loader2,
+  Pencil,
   Plus,
   RotateCcw,
   Trash2,
@@ -459,20 +460,32 @@ function LinkedFoldersSection({
                 </span>
               </div>
               {folder.knownSource ? (
-                <button
-                  type="button"
-                  className="settings-btn"
-                  title="Pull the latest from the source"
-                  disabled={controlsDisabled}
-                  onClick={() => void update(folder.prefix)}
-                >
-                  {busy === folder.prefix ? (
-                    <Loader2 size={14} className="spin" />
-                  ) : (
-                    <ArrowDownToLine size={14} />
-                  )}
-                  Update
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    title="Pull the latest from the source"
+                    disabled={controlsDisabled}
+                    onClick={() => void update(folder.prefix)}
+                  >
+                    {busy === folder.prefix ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <ArrowDownToLine size={14} />
+                    )}
+                    Update
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn sm"
+                    aria-label={`Edit source for ${folder.prefix}`}
+                    title="Edit source URL & branch"
+                    disabled={controlsDisabled}
+                    onClick={() => beginSetSource(folder)}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"
@@ -481,6 +494,7 @@ function LinkedFoldersSection({
                   disabled={controlsDisabled}
                   onClick={() => beginSetSource(folder)}
                 >
+                  <Pencil size={14} />
                   Set source
                 </button>
               )}
