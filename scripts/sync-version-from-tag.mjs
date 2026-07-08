@@ -8,6 +8,14 @@ if (!tag?.startsWith("v")) {
 
 const version = tag.slice(1);
 
+if (!/^\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?$/.test(version)) {
+  console.error(
+    `Invalid version "${version}" from tag "${tag}". ` +
+      "Tags must be a full semver, e.g. v0.15.0 (not v0.15).",
+  );
+  process.exit(1);
+}
+
 const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 packageJson.version = version;
 fs.writeFileSync("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
