@@ -177,6 +177,25 @@ export type UpdateOutcome = {
   output: string;
 };
 
+/// A folder in this repo that mirrors another repo (a git subtree), surfaced in
+/// the UI as a "linked folder". History is the source of truth for which folders
+/// are subtrees; the committed manifest (`.gitty/subtrees.json`) supplies the
+/// origin URL/branch so Update is one click.
+export type LinkedFolder = {
+  prefix: string;
+  /// Source repo URL. Empty when recovered from history without a manifest hint.
+  url: string;
+  /// Source ref/branch. Empty when unknown.
+  branch: string;
+  /// Short SHA of the source commit last pulled in.
+  lastSyncedShort?: string | null;
+  /// Whether the folder has uncommitted local edits.
+  dirty: boolean;
+  /// Whether Gitty knows this folder's origin. When false, the UI asks for the
+  /// URL before the first Update.
+  knownSource: boolean;
+};
+
 /// Whether an update (rebase) is paused mid-flight, so the UI can resume it.
 export type UpdateStatus = {
   rebasing: boolean;

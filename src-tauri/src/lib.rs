@@ -211,6 +211,38 @@ struct UpdateStatus {
     resolved_files: Vec<String>,
 }
 
+/// One entry in a repo's committed linked-folder manifest
+/// (`.gitty/subtrees.json`). History is the source of truth for *which* folders
+/// are subtrees; this file only supplies the origin URL/branch that history
+/// doesn't record, so Update can be one click.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtreeManifestEntry {
+    folder: String,
+    url: String,
+    branch: String,
+}
+
+/// A folder in this repo that mirrors another repo (a git subtree), surfaced to
+/// the UI as a "linked folder".
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkedFolder {
+    /// The folder inside the repo, e.g. "vendor/ui-kit".
+    prefix: String,
+    /// Source repo URL. Empty when recovered from history without a manifest hint.
+    url: String,
+    /// Source ref/branch. Empty when unknown (see `url`).
+    branch: String,
+    /// Short SHA of the source commit last pulled in, from the squash trailer.
+    last_synced_short: Option<String>,
+    /// Whether the folder has uncommitted local edits.
+    dirty: bool,
+    /// Whether Gitty knows this folder's origin (a manifest entry exists). When
+    /// false, the UI asks for the URL before the first Update.
+    known_source: bool,
+}
+
 /// The most recently active *other* branch — a single context lane for the
 /// timeline. Chosen only when its tip is newer than the trunk's, so a stale
 /// branch never clutters the view.
@@ -2710,6 +2742,366 @@ fn update_status(path: String) -> Result<UpdateStatus, String> {
     })
 }
 
+// ---- Linked folders (git subtree) -------------------------------------------
+
+/// Path to a repo's committed linked-folder manifest.
+fn subtree_manifest_path(repo_path: &Path) -> PathBuf {
+    repo_path.join(".gitty").join("subtrees.json")
+}
+
+/// Read the linked-folder manifest, or an empty list when absent/unreadable. The
+/// manifest is only a hint cache — a missing or corrupt one is never fatal.
+fn read_subtree_manifest(repo_path: &Path) -> Vec<SubtreeManifestEntry> {
+    let Ok(data) = fs::read_to_string(subtree_manifest_path(repo_path)) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+/// Write the linked-folder manifest, creating `.gitty/` as needed.
+fn write_subtree_manifest(
+    repo_path: &Path,
+    entries: &[SubtreeManifestEntry],
+) -> Result<(), String> {
+    let path = subtree_manifest_path(repo_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("Could not create {}: {err}", parent.display()))?;
+    }
+    let data = serde_json::to_string_pretty(entries)
+        .map_err(|err| format!("Could not serialize linked folders: {err}"))?;
+    fs::write(&path, format!("{data}\n"))
+        .map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+/// Whether this Git build ships the `git subtree` command (a contrib script some
+/// minimal installs omit).
+fn subtree_available() -> bool {
+    Command::new("git")
+        .args(["subtree", "-h"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map(|out| {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            !text.contains("is not a git command")
+        })
+        .unwrap_or(false)
+}
+
+fn ensure_subtree_available() -> Result<(), String> {
+    if subtree_available() {
+        Ok(())
+    } else {
+        Err("This copy of Git doesn't include subtree support.".to_string())
+    }
+}
+
+/// Run a `git subtree ...` invocation with editors and prompts disabled, so its
+/// internal squash/merge/commit steps never block. Returns (success, stdout,
+/// stderr) like the other conflict-aware runners.
+fn git_subtree(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .output()
+        .map_err(|err| format!("Could not run git subtree: {err}"))?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
+}
+
+/// Reject prefixes that aren't a clean relative path inside the repo.
+fn validate_prefix(prefix: &str) -> Result<String, String> {
+    let trimmed = prefix.trim().trim_matches('/').to_string();
+    if trimmed.is_empty() {
+        return Err("Choose a folder for the linked folder.".to_string());
+    }
+    if Path::new(&trimmed).is_absolute() || trimmed.split('/').any(|part| part == "..") {
+        return Err("The folder must be a path inside this repository.".to_string());
+    }
+    Ok(trimmed)
+}
+
+/// Discover the subtree folders recorded in history and the short SHA each was
+/// last synced to, from the `git-subtree-dir:` / `git-subtree-split:` trailers
+/// that `--squash` writes onto its squash commits. `git log` is newest-first, so
+/// the first split seen per folder is the current one.
+fn discover_subtree_prefixes(repo_path: &Path) -> HashMap<String, Option<String>> {
+    let mut found: HashMap<String, Option<String>> = HashMap::new();
+    let log = match git(
+        repo_path,
+        &[
+            "log",
+            "--no-merges",
+            "--grep=git-subtree-dir:",
+            "--pretty=format:%x1e%b",
+        ],
+    ) {
+        Ok(text) => text,
+        Err(_) => return found,
+    };
+
+    for record in log.split('\u{1e}') {
+        let mut dir: Option<String> = None;
+        let mut split: Option<String> = None;
+        for line in record.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("git-subtree-dir:") {
+                dir = Some(rest.trim().trim_matches('/').to_string());
+            } else if let Some(rest) = line.strip_prefix("git-subtree-split:") {
+                split = Some(rest.trim().to_string());
+            }
+        }
+        if let Some(dir) = dir.filter(|d| !d.is_empty()) {
+            found
+                .entry(dir)
+                .or_insert_with(|| split.map(|sha| sha.chars().take(9).collect::<String>()));
+        }
+    }
+    found
+}
+
+/// List this repo's linked folders, merging what history records with the
+/// committed manifest's origin hints. Local-only and instant — no network,
+/// matching Gitty's no-background-polling stance; Update fetches on demand.
+#[tauri::command]
+fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let manifest = read_subtree_manifest(repo_path);
+    let manifest_by_folder: HashMap<&str, &SubtreeManifestEntry> =
+        manifest.iter().map(|entry| (entry.folder.as_str(), entry)).collect();
+
+    let discovered = discover_subtree_prefixes(repo_path);
+
+    // Union of folders known to history and folders named in the manifest.
+    let mut prefixes: Vec<String> = discovered.keys().cloned().collect();
+    for entry in &manifest {
+        prefixes.push(entry.folder.clone());
+    }
+    prefixes.sort();
+    prefixes.dedup();
+
+    let folders = prefixes
+        .into_iter()
+        .map(|prefix| {
+            let hint = manifest_by_folder.get(prefix.as_str());
+            let dirty = git(repo_path, &["status", "--porcelain", "--", &prefix])
+                .map(|out| !out.trim().is_empty())
+                .unwrap_or(false);
+            LinkedFolder {
+                last_synced_short: discovered.get(&prefix).cloned().flatten(),
+                url: hint.map(|hint| hint.url.clone()).unwrap_or_default(),
+                branch: hint.map(|hint| hint.branch.clone()).unwrap_or_default(),
+                known_source: hint.is_some(),
+                dirty,
+                prefix,
+            }
+        })
+        .collect();
+
+    Ok(folders)
+}
+
+/// Add a folder that mirrors another repo (`git subtree add --squash`), then
+/// record its origin in the manifest so Update is one click later.
+#[tauri::command]
+fn add_linked_folder(
+    path: String,
+    prefix: String,
+    url: String,
+    branch: String,
+) -> Result<ActionResult, String> {
+    ensure_subtree_available()?;
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let prefix = validate_prefix(&prefix)?;
+    let url = url.trim().to_string();
+    let branch = branch.trim().to_string();
+    if url.is_empty() {
+        return Err("Enter the source repository URL.".to_string());
+    }
+    if branch.is_empty() {
+        return Err("Enter the source branch to track.".to_string());
+    }
+    if repo_path.join(&prefix).exists() {
+        return Err(format!(
+            "{prefix} already exists. Choose a folder that doesn't exist yet."
+        ));
+    }
+
+    let (success, stdout, stderr) = git_subtree(
+        repo_path,
+        &["subtree", "add", "--prefix", &prefix, &url, &branch, "--squash"],
+    )?;
+    let output = combine_output(&stdout, &stderr);
+    if !success {
+        return Err(if output.is_empty() {
+            format!("Could not add {prefix}.")
+        } else {
+            output
+        });
+    }
+
+    // Record the origin. This lands as an uncommitted change to
+    // `.gitty/subtrees.json`, which the user commits through the normal flow so
+    // teammates inherit the mapping.
+    let mut manifest = read_subtree_manifest(repo_path);
+    manifest.retain(|entry| entry.folder != prefix);
+    manifest.push(SubtreeManifestEntry {
+        folder: prefix.clone(),
+        url,
+        branch,
+    });
+    manifest.sort_by(|a, b| a.folder.cmp(&b.folder));
+    write_subtree_manifest(repo_path, &manifest)?;
+
+    Ok(ActionResult {
+        message: format!("Linked {prefix}."),
+        output,
+    })
+}
+
+/// Interpret the result of a `git subtree pull --squash`. On divergence the pull
+/// leaves a standard merge state (`MERGE_HEAD` + unmerged files), so the existing
+/// ConflictResolver / `complete_merge` / `abort_merge` path finishes it unchanged.
+fn subtree_pull_outcome(
+    repo_path: &Path,
+    prefix: &str,
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Result<UpdateOutcome, String> {
+    let output = combine_output(stdout, stderr);
+    let conflict_files = unmerged_files(repo_path);
+
+    if !conflict_files.is_empty() || rev_exists(repo_path, "MERGE_HEAD") {
+        return Ok(UpdateOutcome {
+            status: "conflicts".to_string(),
+            message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
+            conflict_files,
+            output,
+        });
+    }
+
+    if success {
+        // `git subtree pull` reports a no-op as "Subtree is already at commit …";
+        // a plain merge fast-path says "up to date".
+        let up_to_date = output.contains("already at commit")
+            || output.contains("up to date")
+            || output.contains("up-to-date");
+        return Ok(UpdateOutcome {
+            status: if up_to_date { "up_to_date" } else { "updated" }.to_string(),
+            conflict_files: Vec::new(),
+            message: if up_to_date {
+                format!("{prefix} is already up to date.")
+            } else {
+                format!("Updated {prefix}.")
+            },
+            output,
+        });
+    }
+
+    Err(if output.is_empty() {
+        format!("Could not update {prefix}.")
+    } else {
+        output
+    })
+}
+
+/// Pull the source repo's latest work into a linked folder
+/// (`git subtree pull --squash`). Needs a clean tree (a subtree pull is a merge
+/// and can't autostash); conflicts flow to the shared resolver.
+#[tauri::command]
+fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, String> {
+    ensure_subtree_available()?;
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let prefix = validate_prefix(&prefix)?;
+
+    let entry = read_subtree_manifest(repo_path)
+        .into_iter()
+        .find(|entry| entry.folder == prefix)
+        .ok_or_else(|| {
+            "Gitty doesn't know where this folder came from. Add its source URL first.".to_string()
+        })?;
+
+    let dirty = git(repo_path, &["status", "--porcelain"])
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(false);
+    if dirty {
+        return Err("Save or set aside your changes before updating a linked folder.".to_string());
+    }
+
+    let (success, stdout, stderr) = git_subtree(
+        repo_path,
+        &[
+            "subtree",
+            "pull",
+            "--prefix",
+            &prefix,
+            &entry.url,
+            &entry.branch,
+            "--squash",
+        ],
+    )?;
+    subtree_pull_outcome(repo_path, &prefix, success, &stdout, &stderr)
+}
+
+/// Stop tracking a linked folder: always drop its manifest entry. When
+/// `delete_files` is set, stage the folder's removal too (the user commits it
+/// through the normal flow). History still remembers the folder was linked.
+#[tauri::command]
+fn remove_linked_folder(
+    path: String,
+    prefix: String,
+    delete_files: bool,
+) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let prefix = validate_prefix(&prefix)?;
+
+    let mut manifest = read_subtree_manifest(repo_path);
+    let had_entry = manifest.iter().any(|entry| entry.folder == prefix);
+    manifest.retain(|entry| entry.folder != prefix);
+    if had_entry {
+        write_subtree_manifest(repo_path, &manifest)?;
+    }
+
+    if delete_files && repo_path.join(&prefix).exists() {
+        let (success, stdout, stderr) = git_raw(repo_path, &["rm", "-r", "--", &prefix])?;
+        let output = combine_output(&stdout, &stderr);
+        if !success {
+            return Err(if output.is_empty() {
+                format!("Could not remove {prefix}.")
+            } else {
+                output
+            });
+        }
+        return Ok(ActionResult {
+            message: format!("Removed {prefix}. Commit to finish."),
+            output,
+        });
+    }
+
+    Ok(ActionResult {
+        message: format!("Unlinked {prefix}."),
+        output: String::new(),
+    })
+}
+
 /// Merge `source` (defaults to the current branch) into the trunk, running the
 /// merge inside a linked worktree so the user's own checkout, branch, and
 /// uncommitted work are never disturbed. On conflicts, the returned `worktree`
@@ -3385,6 +3777,10 @@ pub fn run() {
             update_continue,
             update_abort,
             update_status,
+            list_linked_folders,
+            add_linked_folder,
+            update_linked_folder,
+            remove_linked_folder,
             open_commit_worktree,
             cleanup_commit_worktrees,
             merge_status,
