@@ -66,11 +66,11 @@ Summaries are generated from staged diff content sent to NVIDIA's API — only e
 - Soft or hard reset to a selected commit
 - Ahead/behind counts relative to upstream
 
-![Gitty's History view — a branch graph with merge commits, hashes, dates, and authors](docs/history.png)
+![Gitty's changes view — a syntax-highlighted diff with inline single-line editing and the commit timeline across the top](docs/gitty_inline_edit.png)
 
 The working-tree timeline keeps branch context in view: how far ahead and behind you are of `main` and your upstream, with ghost commits showing what you'd pull in.
 
-![Gitty's commit timeline with branch-divergence context against main and the upstream](docs/timeline.png)
+![Gitty's commit timeline with branch-divergence context — ahead/behind main and ghost commits showing what you'd pull in](docs/storefront_empty.png)
 
 ### Remotes and push
 - Add, update, or remove remotes from repo settings
