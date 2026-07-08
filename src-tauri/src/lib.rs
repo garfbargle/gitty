@@ -1113,6 +1113,30 @@ fn resolve_repo_icon(
 }
 
 #[tauri::command]
+fn list_repo_images(path: String) -> Result<Vec<repo_icon::RepoImage>, String> {
+    let repo = normalize_repo(&path)?;
+    Ok(repo_icon::list_repo_images(Path::new(&repo.path)))
+}
+
+#[tauri::command]
+fn set_repo_icon(
+    app: AppHandle,
+    path: String,
+    relative_path: String,
+) -> Result<Option<String>, String> {
+    let repo = normalize_repo(&path)?;
+    repo_icon::set_repo_icon_override(&app, &repo.path, &relative_path)?;
+    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+}
+
+#[tauri::command]
+fn clear_repo_icon(app: AppHandle, path: String) -> Result<Option<String>, String> {
+    let repo = normalize_repo(&path)?;
+    repo_icon::clear_repo_icon_override(&app, &repo.path)?;
+    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+}
+
+#[tauri::command]
 fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
     Ok(load_repos_from_disk(&app)?
         .into_iter()
@@ -3333,6 +3357,9 @@ pub fn run() {
             init_repo,
             list_repos,
             resolve_repo_icon,
+            list_repo_images,
+            set_repo_icon,
+            clear_repo_icon,
             add_repo,
             remove_repo,
             start_repo_discovery,

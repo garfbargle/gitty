@@ -1,7 +1,33 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export type RepoImage = {
+  relativePath: string;
+  dataUrl: string;
+};
+
 const iconCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string | null>>();
+const subscribers = new Map<string, Set<() => void>>();
+
+/** Notify mounted <RepoIcon> instances for a path that their icon changed. */
+export function subscribeRepoIcon(path: string, listener: () => void): () => void {
+  let listeners = subscribers.get(path);
+  if (!listeners) {
+    listeners = new Set();
+    subscribers.set(path, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = subscribers.get(path);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) subscribers.delete(path);
+  };
+}
+
+function notifyRepoIcon(path: string) {
+  subscribers.get(path)?.forEach((listener) => listener());
+}
 
 export function repoIconFallbackColor(name: string): string {
   let hash = 0;
@@ -22,6 +48,7 @@ export function repoIconInitial(name: string): string {
 export function invalidateRepoIcon(path: string) {
   iconCache.delete(path);
   inflight.delete(path);
+  notifyRepoIcon(path);
 }
 
 export async function fetchRepoIcon(
@@ -61,4 +88,29 @@ export async function fetchRepoIcon(
 export function primeRepoIcon(path: string, dataUrl: string | null) {
   if (dataUrl) iconCache.set(path, dataUrl);
   else iconCache.delete(path);
+  notifyRepoIcon(path);
+}
+
+/** List candidate images inside the repo for the manual icon picker. */
+export async function listRepoImages(path: string): Promise<RepoImage[]> {
+  return invoke<RepoImage[]>("list_repo_images", { path });
+}
+
+/** Pin a specific in-repo image as this repo's icon. */
+export async function setRepoIcon(
+  path: string,
+  relativePath: string,
+): Promise<string | null> {
+  const dataUrl = await invoke<string | null>("set_repo_icon", { path, relativePath });
+  invalidateRepoIcon(path);
+  primeRepoIcon(path, dataUrl);
+  return dataUrl;
+}
+
+/** Drop the manual override and return to automatic icon detection. */
+export async function clearRepoIcon(path: string): Promise<string | null> {
+  const dataUrl = await invoke<string | null>("clear_repo_icon", { path });
+  invalidateRepoIcon(path);
+  primeRepoIcon(path, dataUrl);
+  return dataUrl;
 }

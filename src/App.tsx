@@ -2563,6 +2563,7 @@ function App() {
           <RepoSettingsDrawer
             open={repoSettingsOpen}
             repoName={snapshot.repo.name}
+            repoPath={snapshot.repo.path}
             remotes={snapshot.remotes}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}

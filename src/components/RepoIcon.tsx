@@ -4,6 +4,7 @@ import {
   invalidateRepoIcon,
   repoIconFallbackColor,
   repoIconInitial,
+  subscribeRepoIcon,
 } from "../lib/repoIcons";
 
 type RepoIconProps = {
@@ -30,6 +31,13 @@ export function RepoIcon({ path, name, size = 16, className = "" }: RepoIconProp
     setDataUrl(undefined);
     void loadIcon(false);
   }, [loadIcon]);
+
+  useEffect(() => {
+    return subscribeRepoIcon(path, () => {
+      retriedRef.current = false;
+      void loadIcon(false);
+    });
+  }, [path, loadIcon]);
 
   function handleImageError() {
     if (retriedRef.current) {

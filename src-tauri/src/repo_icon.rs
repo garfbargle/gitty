@@ -8,9 +8,14 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 const ICON_CACHE_FILE: &str = "repo-icon-cache.json";
-const MAX_ICON_BYTES: u64 = 512 * 1024;
+const ICON_OVERRIDE_FILE: &str = "repo-icon-overrides.json";
+const MAX_ICON_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_SEARCH_DEPTH: usize = 6;
 const MAX_FILES_SCANNED: usize = 2500;
+const MAX_PICKER_IMAGES: usize = 60;
+// Minimum score for the shallow top-level scan to preempt the full tree walk —
+// clears favicon/app-icon/apple-touch names, but not bare "logo"/"icon".
+const TOP_LEVEL_CONFIDENT_SCORE: i32 = 80;
 
 const HTML_ENTRYPOINTS: &[&str] = &["index.html", "public/index.html", "src/index.html"];
 
@@ -77,18 +82,18 @@ struct IconCacheStore {
     entries: HashMap<String, String>,
 }
 
-fn icon_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn config_file(app: &AppHandle, file: &str) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
         .map_err(|err| format!("Could not locate app config directory: {err}"))?;
     fs::create_dir_all(&dir)
         .map_err(|err| format!("Could not create config directory {}: {err}", dir.display()))?;
-    Ok(dir.join(ICON_CACHE_FILE))
+    Ok(dir.join(file))
 }
 
-fn load_icon_cache(app: &AppHandle) -> Result<IconCacheStore, String> {
-    let path = icon_cache_path(app)?;
+fn load_store(app: &AppHandle, file: &str) -> Result<IconCacheStore, String> {
+    let path = config_file(app, file)?;
     if !path.exists() {
         return Ok(IconCacheStore::default());
     }
@@ -98,10 +103,10 @@ fn load_icon_cache(app: &AppHandle) -> Result<IconCacheStore, String> {
     serde_json::from_str(&data).map_err(|err| format!("Could not parse {}: {err}", path.display()))
 }
 
-fn save_icon_cache(app: &AppHandle, cache: &IconCacheStore) -> Result<(), String> {
-    let path = icon_cache_path(app)?;
-    let data = serde_json::to_string_pretty(cache)
-        .map_err(|err| format!("Could not serialize icon cache: {err}"))?;
+fn save_store(app: &AppHandle, file: &str, store: &IconCacheStore) -> Result<(), String> {
+    let path = config_file(app, file)?;
+    let data = serde_json::to_string_pretty(store)
+        .map_err(|err| format!("Could not serialize {file}: {err}"))?;
     fs::write(&path, data).map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
 
@@ -417,11 +422,7 @@ fn walk_for_icon_candidates(
     }
 }
 
-fn search_icons_in_tree(repo_root: &Path) -> Option<String> {
-    let mut candidates = Vec::new();
-    let mut scanned = 0;
-    walk_for_icon_candidates(repo_root, repo_root, Path::new(""), 0, &mut scanned, &mut candidates);
-
+fn best_candidate_entry(mut candidates: Vec<IconCandidate>) -> Option<IconCandidate> {
     candidates.sort_by(|left, right| {
         right
             .score
@@ -430,17 +431,107 @@ fn search_icons_in_tree(repo_root: &Path) -> Option<String> {
             .then_with(|| left.size.cmp(&right.size))
     });
 
-    candidates.into_iter().next().map(|candidate| candidate.relative_path)
+    candidates.into_iter().next()
+}
+
+fn best_candidate(candidates: Vec<IconCandidate>) -> Option<String> {
+    best_candidate_entry(candidates).map(|candidate| candidate.relative_path)
+}
+
+/// Score the icon-named files directly inside a single directory (no recursion).
+fn score_dir_icon_files(dir: &Path, relative: &Path, depth: usize) -> Vec<IconCandidate> {
+    let mut candidates = Vec::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return candidates,
+    };
+
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        let Some(base_score) = score_icon_filename(&name) else {
+            continue;
+        };
+
+        let size = fs::metadata(entry.path()).ok().map(|meta| meta.len()).unwrap_or(0);
+        if size == 0 || size > MAX_ICON_BYTES {
+            continue;
+        }
+
+        let relative_path = if relative.as_os_str().is_empty() {
+            name.to_string()
+        } else {
+            relative.join(name.as_ref()).to_string_lossy().to_string()
+        };
+
+        let depth_penalty = (depth as i32) * 3;
+        let size_penalty = if size > 256 * 1024 { 4 } else { 0 };
+
+        candidates.push(IconCandidate {
+            relative_path,
+            score: base_score - depth_penalty - size_penalty,
+            depth,
+            size,
+        });
+    }
+
+    candidates
+}
+
+/// Fast, shallow scan: the repo root plus each immediate top-level subdirectory
+/// (e.g. `marketing/app-icon.png`). Bounded to two levels so it stays cheap even
+/// on large repos, and runs before the exhaustive tree walk.
+fn search_icons_top_level(repo_root: &Path) -> Option<String> {
+    let mut candidates = score_dir_icon_files(repo_root, Path::new(""), 0);
+
+    if let Ok(entries) = fs::read_dir(repo_root) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            if should_skip_dir(&name) {
+                continue;
+            }
+            candidates.append(&mut score_dir_icon_files(
+                &entry.path(),
+                Path::new(name.as_ref()),
+                1,
+            ));
+        }
+    }
+
+    // Only short-circuit the exhaustive walk when the shallow winner is a
+    // high-confidence name (favicon / app-icon / apple-touch-icon). Generic
+    // "logo"/"icon" names could still be beaten by a stronger match deeper in
+    // the tree, so those fall through to the full walk.
+    best_candidate_entry(candidates)
+        .filter(|candidate| candidate.score >= TOP_LEVEL_CONFIDENT_SCORE)
+        .map(|candidate| candidate.relative_path)
+}
+
+fn search_icons_in_tree(repo_root: &Path) -> Option<String> {
+    let mut candidates = Vec::new();
+    let mut scanned = 0;
+    walk_for_icon_candidates(repo_root, repo_root, Path::new(""), 0, &mut scanned, &mut candidates);
+
+    best_candidate(candidates)
 }
 
 pub fn search_repo_icon(repo_root: &Path) -> Option<String> {
     search_gitty_override(repo_root)
         .or_else(|| search_icons_from_html(repo_root))
+        .or_else(|| search_icons_top_level(repo_root))
         .or_else(|| search_icons_in_tree(repo_root))
 }
 
 fn set_cached_icon(app: &AppHandle, repo_path: &str, relative: Option<&str>) -> Result<(), String> {
-    let mut cache = load_icon_cache(app)?;
+    let mut cache = load_store(app, ICON_CACHE_FILE)?;
     match relative {
         Some(path) => {
             cache.entries.insert(repo_path.to_string(), path.to_string());
@@ -449,7 +540,41 @@ fn set_cached_icon(app: &AppHandle, repo_path: &str, relative: Option<&str>) -> 
             cache.entries.remove(repo_path);
         }
     }
-    save_icon_cache(app, &cache)
+    save_store(app, ICON_CACHE_FILE, &cache)
+}
+
+fn icon_override(app: &AppHandle, repo_path: &str) -> Result<Option<String>, String> {
+    Ok(load_store(app, ICON_OVERRIDE_FILE)?
+        .entries
+        .get(repo_path)
+        .cloned())
+}
+
+/// Pin a specific in-repo image (relative path) as this repo's icon. The choice
+/// is stored in app config, never written into the working tree.
+pub fn set_repo_icon_override(
+    app: &AppHandle,
+    repo_path: &str,
+    relative: &str,
+) -> Result<(), String> {
+    let relative = normalize_icon_href(relative);
+    if read_icon_bytes(Path::new(repo_path), &relative).is_none() {
+        return Err(format!("{relative} is not a readable image in this repository."));
+    }
+
+    let mut store = load_store(app, ICON_OVERRIDE_FILE)?;
+    store.entries.insert(repo_path.to_string(), relative.clone());
+    save_store(app, ICON_OVERRIDE_FILE, &store)?;
+    set_cached_icon(app, repo_path, Some(&relative))
+}
+
+/// Drop a manual override and fall back to automatic detection.
+pub fn clear_repo_icon_override(app: &AppHandle, repo_path: &str) -> Result<(), String> {
+    let mut store = load_store(app, ICON_OVERRIDE_FILE)?;
+    if store.entries.remove(repo_path).is_some() {
+        save_store(app, ICON_OVERRIDE_FILE, &store)?;
+    }
+    warm_repo_icon_cache(app, repo_path)
 }
 
 pub fn warm_repo_icon_cache(app: &AppHandle, repo_path: &str) -> Result<(), String> {
@@ -459,6 +584,10 @@ pub fn warm_repo_icon_cache(app: &AppHandle, repo_path: &str) -> Result<(), Stri
 }
 
 pub fn clear_repo_icon_cache(app: &AppHandle, repo_path: &str) -> Result<(), String> {
+    let mut overrides = load_store(app, ICON_OVERRIDE_FILE)?;
+    if overrides.entries.remove(repo_path).is_some() {
+        save_store(app, ICON_OVERRIDE_FILE, &overrides)?;
+    }
     set_cached_icon(app, repo_path, None)
 }
 
@@ -469,8 +598,15 @@ pub fn resolve_repo_icon(
 ) -> Result<Option<String>, String> {
     let repo_path = repo_root.to_string_lossy().to_string();
 
+    // A manual pick always wins, as long as the file is still there.
+    if let Some(relative) = icon_override(app, &repo_path)? {
+        if let Some(data_url) = read_icon_data_url(repo_root, &relative) {
+            return Ok(Some(data_url));
+        }
+    }
+
     if !force_rescan {
-        if let Some(relative) = load_icon_cache(app)?.entries.get(&repo_path).cloned() {
+        if let Some(relative) = load_store(app, ICON_CACHE_FILE)?.entries.get(&repo_path).cloned() {
             if let Some(data_url) = read_icon_data_url(repo_root, &relative) {
                 return Ok(Some(data_url));
             }
@@ -481,6 +617,107 @@ pub fn resolve_repo_icon(
     set_cached_icon(app, &repo_path, relative.as_deref())?;
 
     Ok(relative.and_then(|path| read_icon_data_url(repo_root, &path)))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoImage {
+    pub relative_path: String,
+    pub data_url: String,
+}
+
+fn walk_for_images(
+    dir: &Path,
+    relative: &Path,
+    depth: usize,
+    scanned: &mut usize,
+    found: &mut Vec<(i32, usize, String)>,
+) {
+    if depth > MAX_SEARCH_DEPTH || *scanned >= MAX_FILES_SCANNED {
+        return;
+    }
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        if *scanned >= MAX_FILES_SCANNED {
+            return;
+        }
+
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+
+        if file_type.is_dir() {
+            if should_skip_dir(&name) {
+                continue;
+            }
+            let next_relative = if relative.as_os_str().is_empty() {
+                PathBuf::from(name.as_ref())
+            } else {
+                relative.join(name.as_ref())
+            };
+            walk_for_images(&entry.path(), &next_relative, depth + 1, scanned, found);
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        *scanned += 1;
+
+        let path = entry.path();
+        if image_mime_type(&path).is_none() {
+            continue;
+        }
+
+        let size = fs::metadata(&path).ok().map(|meta| meta.len()).unwrap_or(0);
+        if size == 0 || size > MAX_ICON_BYTES {
+            continue;
+        }
+
+        let relative_path = if relative.as_os_str().is_empty() {
+            name.to_string()
+        } else {
+            relative.join(name.as_ref()).to_string_lossy().to_string()
+        };
+
+        // Rank icon-shaped names first, then shallower files, so the most
+        // likely picks lead the grid.
+        let score = score_icon_filename(&name).unwrap_or(0) - (depth as i32) * 3;
+        found.push((score, depth, relative_path));
+    }
+}
+
+/// List candidate images inside the repo for the manual icon picker, best-first.
+pub fn list_repo_images(repo_root: &Path) -> Vec<RepoImage> {
+    let mut found = Vec::new();
+    let mut scanned = 0;
+    walk_for_images(repo_root, Path::new(""), 0, &mut scanned, &mut found);
+
+    found.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    found.truncate(MAX_PICKER_IMAGES);
+
+    found
+        .into_iter()
+        .filter_map(|(_, _, relative_path)| {
+            read_icon_data_url(repo_root, &relative_path)
+                .map(|data_url| RepoImage { relative_path, data_url })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -552,6 +789,63 @@ mod tests {
         assert_eq!(
             search_repo_icon(&dir).as_deref(),
             Some("assets/branding/AppIcon.png")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finds_top_level_folder_app_icon() {
+        let _guard = lock_test_dir();
+        let dir = std::env::temp_dir().join(format!("gitty-repo-icon-marketing-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir.join("marketing")).unwrap();
+
+        // A distractor deeper in the tree that should lose to the top-level pick.
+        write_file(&dir.join("src/assets/logo.png"), b"logo");
+        write_file(&dir.join("marketing/app-icon.png"), b"app-icon");
+
+        assert_eq!(
+            search_repo_icon(&dir).as_deref(),
+            Some("marketing/app-icon.png")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finds_large_top_level_app_icon() {
+        let _guard = lock_test_dir();
+        let dir = std::env::temp_dir().join(format!("gitty-repo-icon-large-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir.join("Marketing")).unwrap();
+
+        // ~700KB, larger than the old 512KB cap — must still be picked up.
+        write_file(&dir.join("Marketing/app-icon.png"), &vec![7u8; 700 * 1024]);
+
+        assert_eq!(
+            search_repo_icon(&dir).as_deref(),
+            Some("Marketing/app-icon.png")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn weak_top_level_name_does_not_beat_deeper_favicon() {
+        let _guard = lock_test_dir();
+        let dir = std::env::temp_dir().join(format!("gitty-repo-icon-weak-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir.join("assets/icons")).unwrap();
+
+        write_file(&dir.join("logo.png"), b"logo");
+        write_file(&dir.join("assets/icons/favicon.png"), b"favicon");
+
+        // A bare top-level "logo" is not confident enough to short-circuit the
+        // full walk, so the stronger nested favicon still wins.
+        assert_eq!(
+            search_repo_icon(&dir).as_deref(),
+            Some("assets/icons/favicon.png")
         );
 
         let _ = fs::remove_dir_all(&dir);

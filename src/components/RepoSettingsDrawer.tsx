@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, Plus, Trash2 } from "lucide-react";
+import { Download, ImageOff, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { RemoteEntry } from "../types";
 import { SettingsModal } from "./SettingsModal";
+import { RepoIcon } from "./RepoIcon";
+import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
 
 type RemoteDraft = {
   id: string;
@@ -13,6 +15,7 @@ type RemoteDraft = {
 type RepoSettingsDrawerProps = {
   open: boolean;
   repoName: string;
+  repoPath: string;
   remotes: RemoteEntry[];
   onClose: () => void;
   onSaveRemote: (name: string, url: string) => Promise<boolean>;
@@ -57,9 +60,144 @@ function validDrafts(drafts: RemoteDraft[]) {
   return drafts.filter((draft) => draft.name.trim() && draft.url.trim());
 }
 
+function RepoIconSection({
+  open,
+  repoName,
+  repoPath,
+  disabled,
+}: {
+  open: boolean;
+  repoName: string;
+  repoPath: string;
+  disabled?: boolean;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [images, setImages] = useState<RepoImage[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setPicking(false);
+      setImages(null);
+      setError(null);
+    }
+  }, [open, repoPath]);
+
+  async function togglePicker() {
+    if (picking) {
+      setPicking(false);
+      return;
+    }
+    setPicking(true);
+    setError(null);
+    if (images) return;
+
+    setLoading(true);
+    try {
+      setImages(await listRepoImages(repoPath));
+    } catch (err) {
+      setError(String(err));
+      setImages([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function choose(relativePath: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await setRepoIcon(repoPath, relativePath);
+      setPicking(false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function useAutomatic() {
+    setBusy(true);
+    setError(null);
+    try {
+      await clearRepoIcon(repoPath);
+      setPicking(false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const controlsDisabled = disabled || busy;
+
+  return (
+    <div className="settings-field">
+      <label>Icon</label>
+      <div className="settings-icon-row">
+        <RepoIcon path={repoPath} name={repoName} size={44} className="settings-icon-preview" />
+        <div className="settings-icon-actions">
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={controlsDisabled}
+            onClick={() => void togglePicker()}
+          >
+            {picking ? "Cancel" : "Choose from repo…"}
+          </button>
+          <button
+            type="button"
+            className="settings-inline-link"
+            disabled={controlsDisabled}
+            onClick={() => void useAutomatic()}
+          >
+            <RotateCcw size={12} />
+            Use automatic
+          </button>
+        </div>
+      </div>
+
+      {picking ? (
+        loading ? (
+          <div className="settings-icon-empty">
+            <Loader2 size={16} className="spin" />
+            Scanning repository…
+          </div>
+        ) : images && images.length > 0 ? (
+          <div className="settings-icon-grid">
+            {images.map((image) => (
+              <button
+                type="button"
+                key={image.relativePath}
+                className="settings-icon-choice"
+                title={image.relativePath}
+                disabled={controlsDisabled}
+                onClick={() => void choose(image.relativePath)}
+              >
+                <img src={image.dataUrl} alt="" draggable={false} />
+                <span>{image.relativePath}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="settings-icon-empty">
+            <ImageOff size={16} />
+            No images found in this repository.
+          </div>
+        )
+      ) : null}
+
+      {error ? <p className="settings-field-note error">{error}</p> : null}
+    </div>
+  );
+}
+
 export function RepoSettingsDrawer({
   open,
   repoName,
+  repoPath,
   remotes,
   onClose,
   onSaveRemote,
@@ -194,6 +332,8 @@ export function RepoSettingsDrawer({
         </>
       }
     >
+      <RepoIconSection open={open} repoName={repoName} repoPath={repoPath} disabled={disabled} />
+
       <div className="settings-field">
         <div className="settings-field-head">
           <label>Remote URL</label>

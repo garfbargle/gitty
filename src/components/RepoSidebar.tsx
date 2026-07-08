@@ -127,7 +127,7 @@ export const RepoSidebar = memo(function RepoSidebar({
               type="button"
               onClick={() => handleSelect(repo.path)}
             >
-              <RepoIcon path={repo.path} name={repo.name} size={18} className="repo-icon" />
+              <RepoIcon path={repo.path} name={repo.name} size={30} className="repo-icon" />
               <div className="repo-text">
                 <span className="repo-name-row">
                   <span className="repo-name">{repo.name}</span>
