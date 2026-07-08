@@ -2652,6 +2652,37 @@ button.context-chip.sibling:disabled {
   color: var(--text-muted);
 }
 
+/* Inline line editing */
+.diff-text-slot {
+  display: block;
+  min-width: 0;
+}
+
+.diff-line.editable .diff-text-slot {
+  cursor: text;
+}
+
+.diff-line.editable:hover .diff-text-slot {
+  box-shadow: inset 2px 0 0 var(--accent, currentColor);
+}
+
+.diff-edit-input {
+  background: var(--surface, transparent);
+  border: 1px solid var(--accent, var(--text-muted));
+  border-radius: 3px;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin: 0;
+  min-width: 0;
+  padding: 0 6px 0 0;
+  width: 100%;
+}
+
+.diff-edit-input:focus {
+  outline: none;
+}
+
 .syn-kw {
   color: var(--syn-kw);
 }

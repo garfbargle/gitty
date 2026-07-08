@@ -7,6 +7,7 @@ import {
   serializeHunkPatch,
   type DiffFileBundle,
   type DiffHunkScope,
+  type DiffLine,
   type ScopedDiffHunk,
 } from "../lib/diff";
 import { type FileImagePreview, isImagePath } from "../lib/images";
@@ -35,6 +36,7 @@ type DiffViewerProps = {
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
   onDiscardHunk?: (filePath: string, patch: string) => void;
+  onEditLine?: (filePath: string, newLine: number, expected: string, text: string) => void;
 };
 
 function HighlightedLine({ text }: { text: string }) {
@@ -54,22 +56,108 @@ function HighlightedLine({ text }: { text: string }) {
   );
 }
 
+function DiffLineRow({
+  line,
+  filePath,
+  editable,
+  disabled,
+  onEditLine,
+}: {
+  line: DiffLine;
+  filePath: string;
+  editable?: boolean;
+  disabled?: boolean;
+  onEditLine?: (filePath: string, newLine: number, expected: string, text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(line.text);
+
+  const canEdit =
+    !!editable &&
+    !disabled &&
+    !!onEditLine &&
+    (line.kind === "add" || line.kind === "context") &&
+    line.newLine != null;
+
+  function startEditing() {
+    if (!canEdit) return;
+    setValue(line.text);
+    setEditing(true);
+  }
+
+  function commit() {
+    setEditing(false);
+    if (value !== line.text && line.newLine != null) {
+      onEditLine?.(filePath, line.newLine, line.text, value);
+    }
+  }
+
+  const isBody =
+    line.kind === "context" || line.kind === "add" || line.kind === "remove";
+
+  return (
+    <div className={`diff-line ${line.kind}${canEdit ? " editable" : ""}`}>
+      <span className="diff-gutter old">{line.kind === "add" ? "" : (line.oldLine ?? "")}</span>
+      <span className="diff-gutter new">{line.kind === "remove" ? "" : (line.newLine ?? "")}</span>
+      <span className="diff-sign">
+        {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
+      </span>
+      {editing ? (
+        <input
+          className="diff-edit-input"
+          value={value}
+          autoFocus
+          spellCheck={false}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopPropagation();
+              commit();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setValue(line.text);
+              setEditing(false);
+            }
+          }}
+        />
+      ) : isBody ? (
+        <span
+          className="diff-text-slot"
+          onClick={canEdit ? startEditing : undefined}
+          title={canEdit ? "Click to edit this line" : undefined}
+        >
+          <HighlightedLine text={line.text || " "} />
+        </span>
+      ) : (
+        <code className="diff-text meta">{line.text}</code>
+      )}
+    </div>
+  );
+}
+
 function DiffHunkView({
   scopedHunk,
   filePath,
   showActions,
+  editable,
   disabled,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onEditLine,
 }: {
   scopedHunk: ScopedDiffHunk;
   filePath: string;
   showActions?: boolean;
+  editable?: boolean;
   disabled?: boolean;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
   onDiscardHunk?: (filePath: string, patch: string) => void;
+  onEditLine?: (filePath: string, newLine: number, expected: string, text: string) => void;
 }) {
   const { hunk, scope, file } = scopedHunk;
   const canStage = showActions && scope === "unstaged" && onStageHunk;
@@ -138,18 +226,14 @@ function DiffHunkView({
       ) : null}
       <div className="diff-lines">
         {hunk.lines.map((line, lineIndex) => (
-          <div className={`diff-line ${line.kind}`} key={`${line.kind}-${lineIndex}`}>
-            <span className="diff-gutter old">{line.kind === "add" ? "" : (line.oldLine ?? "")}</span>
-            <span className="diff-gutter new">{line.kind === "remove" ? "" : (line.newLine ?? "")}</span>
-            <span className="diff-sign">
-              {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
-            </span>
-            {line.kind === "context" || line.kind === "add" || line.kind === "remove" ? (
-              <HighlightedLine text={line.text || " "} />
-            ) : (
-              <code className="diff-text meta">{line.text}</code>
-            )}
-          </div>
+          <DiffLineRow
+            line={line}
+            filePath={filePath}
+            editable={editable && scope === "unstaged"}
+            disabled={disabled}
+            onEditLine={onEditLine}
+            key={`${line.kind}-${lineIndex}`}
+          />
         ))}
       </div>
     </div>
@@ -165,12 +249,14 @@ function DiffFileSection({
   commit,
   showWorkingTreeBadges,
   showHunkActions,
+  editable,
   showHeader = true,
   disabled,
   onUnstage,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onEditLine,
 }: {
   bundle: DiffFileBundle;
   fileChange?: FileChange;
@@ -181,11 +267,13 @@ function DiffFileSection({
   commit?: string;
   showWorkingTreeBadges?: boolean;
   showHunkActions?: boolean;
+  editable?: boolean;
   disabled?: boolean;
   onUnstage?: (path: string) => void;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
   onDiscardHunk?: (filePath: string, patch: string) => void;
+  onEditLine?: (filePath: string, newLine: number, expected: string, text: string) => void;
 }) {
   const [imagePreview, setImagePreview] = useState<FileImagePreview | null>(null);
   const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
@@ -299,10 +387,12 @@ function DiffFileSection({
             scopedHunk={scopedHunk}
             filePath={filePath}
             showActions={showHunkActions}
+            editable={editable}
             disabled={disabled}
             onStageHunk={onStageHunk}
             onUnstageHunk={onUnstageHunk}
             onDiscardHunk={onDiscardHunk}
+            onEditLine={onEditLine}
             key={`${scopedHunk.scope}-${scopedHunk.hunk.header}-${index}`}
           />
         ))
@@ -336,6 +426,7 @@ export function DiffViewer({
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
+  onEditLine,
 }: DiffViewerProps) {
   const bundles = useMemo(
     () => diffBundles ?? (raw.trim() ? bundlesFromRaw(raw) : []),
@@ -345,6 +436,9 @@ export function DiffViewer({
     showWorkingTreeBadges &&
     !commit &&
     !!(onStageHunk || onUnstageHunk || onDiscardHunk);
+  // Inline editing works on real working-tree files, so only in the working-tree
+  // view (never a historical commit) and only when a save handler is wired in.
+  const editable = showWorkingTreeBadges && !commit && !!onEditLine;
 
   const metaByPath = useMemo(() => {
     const map = new Map<string, DiffSelectionEntry>();
@@ -443,12 +537,14 @@ export function DiffViewer({
               commit={commit}
               showWorkingTreeBadges={showWorkingTreeBadges}
               showHunkActions={showHunkActions}
+              editable={editable}
               showHeader={multiFile}
               disabled={disabled}
               onUnstage={onUnstage}
               onStageHunk={onStageHunk}
               onUnstageHunk={onUnstageHunk}
               onDiscardHunk={onDiscardHunk}
+              onEditLine={onEditLine}
               key={bundle.path}
             />
           );

@@ -2550,6 +2550,42 @@ fn conflict_sides(path: String, file: String) -> Result<ConflictSides, String> {
     })
 }
 
+/// Reads a working-tree file as text so the changes view can edit it inline.
+#[tauri::command]
+fn read_working_file(path: String, file_path: String) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("A file path is required.".to_string());
+    }
+    let full = repo_path.join(&file_path);
+    fs::read_to_string(&full).map_err(|err| format!("Could not read {}: {err}", full.display()))
+}
+
+/// Writes new contents to a working-tree file. Does not stage — the edit stays
+/// in the working tree so the user keeps control of staging.
+#[tauri::command]
+fn write_working_file(
+    path: String,
+    file_path: String,
+    content: String,
+) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let file_path = file_path.trim().to_string();
+    if file_path.is_empty() {
+        return Err("A file path is required.".to_string());
+    }
+    let full = repo_path.join(&file_path);
+    fs::write(&full, content)
+        .map_err(|err| format!("Could not write {}: {err}", full.display()))?;
+    Ok(ActionResult {
+        message: format!("Saved {file_path}."),
+        output: String::new(),
+    })
+}
+
 /// Writes a manually-resolved file and stages it.
 #[tauri::command]
 fn resolve_conflict_manual(
@@ -3892,6 +3928,8 @@ pub fn run() {
             abort_merge,
             resolve_conflict,
             resolve_conflict_manual,
+            read_working_file,
+            write_working_file,
             conflict_sides,
             complete_merge,
             stage_files,

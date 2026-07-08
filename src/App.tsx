@@ -45,6 +45,7 @@ import type {
   ConflictSides,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
+import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
 import {
@@ -311,6 +312,13 @@ function App() {
   const changesListRef = useRef<ChangesListHandle>(null);
   const selectionPreserveRef = useRef(0);
   const loadDiffRequestRef = useRef(0);
+  // Undo/redo stack for inline line edits. Each entry snapshots a file's whole
+  // contents before and after one edit so undo/redo can rewrite it exactly,
+  // even after the diff view has been rebuilt.
+  const editHistoryRef = useRef<{
+    past: { filePath: string; before: string; after: string }[];
+    future: { filePath: string; before: string; after: string }[];
+  }>({ past: [], future: [] });
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
   const workingTreeRefreshInFlightRef = useRef(false);
@@ -604,6 +612,7 @@ function App() {
 
   function applyRepoSwitchCleanup() {
     snapshotGenerationRef.current += 1;
+    clearEditHistory();
     setViewingCommit(null);
     setViewingCommitMessage("");
     setCommitFiles([]);
@@ -1099,6 +1108,102 @@ function App() {
       );
       if (!result) return;
       await reconcileWorkingSelection([filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
+  }
+
+  function clearEditHistory() {
+    editHistoryRef.current = { past: [], future: [] };
+  }
+
+  // Applies an inline single-line edit: reads the file, guards that the line we
+  // edited still matches, writes just that line back, and records the change so
+  // it can be undone. Re-diffs afterward so line numbers stay consistent.
+  async function commitLineEdit(
+    filePath: string,
+    newLine: number,
+    expected: string,
+    text: string,
+  ) {
+    if (!selectedPath || text === expected) return;
+    beginSelectionPreserve();
+    try {
+      const before = await run(() =>
+        invoke<string>("read_working_file", { path: selectedPath, filePath }),
+      );
+      if (before == null) return;
+      if (getLine(before, newLine) !== expected) {
+        setError("This file changed on disk — refreshed without saving your edit.");
+        await reconcileWorkingSelection([filePath]);
+        return;
+      }
+      let after: string;
+      try {
+        after = replaceLine(before, newLine, text);
+      } catch (err) {
+        setError(String(err));
+        return;
+      }
+      const result = await run(() =>
+        invoke<ActionResult>("write_working_file", {
+          path: selectedPath,
+          filePath,
+          content: after,
+        }),
+      );
+      if (!result) return;
+      editHistoryRef.current.past.push({ filePath, before, after });
+      editHistoryRef.current.future = [];
+      await reconcileWorkingSelection([filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
+  }
+
+  async function undoEdit() {
+    if (!selectedPath) return;
+    const entry = editHistoryRef.current.past.pop();
+    if (!entry) return;
+    beginSelectionPreserve();
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("write_working_file", {
+          path: selectedPath,
+          filePath: entry.filePath,
+          content: entry.before,
+        }),
+      );
+      if (!result) {
+        editHistoryRef.current.past.push(entry);
+        return;
+      }
+      editHistoryRef.current.future.push(entry);
+      await reconcileWorkingSelection([entry.filePath]);
+    } finally {
+      endSelectionPreserve();
+    }
+  }
+
+  async function redoEdit() {
+    if (!selectedPath) return;
+    const entry = editHistoryRef.current.future.pop();
+    if (!entry) return;
+    beginSelectionPreserve();
+    try {
+      const result = await run(() =>
+        invoke<ActionResult>("write_working_file", {
+          path: selectedPath,
+          filePath: entry.filePath,
+          content: entry.after,
+        }),
+      );
+      if (!result) {
+        editHistoryRef.current.future.push(entry);
+        return;
+      }
+      editHistoryRef.current.past.push(entry);
+      await reconcileWorkingSelection([entry.filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1613,6 +1718,7 @@ function App() {
       setAmend(false);
       setChangeSummaryVisible(false);
       resetSummaryCache();
+      clearEditHistory();
       const snap = await refreshRepo();
       if (pushOnCommit && snap && snap.remotes.length > 0) {
         await push(false);
@@ -2093,6 +2199,25 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggleSidebar]);
 
+  // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z redo for inline line edits. While a line's
+  // input is focused, shouldIgnoreKeyboardNavigation bails so the browser's own
+  // text undo runs; once the edit is committed and focus leaves, this takes over.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() !== "z") return;
+      if (shouldIgnoreKeyboardNavigation(event)) return;
+      if (!workingTreeActive || viewingCommit || loading) return;
+      event.preventDefault();
+      if (event.shiftKey) void redoEdit();
+      else void undoEdit();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingTreeActive, viewingCommit, loading, selectedPath]);
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
@@ -2456,6 +2581,9 @@ function App() {
                           onStageHunk={(filePath, patch) => void stageHunk(filePath, patch)}
                           onUnstageHunk={(filePath, patch) => void unstageHunk(filePath, patch)}
                           onDiscardHunk={(filePath, patch) => void discardHunk(filePath, patch)}
+                          onEditLine={(filePath, newLine, expected, text) =>
+                            void commitLineEdit(filePath, newLine, expected, text)
+                          }
                         />
                       }
                     />
