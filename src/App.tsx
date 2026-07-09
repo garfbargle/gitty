@@ -230,6 +230,9 @@ function App() {
   const [workspaceSplit, setWorkspaceSplit] = useState(0.3);
   const [loading, setLoading] = useState(false);
   const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
+  // Set when a normal push is rejected as non-fast-forward, so the push button
+  // surfaces the force-push affordance even without a fresh fetch.
+  const [pushRejected, setPushRejected] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
@@ -629,6 +632,7 @@ function App() {
     setResolvedFiles([]);
     setSelectedConflict(null);
     setConflictSides(null);
+    setPushRejected(false);
   }
 
   async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
@@ -1877,9 +1881,22 @@ function App() {
     }
   }
 
-  async function push(force: boolean): Promise<boolean> {
+  async function push(force: boolean, hard = false): Promise<boolean> {
     if (!selectedPath || pushLockRef.current || pushPhase !== "idle") return false;
-    if (force && !window.confirm("Force push with --force-with-lease?")) return false;
+    if (hard) {
+      if (
+        !window.confirm(
+          "Overwrite the remote with your local branch?\n\n" +
+            "This runs `git push --force` and permanently discards any commits on the " +
+            "remote that you don't have locally. Use this only when a normal force push " +
+            "was rejected as “stale info” and you're sure you want your version to win.",
+        )
+      ) {
+        return false;
+      }
+    } else if (force && !window.confirm("Force push with --force-with-lease?")) {
+      return false;
+    }
 
     pushLockRef.current = true;
     setPushPhase("pushing");
@@ -1888,8 +1905,9 @@ function App() {
     await waitForPaint();
 
     try {
-      const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force });
+      const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force, hard });
       setMessage([result.message, result.output].filter(Boolean).join("\n"));
+      setPushRejected(false);
       const snap = await refreshRepoQuiet(selectedPath);
       const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
       if (remaining === 0) {
@@ -1910,7 +1928,14 @@ function App() {
       }
       return true;
     } catch (err) {
-      setError(String(err));
+      const errText = String(err);
+      setError(errText);
+      // A non-fast-forward / stale-info rejection means the remote moved under us.
+      // Surface the force-push affordances even though our cached `behind` count
+      // may still be 0. (A hard `--force` already overwrites, so nothing to add.)
+      if (!hard && /non-fast-forward|\[rejected\]|fetch first|stale info|failed to push some refs/i.test(errText)) {
+        setPushRejected(true);
+      }
       setPushPhase("idle");
       await refreshRepoQuiet(selectedPath);
       return false;
@@ -2361,6 +2386,7 @@ function App() {
               behind={displaySnapshot.behind}
               unpushedTags={displaySnapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
+              forceSuggested={pushRejected}
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
@@ -2371,6 +2397,7 @@ function App() {
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
+              onOverwrite={() => push(true, true)}
               onSetupRemote={() => openRepoSettings()}
             />
 

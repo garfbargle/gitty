@@ -3519,7 +3519,7 @@ fn push_tags(repo_path: &Path, remote: &str, tags: &[String]) -> Result<String, 
     git_owned(repo_path, args)
 }
 
-fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String> {
+fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let branch = current_branch(repo_path);
@@ -3527,11 +3527,18 @@ fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String>
     let remote = default_remote_name(repo_path);
     let mut outputs = Vec::new();
     let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
-    let branch_pushed = ahead > 0 || (force && behind > 0);
+    let forcing = force || hard;
+    let branch_pushed = ahead > 0 || (forcing && behind > 0);
 
     if branch_pushed {
         let mut args = vec!["push".to_string()];
-        if force {
+        // `hard` is the unconditional overwrite (`--force`); `force` is the safe
+        // lease. Prefer the lease unless the caller explicitly asked for the
+        // hard overwrite — needed when the remote-tracking ref is stale and the
+        // lease can't be satisfied ("stale info").
+        if hard {
+            args.push("--force".to_string());
+        } else if force {
             args.push("--force-with-lease".to_string());
         }
 
@@ -3561,6 +3568,7 @@ fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String>
 
     let tag_count = tags_to_push.len();
     let message = match (branch_pushed, tag_count) {
+        (true, 0) if hard => "Force push completed (--force, remote overwritten).".to_string(),
         (true, 0) if force => "Force push completed with --force-with-lease.".to_string(),
         (true, 0) => "Push completed.".to_string(),
         (true, 1) => "Push completed (1 tag pushed).".to_string(),
@@ -3576,8 +3584,8 @@ fn push_repo_blocking(path: String, force: bool) -> Result<ActionResult, String>
 }
 
 #[tauri::command]
-async fn push_repo(path: String, force: bool) -> Result<ActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(path, force))
+async fn push_repo(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(path, force, hard))
         .await
         .map_err(|err| format!("Push task failed: {err}"))?
 }

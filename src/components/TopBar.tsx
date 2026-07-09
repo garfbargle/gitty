@@ -26,6 +26,7 @@ type TopBarProps = {
   behind?: number;
   unpushedTags?: number;
   hasRemotes?: boolean;
+  forceSuggested?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onReturnToWorkingTree: () => void;
@@ -33,6 +34,7 @@ type TopBarProps = {
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
+  onOverwrite?: () => Promise<boolean>;
   onSetupRemote?: () => void;
   onOpenRepoSettings?: () => void;
   sidebarVisible?: boolean;
@@ -53,6 +55,7 @@ export function TopBar({
   behind = 0,
   unpushedTags = 0,
   hasRemotes = false,
+  forceSuggested = false,
   onRepoChange,
   onBranchChange,
   onReturnToWorkingTree,
@@ -60,6 +63,7 @@ export function TopBar({
   onRefresh,
   onPush,
   onForcePush,
+  onOverwrite,
   onSetupRemote,
   onOpenRepoSettings,
   sidebarVisible = true,
@@ -146,16 +150,18 @@ export function TopBar({
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>
-        {onPush && onForcePush && !repoSwitching ? (
+        {onPush && onForcePush && onOverwrite && !repoSwitching ? (
           <PushButton
             ahead={ahead}
             behind={behind}
             unpushedTags={unpushedTags}
             hasRemotes={hasRemotes}
+            forceSuggested={forceSuggested}
             pushPhase={pushPhase}
             loading={loading}
             onPush={onPush}
             onForcePush={onForcePush}
+            onOverwrite={onOverwrite}
           />
         ) : null}
         {!hasRemotes && onSetupRemote ? (

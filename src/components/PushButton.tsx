@@ -8,11 +8,15 @@ type PushButtonProps = {
   behind: number;
   unpushedTags?: number;
   hasRemotes: boolean;
+  /** Force force-push affordances on even when `behind` is 0 — e.g. after a push was rejected as non-fast-forward. */
+  forceSuggested?: boolean;
   pushPhase?: PushPhase;
   loading?: boolean;
   disabled?: boolean;
   onPush: () => Promise<boolean>;
   onForcePush: () => Promise<boolean>;
+  /** Hard `git push --force` — overwrites the remote unconditionally, for when the lease is stale. */
+  onOverwrite: () => Promise<boolean>;
 };
 
 export function PushButton({
@@ -20,11 +24,13 @@ export function PushButton({
   behind,
   unpushedTags = 0,
   hasRemotes,
+  forceSuggested = false,
   pushPhase = "idle",
   loading,
   disabled,
   onPush,
   onForcePush,
+  onOverwrite,
 }: PushButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -32,7 +38,7 @@ export function PushButton({
 
   const pushCount = ahead + unpushedTags;
   const visible = hasRemotes && (pushCount > 0 || pushPhase === "pushing" || pushPhase === "done");
-  const suggestsForcePush = behind > 0;
+  const suggestsForcePush = behind > 0 || forceSuggested;
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
   const showBadge = pushPhase === "pushing" || (pushPhase === "idle" && pushCount > 0);
@@ -74,6 +80,16 @@ export function PushButton({
 
   const badgeCount = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
 
+  // Right-click anywhere on the button opens the push menu so force push is
+  // always reachable — even when we haven't detected divergence (e.g. the
+  // ahead/behind counts are stale). It's a deliberate two-step: open, then
+  // choose "Force push" (which still asks for confirmation).
+  function handleContextMenu(event: React.MouseEvent) {
+    event.preventDefault();
+    if (isLocked) return;
+    setOpen(true);
+  }
+
   function pushTitle() {
     if (pushPhase === "pushing") return "Push in progress…";
     if (pushPhase === "done") return "Push completed";
@@ -87,10 +103,14 @@ export function PushButton({
     }
     const summary = parts.length > 0 ? parts.join(" and ") : "changes";
 
-    if (suggestsForcePush) {
-      return `Push ${summary} — remote has ${behind} newer commit${behind === 1 ? "" : "s"}`;
+    const forceHint = "  •  right-click for push options";
+    if (behind > 0) {
+      return `Push ${summary} — remote has ${behind} newer commit${behind === 1 ? "" : "s"}${forceHint}`;
     }
-    return `Push ${summary}`;
+    if (suggestsForcePush) {
+      return `Push ${summary} — remote rejected the last push${forceHint}`;
+    }
+    return `Push ${summary}${forceHint}`;
   }
 
   return (
@@ -98,6 +118,7 @@ export function PushButton({
       className={`push-btn-group${suggestsForcePush ? " diverged" : ""}${open ? " open" : ""}${pushPhase !== "idle" ? ` ${pushPhase}` : ""}`}
       ref={rootRef}
       aria-live="polite"
+      onContextMenu={handleContextMenu}
     >
       {showBadge ? (
         <span className="push-btn-badge" aria-hidden="true">
@@ -132,50 +153,63 @@ export function PushButton({
       </button>
 
       {suggestsForcePush ? (
-        <>
+        <button
+          type="button"
+          className="push-btn-chevron"
+          title="Push options"
+          disabled={isLocked}
+          aria-expanded={open}
+          aria-haspopup="menu"
+          onClick={() => setOpen((current) => !current)}
+        >
+          <ChevronDown size={14} />
+        </button>
+      ) : null}
+
+      {open ? (
+        <div className="push-btn-menu" role="menu">
           <button
             type="button"
-            className="push-btn-chevron"
-            title="Push options"
+            role="menuitem"
+            className="push-btn-menu-item"
             disabled={isLocked}
-            aria-expanded={open}
-            aria-haspopup="menu"
-            onClick={() => setOpen((current) => !current)}
+            onClick={() => {
+              setOpen(false);
+              void onPush();
+            }}
           >
-            <ChevronDown size={14} />
+            <Upload size={14} />
+            <span>Push</span>
           </button>
-          {open ? (
-            <div className="push-btn-menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                className="push-btn-menu-item"
-                disabled={isLocked}
-                onClick={() => {
-                  setOpen(false);
-                  void onPush();
-                }}
-              >
-                <Upload size={14} />
-                <span>Push</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="push-btn-menu-item danger"
-                disabled={isLocked}
-                onClick={() => {
-                  setOpen(false);
-                  void onForcePush();
-                }}
-              >
-                <AlertTriangle size={14} />
-                <span>Force push</span>
-                <small>--force-with-lease</small>
-              </button>
-            </div>
-          ) : null}
-        </>
+          <button
+            type="button"
+            role="menuitem"
+            className="push-btn-menu-item danger"
+            disabled={isLocked}
+            onClick={() => {
+              setOpen(false);
+              void onForcePush();
+            }}
+          >
+            <AlertTriangle size={14} />
+            <span>Force push</span>
+            <small>--force-with-lease</small>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="push-btn-menu-item danger"
+            disabled={isLocked}
+            onClick={() => {
+              setOpen(false);
+              void onOverwrite();
+            }}
+          >
+            <AlertTriangle size={14} />
+            <span>Overwrite remote</span>
+            <small>--force</small>
+          </button>
+        </div>
       ) : null}
     </div>
   );
