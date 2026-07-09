@@ -6,6 +6,10 @@ No Electron bloat. No background polling. No embedded Git library. Gitty calls y
 
 ![Gitty's Changes view — staged and unstaged files, a syntax-highlighted diff, and the commit panel with a free AI commit summary](docs/changes.png)
 
+Gitty follows your system appearance, with a first-class dark theme:
+
+![Gitty in dark mode — the Changes view with a syntax-highlighted diff and the commit panel](docs/dark_mode.png)
+
 ## Why Gitty
 
 - **Keyboard-first** — The whole workflow is built around keybinds. Stage everything, write a message, commit, and push without touching the mouse.
