@@ -50,6 +50,10 @@ type HistoryTimelineProps = {
   integrationBusy?: boolean;
   onUpdateFromMain?: () => void;
   onMergeIntoMain?: () => void;
+  /// Pull the branch's upstream (the "origin/… ↓N" lane) — the same action as
+  /// the toolbar Pull button, offered where the user is looking at the gap.
+  onPullUpstream?: () => void;
+  pullBusy?: boolean;
   /// A live integration op, drawn as a preview node on the track.
   integrationPreview?: {
     kind: "update" | "merge";
@@ -83,6 +87,8 @@ export function HistoryTimeline({
   integrationBusy,
   onUpdateFromMain,
   onMergeIntoMain,
+  onPullUpstream,
+  pullBusy,
   integrationPreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -468,11 +474,11 @@ export function HistoryTimeline({
         {renderSiblingChip()}
         {contextLanes.map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
-          return (
-            <div
-              className={`context-chip${lane.behind > 0 ? " behind" : ""}`}
-              key={`chip-${lane.kind}-${lane.refName}`}
-            >
+          // The upstream lane, when behind, doubles as a Pull affordance: click
+          // the "origin/… ↓N" chip to catch up, right where the gap is shown.
+          const pullable = lane.kind === "upstream" && lane.behind > 0 && !!onPullUpstream;
+          const chipBody = (
+            <>
               <GitBranch size={12} aria-hidden />
               <span className="chip-ref">{lane.refName}</span>
               {inSync ? (
@@ -493,6 +499,25 @@ export function HistoryTimeline({
                   ) : null}
                 </>
               )}
+            </>
+          );
+          return pullable ? (
+            <button
+              type="button"
+              className={`context-chip behind pullable${pullBusy ? " busy" : ""}`}
+              key={`chip-${lane.kind}-${lane.refName}`}
+              title={`Pull ${lane.behind} commit${lane.behind === 1 ? "" : "s"} from ${lane.refName}`}
+              disabled={pullBusy}
+              onClick={onPullUpstream}
+            >
+              {chipBody}
+            </button>
+          ) : (
+            <div
+              className={`context-chip${lane.behind > 0 ? " behind" : ""}`}
+              key={`chip-${lane.kind}-${lane.refName}`}
+            >
+              {chipBody}
             </div>
           );
         })}

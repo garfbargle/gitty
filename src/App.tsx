@@ -23,6 +23,7 @@ import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialo
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
+import type { PullPhase } from "./components/PullButton";
 import type { PushPhase } from "./components/PushButton";
 import type {
   ActionResult,
@@ -235,6 +236,7 @@ function App() {
   const [workspaceSplit, setWorkspaceSplit] = useState(0.3);
   const [loading, setLoading] = useState(false);
   const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
+  const [pullPhase, setPullPhase] = useState<PullPhase>("idle");
   // Set when a normal push is rejected as non-fast-forward, so the push button
   // surfaces the force-push affordance even without a fresh fetch.
   const [pushRejected, setPushRejected] = useState(false);
@@ -329,6 +331,8 @@ function App() {
   }>({ past: [], future: [] });
   const pushLockRef = useRef(false);
   const pushDoneTimerRef = useRef<number | null>(null);
+  const pullLockRef = useRef(false);
+  const pullDoneTimerRef = useRef<number | null>(null);
   const workingTreeRefreshInFlightRef = useRef(false);
   const focusRefreshTimerRef = useRef<number | null>(null);
   const lastFocusRefreshAtRef = useRef(0);
@@ -1954,6 +1958,61 @@ function App() {
   const pushRef = useRef(push);
   pushRef.current = push;
 
+  // Bring the current branch up to date with its upstream. A purely-behind branch
+  // fast-forwards; a diverged branch rebases (or merges, when `merge`), routing any
+  // conflicts into the same resolver used for update-from-main.
+  async function pull(merge = false): Promise<boolean> {
+    if (!selectedPath || !snapshot || snapshot.repo.path !== selectedPath) return false;
+    if (pullLockRef.current || pullPhase !== "idle" || integrationOp) return false;
+
+    pullLockRef.current = true;
+    setPullPhase("pulling");
+    setError("");
+    setMessage("");
+    await waitForPaint();
+
+    const branch = snapshot.branch;
+    const upstreamRef = snapshot.upstream ?? "the remote";
+    try {
+      const outcome = await invoke<UpdateOutcome>("pull_repo", { path: selectedPath, merge });
+      if (outcome.status === "conflicts") {
+        // Rebase conflicts resolve in the main checkout (kind "update"); a merge
+        // pull commits a merge (kind "merge") — both drive the shared resolver.
+        setPullPhase("idle");
+        await refreshRepoQuiet(selectedPath);
+        enterConflicts(
+          merge
+            ? { kind: "merge", onto: upstreamRef, branch, phase: "conflicts" }
+            : { kind: "update", onto: upstreamRef, branch, phase: "conflicts" },
+          outcome.conflictFiles,
+        );
+        return false;
+      }
+
+      setMessage([outcome.message, outcome.output].filter(Boolean).join("\n"));
+      const snap = await refreshRepoQuiet(selectedPath);
+      if (snap) await selectWorkingTree({ snapshot: snap });
+      if ((snap?.behind ?? 0) === 0) {
+        setPullPhase("done");
+        if (pullDoneTimerRef.current !== null) window.clearTimeout(pullDoneTimerRef.current);
+        pullDoneTimerRef.current = window.setTimeout(() => {
+          setPullPhase("idle");
+          pullDoneTimerRef.current = null;
+        }, 1600);
+      } else {
+        setPullPhase("idle");
+      }
+      return true;
+    } catch (err) {
+      setError(String(err));
+      setPullPhase("idle");
+      await refreshRepoQuiet(selectedPath);
+      return false;
+    } finally {
+      pullLockRef.current = false;
+    }
+  }
+
   const stageAllRef = useRef(async () => {});
   stageAllRef.current = async () => {
     if (!selectedPath || !snapshot || snapshot.repo.path !== selectedPath) return;
@@ -2412,10 +2471,12 @@ function App() {
               changeCount={displaySnapshot.changes.length}
               loading={loading}
               pushPhase={pushPhase}
+              pullPhase={pullPhase}
               ahead={displaySnapshot.ahead}
               behind={displaySnapshot.behind}
               unpushedTags={displaySnapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
+              hasUpstream={!!displaySnapshot.upstream}
               branchUnpublished={displaySnapshot.branchUnpublished ?? false}
               forceSuggested={pushRejected}
               sidebarVisible={sidebarVisible}
@@ -2429,6 +2490,8 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
+              onPull={() => pull(false)}
+              onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
             />
 
@@ -2449,6 +2512,8 @@ function App() {
                   integrationBusy={integrationRunning}
                   onUpdateFromMain={() => void updateFromMain()}
                   onMergeIntoMain={() => void mergeIntoMain()}
+                  onPullUpstream={!integrationOp ? () => void pull(false) : undefined}
+                  pullBusy={pullPhase !== "idle"}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}

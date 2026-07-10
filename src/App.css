@@ -1718,6 +1718,166 @@ button:focus-visible {
   background: var(--danger-soft);
 }
 
+/* Pull — the mirror of Push. A neutral "receive" blue so send (green) and
+   receive (blue) read as distinct directions at a glance. */
+.pull-btn-group {
+  display: inline-flex;
+  position: relative;
+}
+
+.pull-btn-badge {
+  align-items: center;
+  background: var(--accent);
+  border: 2px solid var(--bg-panel);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  left: -7px;
+  line-height: 1;
+  min-width: 18px;
+  padding: 2px 5px;
+  pointer-events: none;
+  position: absolute;
+  top: -7px;
+  z-index: 2;
+}
+
+.pull-btn-main,
+.pull-btn-chevron {
+  align-items: center;
+  background: var(--accent);
+  border: 1px solid var(--accent-hover);
+  color: #fff;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 32px;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.pull-btn-main {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  padding: 0 12px;
+}
+
+.pull-btn-chevron {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+}
+
+.pull-btn-group:not(.diverged) .pull-btn-main {
+  border-radius: var(--radius-sm);
+}
+
+.pull-btn-main:hover:not(:disabled),
+.pull-btn-chevron:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.pull-btn-main:active:not(:disabled),
+.pull-btn-chevron:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pull-btn-main:disabled,
+.pull-btn-chevron:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+  opacity: 0.65;
+}
+
+/* Diverged: a rebase-or-merge decision is coming, so warn with an amber tint. */
+.pull-btn-group.diverged .pull-btn-main,
+.pull-btn-group.diverged .pull-btn-chevron {
+  background: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 70%, #000);
+  color: #3b2500;
+}
+
+.pull-btn-group.diverged .pull-btn-chevron {
+  border-left-color: color-mix(in srgb, var(--warning) 55%, #000);
+}
+
+.pull-btn-group.diverged .pull-btn-badge {
+  background: #7c2d12;
+  color: #fff;
+}
+
+.pull-btn-group.pulling .pull-btn-main,
+.pull-btn-group.pulling .pull-btn-chevron {
+  animation: push-active-pulse 1.2s ease-in-out infinite;
+  cursor: wait;
+  filter: none;
+  opacity: 1;
+}
+
+.pull-btn-group.pulling .pull-btn-main {
+  min-width: 112px;
+}
+
+.pull-btn-group.done .pull-btn-main,
+.pull-btn-group.done .pull-btn-chevron {
+  animation: push-done-pop 0.35s ease-out;
+  cursor: default;
+  filter: none;
+  opacity: 1;
+}
+
+.pull-btn-group.done .pull-btn-main {
+  background: color-mix(in srgb, var(--accent) 88%, #fff);
+  min-width: 112px;
+}
+
+.pull-btn-menu {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+}
+
+.pull-btn-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.pull-btn-menu-item small {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.pull-btn-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
 .context-menu {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -2048,6 +2208,25 @@ button.context-chip.sibling:hover:not(:disabled) {
 
 button.context-chip.sibling:disabled {
   cursor: default;
+}
+
+/* The "origin/… ↓N" chip, clickable to pull the upstream. */
+button.context-chip.pullable {
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+button.context-chip.pullable:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+button.context-chip.pullable.busy,
+button.context-chip.pullable:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .context-chip .chip-ref {

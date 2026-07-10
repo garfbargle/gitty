@@ -2823,6 +2823,106 @@ fn update_status(path: String) -> Result<UpdateStatus, String> {
     })
 }
 
+/// Builds an UpdateOutcome from a finished `git merge` (the merge-mode pull),
+/// mapping a conflicted merge into the same resolvable "conflicts" state a
+/// rebase produces, so the UI drives both through one flow.
+fn merge_pull_outcome(
+    repo_path: &Path,
+    upstream_ref: &str,
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Result<UpdateOutcome, String> {
+    let output = combine_output(stdout, stderr);
+    if success {
+        let up_to_date = output.contains("Already up to date");
+        return Ok(UpdateOutcome {
+            status: if up_to_date { "up_to_date" } else { "updated" }.to_string(),
+            conflict_files: Vec::new(),
+            message: if up_to_date {
+                format!("Already up to date with {upstream_ref}.")
+            } else {
+                format!("Merged {upstream_ref} into your branch.")
+            },
+            output,
+        });
+    }
+
+    let conflict_files = unmerged_files(repo_path);
+    if conflict_files.is_empty() {
+        return Err(if output.is_empty() {
+            format!("Could not pull from {upstream_ref}.")
+        } else {
+            output
+        });
+    }
+    Ok(UpdateOutcome {
+        status: "conflicts".to_string(),
+        message: format!("{} file(s) need conflict resolution.", conflict_files.len()),
+        conflict_files,
+        output,
+    })
+}
+
+fn pull_repo_blocking(path: String, merge: bool) -> Result<UpdateOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let branch = current_branch(repo_path);
+    if is_detached_branch(&branch) {
+        return Err("Switch to a branch before pulling.".to_string());
+    }
+
+    // `@{u}` — the remote-tracking ref this branch pulls from (e.g. origin/main).
+    let upstream_ref =
+        upstream(repo_path).ok_or_else(|| "This branch has no upstream to pull from.".to_string())?;
+
+    // Refresh the tracking ref for this branch's remote so we reconcile against
+    // the remote's latest, not a stale snapshot. The remote name is the first
+    // path segment of the upstream ref, falling back to the default remote.
+    let remote = upstream_ref
+        .split_once('/')
+        .map(|(remote, _)| remote.to_string())
+        .or_else(|| default_remote_name(repo_path));
+    if let Some(remote) = remote.as_deref() {
+        git(repo_path, &["fetch", "--prune", remote])?;
+    }
+
+    if merge {
+        // `merge.autoStash` carries uncommitted work across the merge, matching
+        // the rebase path's `--autostash`.
+        let (success, stdout, stderr) = git_raw(
+            repo_path,
+            &[
+                "-c",
+                "merge.autoStash=true",
+                "merge",
+                "--no-edit",
+                &upstream_ref,
+            ],
+        )?;
+        return merge_pull_outcome(repo_path, &upstream_ref, success, &stdout, &stderr);
+    }
+
+    // Default: replay local commits on top of the upstream. A branch that's
+    // purely behind fast-forwards (no conflicts possible); a diverged branch
+    // rebases and may pause on conflicts, resolved through the update flow.
+    let (success, stdout, stderr) =
+        git_rebase(repo_path, &["rebase", "--autostash", &upstream_ref])?;
+    rebase_outcome(repo_path, &upstream_ref, success, &stdout, &stderr)
+}
+
+/// Bring the current branch up to date with its upstream: fetch the backing
+/// remote, then reconcile. Rebase by default (fast-forward when purely behind);
+/// `merge = true` reconciles with a merge commit instead. Conflicts land in the
+/// same resolvable state as update-from-main.
+#[tauri::command]
+async fn pull_repo(path: String, merge: bool) -> Result<UpdateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || pull_repo_blocking(path, merge))
+        .await
+        .map_err(|err| format!("Pull task failed: {err}"))?
+}
+
 // ---- Linked folders (git subtree) -------------------------------------------
 
 /// Path to a repo's committed linked-folder manifest.
@@ -3974,6 +4074,7 @@ pub fn run() {
             update_continue,
             update_abort,
             update_status,
+            pull_repo,
             list_linked_folders,
             add_linked_folder,
             update_linked_folder,

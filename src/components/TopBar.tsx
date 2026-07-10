@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { CommitEntry, RepoEntry } from "../types";
 import { IdePicker } from "./IdePicker";
+import { PullButton, type PullPhase } from "./PullButton";
 import { PushButton, type PushPhase } from "./PushButton";
 import { RepoPicker } from "./RepoPicker";
 
@@ -21,11 +22,13 @@ type TopBarProps = {
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
   pushPhase?: PushPhase;
+  pullPhase?: PullPhase;
   repoSwitching?: boolean;
   ahead?: number;
   behind?: number;
   unpushedTags?: number;
   hasRemotes?: boolean;
+  hasUpstream?: boolean;
   branchUnpublished?: boolean;
   forceSuggested?: boolean;
   onRepoChange: (path: string) => void;
@@ -36,6 +39,8 @@ type TopBarProps = {
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
+  onPull?: () => Promise<boolean>;
+  onPullMerge?: () => Promise<boolean>;
   onSetupRemote?: () => void;
   onOpenRepoSettings?: () => void;
   sidebarVisible?: boolean;
@@ -51,11 +56,13 @@ export function TopBar({
   viewingCommit,
   loading,
   pushPhase = "idle",
+  pullPhase = "idle",
   repoSwitching = false,
   ahead = 0,
   behind = 0,
   unpushedTags = 0,
   hasRemotes = false,
+  hasUpstream = false,
   branchUnpublished = false,
   forceSuggested = false,
   onRepoChange,
@@ -66,6 +73,8 @@ export function TopBar({
   onPush,
   onForcePush,
   onOverwrite,
+  onPull,
+  onPullMerge,
   onSetupRemote,
   onOpenRepoSettings,
   sidebarVisible = true,
@@ -152,6 +161,17 @@ export function TopBar({
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>
+        {onPull && onPullMerge && !repoSwitching ? (
+          <PullButton
+            behind={behind}
+            ahead={ahead}
+            hasUpstream={hasUpstream}
+            pullPhase={pullPhase}
+            loading={loading}
+            onPull={onPull}
+            onPullMerge={onPullMerge}
+          />
+        ) : null}
         {onPush && onForcePush && onOverwrite && !repoSwitching ? (
           <PushButton
             ahead={ahead}
