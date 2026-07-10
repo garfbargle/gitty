@@ -137,6 +137,9 @@ struct RepoSnapshot {
     sibling_tip: Option<SiblingTip>,
     tags: Vec<TagEntry>,
     unpushed_tags: Vec<String>,
+    /// The current branch exists locally but not on any remote, so pushing it
+    /// would publish it. Lights the push button even with no commits ahead.
+    branch_unpublished: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -619,6 +622,25 @@ fn ahead_behind(repo_path: &Path, branch: &str, upstream: &Option<String>) -> (u
     }
 
     unpushed_without_tracking(repo_path)
+}
+
+/// Whether the current branch already exists on a remote. A branch created
+/// locally that has never been pushed has no remote counterpart — the push
+/// button should light up to offer publishing it, even when it has no commits
+/// ahead of the remote. Returns `true` (i.e. "nothing to publish") for detached
+/// HEADs and repos without any remote, where publishing a branch is moot.
+fn branch_published(repo_path: &Path, branch: &str, upstream: &Option<String>) -> bool {
+    if upstream.is_some() {
+        return true;
+    }
+    if is_detached_branch(branch) {
+        return true;
+    }
+    let Some(remote) = default_remote_name(repo_path) else {
+        return true;
+    };
+    let remote_ref = format!("{remote}/{branch}");
+    git(repo_path, &["rev-parse", "--verify", &remote_ref]).is_ok()
 }
 
 fn changed_files(repo_path: &Path) -> Vec<FileChange> {
@@ -1243,6 +1265,8 @@ fn repo_snapshot_blocking(
     });
 
     let (ahead, behind) = ahead_behind(&repo_path, &branch, &upstream);
+    let branch_unpublished =
+        !remotes.is_empty() && !branch_published(&repo_path, &branch, &upstream);
 
     // Branch-context lanes drive the working-tree view that even the lite snapshot
     // renders, so compute them unconditionally. The cost is a handful of git calls —
@@ -1320,6 +1344,7 @@ fn repo_snapshot_blocking(
         sibling_tip: sibling,
         tags,
         unpushed_tags: unpushed_tag_names,
+        branch_unpublished,
     })
 }
 
@@ -3547,7 +3572,12 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
     let mut outputs = Vec::new();
     let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
     let forcing = force || hard;
-    let branch_pushed = ahead > 0 || (forcing && behind > 0);
+    // A branch that exists only locally still needs pushing to publish it, even
+    // with no commits ahead of the remote (`branch_published` returns false only
+    // when there's a remote to publish to). The `-u` handling below sets its
+    // upstream on this first push.
+    let unpushed_branch = !branch_published(repo_path, &branch, &upstream(repo_path));
+    let branch_pushed = ahead > 0 || (forcing && behind > 0) || unpushed_branch;
 
     if branch_pushed {
         let mut args = vec!["push".to_string()];

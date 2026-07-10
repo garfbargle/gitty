@@ -108,6 +108,9 @@ export type RepoSnapshot = {
   siblingTip?: SiblingTip | null;
   tags: TagEntry[];
   unpushedTags: string[];
+  /// The current branch exists locally but not on any remote, so pushing it
+  /// would publish it — lights the push button even with no commits ahead.
+  branchUnpublished?: boolean;
 };
 
 /// The most recently active branch other than the current one and the trunk,

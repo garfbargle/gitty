@@ -8,6 +8,8 @@ type PushButtonProps = {
   behind: number;
   unpushedTags?: number;
   hasRemotes: boolean;
+  /** The current branch exists only locally — push to publish it, even with 0 commits ahead. */
+  unpublished?: boolean;
   /** Force force-push affordances on even when `behind` is 0 — e.g. after a push was rejected as non-fast-forward. */
   forceSuggested?: boolean;
   pushPhase?: PushPhase;
@@ -24,6 +26,7 @@ export function PushButton({
   behind,
   unpushedTags = 0,
   hasRemotes,
+  unpublished = false,
   forceSuggested = false,
   pushPhase = "idle",
   loading,
@@ -37,7 +40,9 @@ export function PushButton({
   const badgeAheadRef = useRef(ahead + unpushedTags);
 
   const pushCount = ahead + unpushedTags;
-  const visible = hasRemotes && (pushCount > 0 || pushPhase === "pushing" || pushPhase === "done");
+  const visible =
+    hasRemotes &&
+    (pushCount > 0 || unpublished || pushPhase === "pushing" || pushPhase === "done");
   const suggestsForcePush = behind > 0 || forceSuggested;
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
@@ -104,6 +109,9 @@ export function PushButton({
     const summary = parts.length > 0 ? parts.join(" and ") : "changes";
 
     const forceHint = "  •  right-click for push options";
+    if (unpublished && pushCount === 0) {
+      return `Publish this branch to the remote${forceHint}`;
+    }
     if (behind > 0) {
       return `Push ${summary} — remote has ${behind} newer commit${behind === 1 ? "" : "s"}${forceHint}`;
     }

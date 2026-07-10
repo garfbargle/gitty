@@ -26,6 +26,7 @@ type TopBarProps = {
   behind?: number;
   unpushedTags?: number;
   hasRemotes?: boolean;
+  branchUnpublished?: boolean;
   forceSuggested?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
@@ -55,6 +56,7 @@ export function TopBar({
   behind = 0,
   unpushedTags = 0,
   hasRemotes = false,
+  branchUnpublished = false,
   forceSuggested = false,
   onRepoChange,
   onBranchChange,
@@ -156,6 +158,7 @@ export function TopBar({
             behind={behind}
             unpushedTags={unpushedTags}
             hasRemotes={hasRemotes}
+            unpublished={branchUnpublished}
             forceSuggested={forceSuggested}
             pushPhase={pushPhase}
             loading={loading}

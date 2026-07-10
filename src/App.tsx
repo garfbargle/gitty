@@ -2195,7 +2195,10 @@ function App() {
   }, [workingTreeActive]);
 
   const canPush =
-    hasRemotes && ((snapshot?.ahead ?? 0) > 0 || (snapshot?.unpushedTags?.length ?? 0) > 0);
+    hasRemotes &&
+    ((snapshot?.ahead ?? 0) > 0 ||
+      (snapshot?.unpushedTags?.length ?? 0) > 0 ||
+      (snapshot?.branchUnpublished ?? false));
   const unpushedTagSet = useMemo(
     () => new Set(snapshot?.unpushedTags ?? []),
     [snapshot?.unpushedTags],
@@ -2413,6 +2416,7 @@ function App() {
               behind={displaySnapshot.behind}
               unpushedTags={displaySnapshot.unpushedTags?.length ?? 0}
               hasRemotes={hasRemotes}
+              branchUnpublished={displaySnapshot.branchUnpublished ?? false}
               forceSuggested={pushRejected}
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
