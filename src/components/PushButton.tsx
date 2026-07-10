@@ -40,10 +40,14 @@ export function PushButton({
   const badgeAheadRef = useRef(ahead + unpushedTags);
 
   const pushCount = ahead + unpushedTags;
+  const suggestsForcePush = behind > 0 || forceSuggested;
   const visible =
     hasRemotes &&
-    (pushCount > 0 || unpublished || pushPhase === "pushing" || pushPhase === "done");
-  const suggestsForcePush = behind > 0 || forceSuggested;
+    (pushCount > 0 ||
+      unpublished ||
+      suggestsForcePush ||
+      pushPhase === "pushing" ||
+      pushPhase === "done");
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
   const showBadge = pushPhase === "pushing" || (pushPhase === "idle" && pushCount > 0);
@@ -111,6 +115,11 @@ export function PushButton({
     const forceHint = "  •  right-click for push options";
     if (unpublished && pushCount === 0) {
       return `Publish this branch to the remote${forceHint}`;
+    }
+    if (behind > 0 && pushCount === 0) {
+      // Purely behind — a backward reset. A normal push can't help; force-push
+      // to move the remote back to this commit.
+      return `Force-push to reset the remote back ${behind} commit${behind === 1 ? "" : "s"}${forceHint}`;
     }
     if (behind > 0) {
       return `Push ${summary} — remote has ${behind} newer commit${behind === 1 ? "" : "s"}${forceHint}`;
