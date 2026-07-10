@@ -6,6 +6,8 @@ type CommitTagMenuHandlers = {
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
   onVisitCommit?: (commit: CommitEntry) => void;
+  onBranchFrom?: (commit: CommitEntry) => void;
+  onResetTo?: (commit: CommitEntry) => void;
 };
 
 export function buildCommitTagMenuItems(
@@ -15,6 +17,14 @@ export function buildCommitTagMenuItems(
   const items: ContextMenuItem[] = [
     { label: "Copy SHA", onClick: () => void navigator.clipboard.writeText(commit.hash) },
   ];
+
+  if (handlers?.onBranchFrom) {
+    items.push({ label: "Start branch from here…", onClick: () => handlers.onBranchFrom!(commit) });
+  }
+
+  if (handlers?.onResetTo) {
+    items.push({ label: "Reset to here…", onClick: () => handlers.onResetTo!(commit) });
+  }
 
   if (handlers?.onVisitCommit) {
     items.push({ label: "Visit commit…", onClick: () => handlers.onVisitCommit!(commit) });

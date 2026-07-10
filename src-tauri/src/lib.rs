@@ -1923,13 +1923,23 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
 /// comes along automatically — this is how you move changes off the trunk onto a
 /// branch where they belong, without committing or stashing first.
 #[tauri::command]
-fn create_branch(path: String, name: String) -> Result<ActionResult, String> {
+fn create_branch(
+    path: String,
+    name: String,
+    start_point: Option<String>,
+) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err("Branch name is required.".to_string());
     }
     let repo_path = Path::new(&repo.path);
+
+    // An optional commit to fork from — right-clicking an old node in the timeline
+    // branches from there rather than from HEAD. Empty/whitespace means "from HEAD".
+    let start_point = start_point
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     // Reject up front so the user gets a clean message instead of git's plumbing
     // error, and so we never half-create a ref under an unusable name.
@@ -1945,13 +1955,22 @@ fn create_branch(path: String, name: String) -> Result<ActionResult, String> {
         return Err(format!("A branch named \"{name}\" already exists."));
     }
 
-    let output = git(repo_path, &["switch", "-c", &name])
-        .or_else(|_| git(repo_path, &["checkout", "-b", &name]))?;
+    let output = match &start_point {
+        Some(from) => git(repo_path, &["switch", "-c", &name, from])
+            .or_else(|_| git(repo_path, &["checkout", "-b", &name, from]))?,
+        None => git(repo_path, &["switch", "-c", &name])
+            .or_else(|_| git(repo_path, &["checkout", "-b", &name]))?,
+    };
 
-    Ok(ActionResult {
-        message: format!("Created {name} from this point."),
-        output,
-    })
+    let message = match &start_point {
+        Some(from) => {
+            let short: String = from.chars().take(7).collect();
+            format!("Created {name} from {short}.")
+        }
+        None => format!("Created {name} from this point."),
+    };
+
+    Ok(ActionResult { message, output })
 }
 
 #[tauri::command]

@@ -3950,6 +3950,30 @@ button.context-chip.sibling:disabled {
   color: var(--danger);
 }
 
+.confirm-dialog-icon.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.reset-mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reset-mode-list li {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.reset-mode-list strong {
+  color: var(--text);
+}
+
 .confirm-dialog-header h2 {
   font-size: 16px;
   margin: 0 0 4px;
@@ -3975,8 +3999,14 @@ button.context-chip.sibling:disabled {
 }
 
 .confirm-dialog-actions .ghost-btn,
-.confirm-dialog-actions .confirm-dialog-primary {
+.confirm-dialog-actions .confirm-dialog-primary,
+.confirm-dialog-actions .action-btn {
   width: auto;
+}
+
+/* Keep Cancel on the left; push the reset choices to the right edge. */
+.reset-commit-dialog .confirm-dialog-actions .ghost-btn {
+  margin-right: auto;
 }
 
 .confirm-dialog-actions kbd {
@@ -4098,6 +4128,12 @@ button.context-chip.sibling:disabled {
   background: var(--danger-soft);
   border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   color: var(--danger);
+}
+
+.action-btn.warn {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: var(--warning);
 }
 
 .gitty-empty-state {

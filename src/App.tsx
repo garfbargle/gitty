@@ -18,6 +18,7 @@ import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
 import { GittyEmptyState } from "./components/GittyEmptyState";
 import { ResetAllConfirmDialog } from "./components/ResetAllConfirmDialog";
+import { ResetToCommitDialog } from "./components/ResetToCommitDialog";
 import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialog";
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
@@ -210,6 +211,10 @@ function App() {
   const [discardFilesTarget, setDiscardFilesTarget] = useState<string[]>([]);
   const [tagCreateCommit, setTagCreateCommit] = useState<CommitEntry | null>(null);
   const [branchCreateOpen, setBranchCreateOpen] = useState(false);
+  // When set, the branch dialog forks from this commit rather than HEAD.
+  const [branchFromCommit, setBranchFromCommit] = useState<CommitEntry | null>(null);
+  // When set, the reset dialog offers to move HEAD to this commit.
+  const [resetToTarget, setResetToTarget] = useState<CommitEntry | null>(null);
   const [tagDeleteTarget, setTagDeleteTarget] = useState<{
     commit: CommitEntry;
     name: string;
@@ -1290,11 +1295,13 @@ function App() {
 
   async function createBranch(name: string) {
     if (!selectedPath || !name.trim()) return;
+    const startPoint = branchFromCommit?.hash;
     const result = await run(() =>
-      invoke<ActionResult>("create_branch", { path: selectedPath, name }),
+      invoke<ActionResult>("create_branch", { path: selectedPath, name, startPoint }),
     );
     if (!result) return;
     setBranchCreateOpen(false);
+    setBranchFromCommit(null);
     setMessage(result.message);
     setViewingCommit(null);
     setCommitFiles([]);
@@ -1973,6 +1980,26 @@ function App() {
     }
   }
 
+  // Reset straight to a right-clicked timeline node; mode comes from the dialog.
+  async function resetToCommit(commit: CommitEntry, mode: "soft" | "hard") {
+    if (!selectedPath) return;
+    const result = await run(() =>
+      invoke<ActionResult>("reset_to_commit", {
+        path: selectedPath,
+        commit: commit.hash,
+        mode,
+      }),
+    );
+    if (!result) return;
+    setResetToTarget(null);
+    setViewingCommit(null);
+    setCommitFiles([]);
+    setFocus(null);
+    setDiff(emptyDiff);
+    setMessage([result.message, result.output].filter(Boolean).join("\n"));
+    await refreshRepo();
+  }
+
   async function resetAllWorkingTree(includeUntracked: boolean) {
     if (!selectedPath) return;
     const result = await run(() =>
@@ -2424,6 +2451,11 @@ function App() {
                   onVisitCommit={(commit) => void openCommitInFolder(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
+                  onBranchFrom={(commit) => {
+                    setBranchFromCommit(commit);
+                    setBranchCreateOpen(true);
+                  }}
+                  onResetTo={(commit) => setResetToTarget(commit)}
                   integrationPreview={
                     integrationOp && integrationOp.kind !== "subtree"
                       ? {
@@ -2740,10 +2772,23 @@ function App() {
           <BranchCreateDialog
             open={branchCreateOpen}
             fromBranch={snapshot.branch}
+            fromCommit={branchFromCommit}
             changes={snapshot.changes ?? []}
             loading={loading}
             onConfirm={(name) => void createBranch(name)}
-            onCancel={() => setBranchCreateOpen(false)}
+            onCancel={() => {
+              setBranchCreateOpen(false);
+              setBranchFromCommit(null);
+            }}
+          />
+          <ResetToCommitDialog
+            open={!!resetToTarget}
+            branch={snapshot.branch}
+            commit={resetToTarget}
+            dirtyCount={snapshot.changes?.length ?? 0}
+            loading={loading}
+            onConfirm={(mode) => resetToTarget && void resetToCommit(resetToTarget, mode)}
+            onCancel={() => setResetToTarget(null)}
           />
           <TagCreateDialog
             open={!!tagCreateCommit}

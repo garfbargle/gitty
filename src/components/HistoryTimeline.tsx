@@ -35,6 +35,8 @@ type HistoryTimelineProps = {
   onInteract?: () => void;
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
+  onBranchFrom?: (commit: CommitEntry) => void;
+  onResetTo?: (commit: CommitEntry) => void;
   workingTreeActive?: boolean;
   /// Where the checked-out branch sits relative to the trunk and its upstream.
   contextLanes?: BranchDivergence[];
@@ -70,6 +72,8 @@ export function HistoryTimeline({
   onInteract,
   onCreateTag,
   onDeleteTag,
+  onBranchFrom,
+  onResetTo,
   workingTreeActive,
   contextLanes = [],
   siblingTip,
@@ -309,6 +313,8 @@ export function HistoryTimeline({
       x: event.clientX,
       y: event.clientY,
       items: buildCommitTagMenuItems(commit, {
+        onBranchFrom,
+        onResetTo,
         onVisitCommit,
         onCreateTag: tagActionsEnabled ? onCreateTag : undefined,
         onDeleteTag: tagActionsEnabled ? onDeleteTag : undefined,

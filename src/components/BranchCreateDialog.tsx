@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { GitBranch } from "lucide-react";
-import type { FileChange } from "../types";
+import type { CommitEntry, FileChange } from "../types";
 import { suggestBranchName } from "../lib/branches";
 import { SettingsModal } from "./SettingsModal";
 
@@ -9,6 +9,9 @@ type BranchCreateDialogProps = {
   /// The point the new branch forks from — usually the trunk you're rescuing
   /// changes off of.
   fromBranch: string;
+  /// When set, the branch forks from this specific commit instead of the current
+  /// branch tip (right-clicking an old node in the timeline).
+  fromCommit?: CommitEntry | null;
   /// Uncommitted changes that will travel onto the new branch.
   changes: FileChange[];
   loading?: boolean;
@@ -19,6 +22,7 @@ type BranchCreateDialogProps = {
 export function BranchCreateDialog({
   open,
   fromBranch,
+  fromCommit,
   changes,
   loading = false,
   onConfirm,
@@ -27,7 +31,11 @@ export function BranchCreateDialog({
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
-  const suggestion = suggestBranchName(changes);
+  // Branching from an old commit doesn't carry the working tree, so its name is
+  // best guessed from the commit itself rather than the pending changes.
+  const suggestion = fromCommit
+    ? suggestBranchName([{ status: "", path: fromCommit.subject } as FileChange])
+    : suggestBranchName(changes);
   const changeCount = changes.length;
 
   useEffect(() => {
@@ -48,9 +56,11 @@ export function BranchCreateDialog({
       open={open}
       title="Start a branch"
       subtitle={
-        changeCount > 0
-          ? `From ${fromBranch} · brings your ${changeCount} change${changeCount === 1 ? "" : "s"} along`
-          : `From ${fromBranch}`
+        fromCommit
+          ? `From ${fromCommit.shortHash} · ${fromCommit.subject}`
+          : changeCount > 0
+            ? `From ${fromBranch} · brings your ${changeCount} change${changeCount === 1 ? "" : "s"} along`
+            : `From ${fromBranch}`
       }
       onClose={onCancel}
       footer={
