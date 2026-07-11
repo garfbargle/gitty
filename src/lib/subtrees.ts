@@ -23,6 +23,13 @@ export function updateLinkedFolder(path: string, prefix: string) {
   return invoke<UpdateOutcome>("update_linked_folder", { path, prefix });
 }
 
+/// Publish a linked folder's committed changes back to its source repo
+/// (`git subtree push`). Rejects (source moved on) and uncommitted-edit guards
+/// come back as a thrown error string.
+export function pushLinkedFolder(path: string, prefix: string) {
+  return invoke<ActionResult>("push_linked_folder", { path, prefix });
+}
+
 /// Record a linked folder's source when Gitty couldn't infer it from remotes.
 export function setLinkedFolderSource(path: string, prefix: string, url: string, branch: string) {
   return invoke<ActionResult>("set_linked_folder_source", { path, prefix, url, branch });

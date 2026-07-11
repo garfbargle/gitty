@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
+  ArrowUpFromLine,
   Download,
   FolderGit2,
   ImageOff,
@@ -19,6 +20,7 @@ import {
   addLinkedFolder,
   checkSubtreeUpdates,
   listLinkedFolders,
+  pushLinkedFolder,
   removeLinkedFolder,
   setLinkedFolderSource,
 } from "../lib/subtrees";
@@ -264,7 +266,10 @@ function LinkedFoldersSection({
   const [updates, setUpdates] = useState<Record<string, boolean>>({});
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // Push is tracked apart from `busy` (pull) so only the clicked button spins.
+  const [pushing, setPushing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   // `adding` = new folder form; `sourceFor` = set-source form for an existing,
   // unknown-source folder (its prefix). At most one is active.
   const [adding, setAdding] = useState(false);
@@ -323,7 +328,7 @@ function LinkedFoldersSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, repoPath]);
 
-  const controlsDisabled = disabled || busy !== null;
+  const controlsDisabled = disabled || busy !== null || pushing !== null;
 
   function beginSetSource(folder: LinkedFolder) {
     setAdding(false);
@@ -358,6 +363,7 @@ function LinkedFoldersSection({
   async function update(prefix: string) {
     setBusy(prefix);
     setError(null);
+    setNotice(null);
     try {
       await onUpdateFolder(prefix);
       await reload();
@@ -365,6 +371,21 @@ function LinkedFoldersSection({
       setError(String(err));
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function push(prefix: string) {
+    setPushing(prefix);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await pushLinkedFolder(repoPath, prefix);
+      setNotice(result.message);
+      await reload();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPushing(null);
     }
   }
 
@@ -539,6 +560,20 @@ function LinkedFoldersSection({
                   </button>
                   <button
                     type="button"
+                    className="settings-btn"
+                    title="Publish this folder's committed changes back to its source"
+                    disabled={controlsDisabled}
+                    onClick={() => void push(folder.prefix)}
+                  >
+                    {pushing === folder.prefix ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <ArrowUpFromLine size={14} />
+                    )}
+                    Publish
+                  </button>
+                  <button
+                    type="button"
                     className="icon-btn sm"
                     aria-label={`Edit source for ${folder.prefix}`}
                     title="Edit source URL & branch"
@@ -575,6 +610,7 @@ function LinkedFoldersSection({
       )}
 
       {error ? <p className="settings-field-note error">{error}</p> : null}
+      {notice && !error ? <p className="settings-field-note">{notice}</p> : null}
     </div>
   );
 }

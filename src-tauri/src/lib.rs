@@ -3382,6 +3382,72 @@ fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, S
     subtree_pull_outcome(repo_path, &prefix, success, &stdout, &stderr)
 }
 
+/// Send a linked folder's committed changes back to its source repo
+/// (`git subtree push`). Only *committed* work is sent — subtree push splits
+/// history, so uncommitted edits in the folder are silently ignored; we block on
+/// that with a clear hint. A rejected push means the source moved on since the
+/// last sync, so the fix is Update-then-Publish. No `--squash` on push: it splits
+/// the folder's real history so the source repo gets clean per-change commits.
+#[tauri::command]
+fn push_linked_folder(path: String, prefix: String) -> Result<ActionResult, String> {
+    ensure_subtree_available()?;
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let prefix = validate_prefix(&prefix)?;
+
+    let manifest = read_subtree_manifest(repo_path);
+    let split = discover_subtree_prefixes(repo_path)
+        .get(&prefix)
+        .cloned()
+        .flatten();
+    let (url, branch, _from_manifest) =
+        resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest).ok_or_else(|| {
+            "Gitty doesn't know where this folder came from. Set its source first.".to_string()
+        })?;
+
+    // Push only sends committed work; uncommitted edits in the folder would be
+    // left behind, which is confusing. Block early with a pointed message.
+    let dirty = git(repo_path, &["status", "--porcelain", "--", &prefix])
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(false);
+    if dirty {
+        return Err(format!(
+            "{prefix} has uncommitted changes. Commit them first — Publish only sends committed work."
+        ));
+    }
+
+    let (success, stdout, stderr) = git_subtree(
+        repo_path,
+        &["subtree", "push", "--prefix", &prefix, &url, &branch],
+    )?;
+    let output = combine_output(&stdout, &stderr);
+
+    if success {
+        let up_to_date = output.contains("Everything up-to-date") || output.contains("up to date");
+        return Ok(ActionResult {
+            message: if up_to_date {
+                format!("{branch} already has {prefix}'s changes.")
+            } else {
+                format!("Published {prefix} to its source.")
+            },
+            output,
+        });
+    }
+
+    // The usual failure: the source ref advanced, so the push is non-fast-forward.
+    let rejected = output.contains("rejected")
+        || output.contains("non-fast-forward")
+        || output.contains("fetch first")
+        || output.contains("behind");
+    Err(if rejected {
+        format!("The source moved on since your last sync. Update {prefix} first, then Publish again.")
+    } else if output.is_empty() {
+        format!("Could not publish {prefix}.")
+    } else {
+        output
+    })
+}
+
 /// Manually record (or overwrite) a linked folder's source in the manifest. For
 /// folders whose origin Gitty couldn't infer from remotes — e.g. added from a
 /// bare URL that no remote-tracking branch covers.
@@ -4158,6 +4224,7 @@ pub fn run() {
             check_subtree_updates,
             add_linked_folder,
             update_linked_folder,
+            push_linked_folder,
             set_linked_folder_source,
             remove_linked_folder,
             open_commit_worktree,

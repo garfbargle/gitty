@@ -4102,6 +4102,142 @@ button.context-chip.pullable:disabled {
   color: var(--text-muted);
 }
 
+/* Top-bar "Linked updates" chip — the incoming arrow for linked folders, mirroring
+   the Pull button's structure. Solid warning so it reads as "heads up, action
+   available" without competing with the primary blue Pull / green Push. */
+.linked-updates-group {
+  display: inline-flex;
+  position: relative;
+}
+
+.linked-updates-badge {
+  align-items: center;
+  background: #7c2d12;
+  border: 2px solid var(--bg-panel);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  justify-content: center;
+  left: -7px;
+  line-height: 1;
+  min-width: 18px;
+  padding: 2px 5px;
+  pointer-events: none;
+  position: absolute;
+  top: -7px;
+  z-index: 2;
+}
+
+.linked-updates-main {
+  align-items: center;
+  background: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 70%, #000);
+  border-radius: var(--radius-sm);
+  color: #3b2500;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.linked-updates-main:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.linked-updates-main:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.linked-updates-main:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+  opacity: 0.65;
+}
+
+.linked-updates-menu {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: grid;
+  gap: 2px;
+  min-width: 260px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+}
+
+.linked-updates-menu-head {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 6px 6px;
+}
+
+.linked-updates-item {
+  align-items: center;
+  border-radius: 5px;
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+}
+
+.linked-updates-item-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.linked-updates-item-name {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linked-updates-item-source {
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linked-updates-item .settings-btn {
+  flex: none;
+  margin-left: auto;
+}
+
+.linked-updates-manage {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 4px;
+  padding: 8px 6px 4px;
+  width: 100%;
+}
+
+.linked-updates-manage:hover {
+  color: var(--text);
+}
+
 .subtree-add-form {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

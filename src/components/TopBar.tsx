@@ -7,10 +7,11 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import type { CommitEntry, RepoEntry } from "../types";
+import type { CommitEntry, LinkedFolder, RepoEntry } from "../types";
 import { IdePicker } from "./IdePicker";
 import { PullButton, type PullPhase } from "./PullButton";
 import { PushButton, type PushPhase } from "./PushButton";
+import { LinkedFolderUpdatesButton } from "./LinkedFolderUpdatesButton";
 import { RepoPicker } from "./RepoPicker";
 
 type TopBarProps = {
@@ -43,6 +44,14 @@ type TopBarProps = {
   onPullMerge?: () => Promise<boolean>;
   onSetupRemote?: () => void;
   onOpenRepoSettings?: () => void;
+  /** Linked folders whose source has moved on, surfaced as a top-bar chip. */
+  linkedUpdates?: LinkedFolder[];
+  linkedBusyPrefix?: string | null;
+  onUpdateLinkedFolder?: (prefix: string) => Promise<void>;
+  /** Deep-link from the chip to the Linked folders settings section. Kept
+   * separate from `onOpenRepoSettings` so the chip doesn't drag in the top-bar
+   * settings gear. */
+  onManageLinkedFolders?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
 };
@@ -77,6 +86,10 @@ export function TopBar({
   onPullMerge,
   onSetupRemote,
   onOpenRepoSettings,
+  linkedUpdates = [],
+  linkedBusyPrefix = null,
+  onUpdateLinkedFolder,
+  onManageLinkedFolders,
   sidebarVisible = true,
   onToggleSidebar,
 }: TopBarProps) {
@@ -185,6 +198,15 @@ export function TopBar({
             onPush={onPush}
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
+          />
+        ) : null}
+        {onUpdateLinkedFolder && !repoSwitching ? (
+          <LinkedFolderUpdatesButton
+            folders={linkedUpdates}
+            busyPrefix={linkedBusyPrefix}
+            loading={loading}
+            onUpdate={onUpdateLinkedFolder}
+            onOpenSettings={onManageLinkedFolders}
           />
         ) : null}
         {!hasRemotes && onSetupRemote ? (

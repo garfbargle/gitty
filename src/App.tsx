@@ -35,6 +35,7 @@ import type {
   DiffFocus,
   DiscoveredRepoEntry,
   FileChange,
+  LinkedFolder,
   RepoEntry,
   RepoChanges,
   RepoEnrichment,
@@ -50,6 +51,7 @@ import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsK
 import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
+import { checkSubtreeUpdates, listLinkedFolders } from "./lib/subtrees";
 import {
   buildTimelineItems,
   moveTimelineSelection,
@@ -207,6 +209,10 @@ function App() {
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
+  // Linked folders whose source has moved on, driving the top-bar chip. Computed
+  // on the network only at deliberate moments (repo open + fetch), never polled.
+  const [behindFolders, setBehindFolders] = useState<LinkedFolder[]>([]);
+  const [linkedBusyPrefix, setLinkedBusyPrefix] = useState<string | null>(null);
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [discardFilesOpen, setDiscardFilesOpen] = useState(false);
   const [discardFilesTarget, setDiscardFilesTarget] = useState<string[]>([]);
@@ -425,6 +431,23 @@ function App() {
       void inspectFileQuiet(first, section, snapshot.repo.path);
     }
   }, [snapshot?.repo.path, selectedPath]);
+
+  // Compute linked-folder update status once when a repo opens (guarded against a
+  // fast repo switch landing stale results). Fetch refreshes it after that.
+  useEffect(() => {
+    setBehindFolders([]);
+    if (!selectedPath) return;
+    let cancelled = false;
+    const path = selectedPath;
+    void (async () => {
+      const behind = await computeBehindFolders(path).catch(() => [] as LinkedFolder[]);
+      if (!cancelled) setBehindFolders(behind);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPath]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
     setLoading(true);
@@ -1438,6 +1461,43 @@ function App() {
     }
   }
 
+  // Which linked folders are behind their source. Local list first (instant,
+  // offline) — most repos have none, so we skip the network entirely. Only when
+  // there are known-source folders do we spend the on-demand `ls-remote` check.
+  // Best-effort: an offline/unreachable source leaves the folder out, not errors.
+  async function computeBehindFolders(path: string): Promise<LinkedFolder[]> {
+    const folders = await listLinkedFolders(path);
+    if (!folders.some((folder) => folder.knownSource)) return [];
+    const statuses = await checkSubtreeUpdates(path);
+    const behind = new Set(
+      statuses.filter((status) => status.updatesAvailable === true).map((status) => status.prefix),
+    );
+    return folders.filter((folder) => behind.has(folder.prefix));
+  }
+
+  async function refreshBehindFolders(path: string) {
+    try {
+      setBehindFolders(await computeBehindFolders(path));
+    } catch {
+      // Awareness is a convenience, not a gate — leave the last known chip state.
+    }
+  }
+
+  // Chip-triggered Update: reuse the drawer's update path (so a conflict routes
+  // into the same resolver), then recompute the chip.
+  async function updateLinkedFolderFromChip(prefix: string) {
+    if (!selectedPath) return;
+    setLinkedBusyPrefix(prefix);
+    try {
+      await runLinkedFolderUpdate(prefix);
+      await refreshBehindFolders(selectedPath);
+    } catch {
+      // runLinkedFolderUpdate already surfaced the error.
+    } finally {
+      setLinkedBusyPrefix(null);
+    }
+  }
+
   // Re-read which files still conflict, from the right place for this op.
   async function refreshConflictStatus() {
     if (!integrationOp) return;
@@ -1889,6 +1949,8 @@ function App() {
     if (result) {
       setMessage(result.message);
       await refreshRepo();
+      // Fetch is the network moment we piggyback the linked-folder check on.
+      await refreshBehindFolders(selectedPath);
     }
   }
 
@@ -2493,6 +2555,10 @@ function App() {
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
+              linkedUpdates={behindFolders}
+              linkedBusyPrefix={linkedBusyPrefix}
+              onUpdateLinkedFolder={updateLinkedFolderFromChip}
+              onManageLinkedFolders={() => openRepoSettings()}
             />
 
             <div className="working-view">
