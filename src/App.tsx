@@ -2278,6 +2278,19 @@ function App() {
     await removeRepo(snapshot.repo.path);
   }
 
+  async function reorderRepos(orderedPaths: string[]) {
+    // Optimistically apply the new order so the drag feels instant.
+    const byPath = new Map(repos.map((repo) => [repo.path, repo]));
+    const optimistic = orderedPaths
+      .map((path) => byPath.get(path))
+      .filter((repo): repo is RepoEntry => repo !== undefined);
+    if (optimistic.length === repos.length) setRepos(optimistic);
+    const result = await run(() =>
+      invoke<RepoEntry[]>("reorder_repos", { paths: orderedPaths }),
+    );
+    if (result) setRepos(result);
+  }
+
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
   const unstagedCount = snapshot?.changes.filter(isUnstaged).length ?? 0;
   const changeCount = snapshot?.changes.length ?? 0;
@@ -2530,6 +2543,7 @@ function App() {
         onSelect={(path) => void selectRepo(path)}
         onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
         onRemoveRepo={(path) => void removeRepo(path)}
+        onReorder={(paths) => void reorderRepos(paths)}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenRepoSettings={(path) => {

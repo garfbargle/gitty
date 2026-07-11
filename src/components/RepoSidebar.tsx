@@ -24,6 +24,7 @@ type RepoSidebarProps = {
   onSelect: (path: string) => void;
   onSaveDiscovered: (path: string) => void;
   onRemoveRepo: (path: string) => void;
+  onReorder: (orderedPaths: string[]) => void;
   onAddExisting: () => void;
   onOpenSettings: () => void;
   onOpenRepoSettings: (path: string) => void;
@@ -40,6 +41,7 @@ export const RepoSidebar = memo(function RepoSidebar({
   onSelect,
   onSaveDiscovered,
   onRemoveRepo,
+  onReorder,
   onAddExisting,
   onOpenSettings,
   onOpenRepoSettings,
@@ -53,6 +55,28 @@ export const RepoSidebar = memo(function RepoSidebar({
   } | null>(null);
   const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
   const activePath = optimisticPath ?? selectedPath;
+  const [dragPath, setDragPath] = useState<string | null>(null);
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+
+  const handleDrop = useCallback(
+    (targetPath: string) => {
+      const sourcePath = dragPath;
+      setDragPath(null);
+      setDragOverPath(null);
+      if (!sourcePath || sourcePath === targetPath) return;
+      const order = repos.map((repo) => repo.path);
+      const from = order.indexOf(sourcePath);
+      if (from === -1) return;
+      order.splice(from, 1);
+      // Compute the target index after removal so the item lands exactly where
+      // the "insert before" line is shown, regardless of drag direction.
+      const to = order.indexOf(targetPath);
+      if (to === -1) return;
+      order.splice(to, 0, sourcePath);
+      onReorder(order);
+    },
+    [dragPath, onReorder, repos],
+  );
 
   useEffect(() => {
     if (optimisticPath !== null && optimisticPath === contentPath) {
@@ -117,9 +141,36 @@ export const RepoSidebar = memo(function RepoSidebar({
       <div className="repo-list">
         {repos.map((repo) => (
           <div
-            className={`repo-item saved ${repo.path === activePath ? "active" : ""}`}
+            className={`repo-item saved ${repo.path === activePath ? "active" : ""}${
+              dragPath === repo.path ? " dragging" : ""
+            }${dragOverPath === repo.path && dragPath !== repo.path ? " drag-over" : ""}`}
             key={repo.id}
             title={repo.path}
+            draggable
+            onDragStart={(event) => {
+              setDragPath(repo.path);
+              event.dataTransfer.effectAllowed = "move";
+              // WebKit requires drag data to be set for drop events to fire.
+              event.dataTransfer.setData("text/plain", repo.path);
+            }}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              if (dragPath) setDragOverPath(repo.path);
+            }}
+            onDragOver={(event) => {
+              if (dragPath) {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              handleDrop(repo.path);
+            }}
+            onDragEnd={() => {
+              setDragPath(null);
+              setDragOverPath(null);
+            }}
             onContextMenu={(event) => openRepoContextMenu(event, repo.path, true)}
           >
             <button

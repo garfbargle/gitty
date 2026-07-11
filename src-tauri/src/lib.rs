@@ -1240,7 +1240,6 @@ fn add_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
 
     if !repos.iter().any(|existing| existing.path == repo.path) {
         repos.push(repo.clone());
-        repos.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         save_repos_to_disk(&app, &repos)?;
         repo_icon::warm_repo_icon_cache(&app, &repo.path)?;
     }
@@ -1255,6 +1254,22 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     save_repos_to_disk(&app, &repos)?;
     repo_icon::clear_repo_icon_cache(&app, &path)?;
     Ok(repos)
+}
+
+#[tauri::command]
+fn reorder_repos(app: AppHandle, paths: Vec<String>) -> Result<Vec<RepoEntry>, String> {
+    let repos = load_repos_from_disk(&app)?;
+    let order: HashMap<&str, usize> = paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| (path.as_str(), index))
+        .collect();
+    let mut reordered = repos.clone();
+    // Stable sort by the requested position; paths not present in the request
+    // keep their relative order and sink to the end.
+    reordered.sort_by_key(|repo| order.get(repo.path.as_str()).copied().unwrap_or(usize::MAX));
+    save_repos_to_disk(&app, &reordered)?;
+    Ok(reordered.into_iter().map(with_repo_status).collect())
 }
 
 fn repo_snapshot_blocking(
@@ -4343,6 +4358,7 @@ pub fn run() {
             clear_repo_icon,
             add_repo,
             remove_repo,
+            reorder_repos,
             start_repo_discovery,
             repo_snapshot,
             repo_enrich,
