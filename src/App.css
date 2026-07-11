@@ -4056,6 +4056,52 @@ button.context-chip.pullable:disabled {
   margin-left: auto;
 }
 
+.settings-field-head-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+/* Update-availability indicator. `margin-left: auto` right-aligns it so the
+   dot + Update + edit + trash cluster together; the Update button's own auto
+   margin then resolves to zero, leaving the two adjacent. */
+.subtree-status {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  font-size: 11px;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.subtree-status-dot {
+  border-radius: 50%;
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+
+.subtree-status.synced {
+  color: var(--text-muted);
+}
+
+.subtree-status.synced .subtree-status-dot {
+  background: var(--success);
+}
+
+.subtree-status.behind {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.subtree-status.behind .subtree-status-dot {
+  background: var(--warning);
+}
+
+.subtree-status.checking {
+  color: var(--text-muted);
+}
+
 .subtree-add-form {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

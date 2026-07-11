@@ -199,6 +199,15 @@ export type LinkedFolder = {
   knownSource: boolean;
 };
 
+/// On-demand result of checking a linked folder against its source ref's tip.
+/// Computed by a network `ls-remote`, kept separate from the offline folder list.
+export type SubtreeUpdateStatus = {
+  prefix: string;
+  /// `true` the source moved on (Update will pull), `false` in sync, `null`
+  /// couldn't tell (offline, unknown source, or no recorded sync point).
+  updatesAvailable: boolean | null;
+};
+
 /// Whether an update (rebase) is paused mid-flight, so the UI can resume it.
 export type UpdateStatus = {
   rebasing: boolean;

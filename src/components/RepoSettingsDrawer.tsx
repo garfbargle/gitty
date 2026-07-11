@@ -7,6 +7,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { RepoIcon } from "./RepoIcon";
 import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
 import {
   addLinkedFolder,
+  checkSubtreeUpdates,
   listLinkedFolders,
   removeLinkedFolder,
   setLinkedFolderSource,
@@ -256,6 +258,11 @@ function LinkedFoldersSection({
   onSourcesChange: (urls: string[]) => void;
 }) {
   const [folders, setFolders] = useState<LinkedFolder[] | null>(null);
+  // prefix → has updates upstream. `true` behind, `false` in sync, absent = not
+  // yet checked / couldn't tell (offline, unknown source). Filled by an on-demand
+  // network check, kept apart from the instant folder list.
+  const [updates, setUpdates] = useState<Record<string, boolean>>({});
+  const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // `adding` = new folder form; `sourceFor` = set-source form for an existing,
@@ -272,11 +279,30 @@ function LinkedFoldersSection({
     setDraft({ folder: "", url: "", branch: "main" });
   }
 
+  // Best-effort network check: which folders have moved on upstream. Failures
+  // (offline, unknown source) leave dots neutral rather than erroring the section.
+  async function checkUpdates() {
+    setChecking(true);
+    try {
+      const statuses = await checkSubtreeUpdates(repoPath);
+      const next: Record<string, boolean> = {};
+      for (const status of statuses) {
+        if (status.updatesAvailable !== null) next[status.prefix] = status.updatesAvailable;
+      }
+      setUpdates(next);
+    } catch {
+      // Leave the last known dots in place; awareness is a convenience, not a gate.
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function reload() {
     try {
       const list = await listLinkedFolders(repoPath);
       setFolders(list);
       onSourcesChange(list.filter((folder) => folder.knownSource).map((folder) => folder.url));
+      void checkUpdates();
     } catch (err) {
       setError(String(err));
       setFolders([]);
@@ -289,6 +315,7 @@ function LinkedFoldersSection({
       closeForm();
       setError(null);
       setFolders(null);
+      setUpdates({});
       onSourcesChange([]);
       return;
     }
@@ -365,19 +392,33 @@ function LinkedFoldersSection({
     <div className="settings-field">
       <div className="settings-field-head">
         <label>Linked folders</label>
-        <button
-          type="button"
-          className="settings-inline-link"
-          disabled={controlsDisabled || formOpen}
-          onClick={() => {
-            setSourceFor(null);
-            setDraft({ folder: "", url: "", branch: "main" });
-            setAdding(true);
-          }}
-        >
-          <Plus size={12} />
-          Add linked folder
-        </button>
+        <div className="settings-field-head-actions">
+          {folders && folders.length > 0 ? (
+            <button
+              type="button"
+              className="settings-inline-link"
+              disabled={controlsDisabled || checking}
+              title="Check each folder's source for new updates"
+              onClick={() => void checkUpdates()}
+            >
+              {checking ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+              Check for updates
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="settings-inline-link"
+            disabled={controlsDisabled || formOpen}
+            onClick={() => {
+              setSourceFor(null);
+              setDraft({ folder: "", url: "", branch: "main" });
+              setAdding(true);
+            }}
+          >
+            <Plus size={12} />
+            Add linked folder
+          </button>
+        </div>
       </div>
 
       {formOpen ? (
@@ -461,9 +502,30 @@ function LinkedFoldersSection({
               </div>
               {folder.knownSource ? (
                 <>
+                  {updates[folder.prefix] === true ? (
+                    <span
+                      className="subtree-status behind"
+                      title="The source has moved on — Update to pull it in"
+                    >
+                      <span className="subtree-status-dot" />
+                      Updates
+                    </span>
+                  ) : updates[folder.prefix] === false ? (
+                    <span
+                      className="subtree-status synced"
+                      title="Up to date with the source"
+                      aria-label="Up to date with the source"
+                    >
+                      <span className="subtree-status-dot" />
+                    </span>
+                  ) : checking ? (
+                    <span className="subtree-status checking" title="Checking for updates…">
+                      <Loader2 size={11} className="spin" />
+                    </span>
+                  ) : null}
                   <button
                     type="button"
-                    className="settings-btn"
+                    className={updates[folder.prefix] === true ? "settings-btn primary" : "settings-btn"}
                     title="Pull the latest from the source"
                     disabled={controlsDisabled}
                     onClick={() => void update(folder.prefix)}

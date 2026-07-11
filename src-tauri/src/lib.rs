@@ -247,6 +247,18 @@ struct LinkedFolder {
     known_source: bool,
 }
 
+/// Whether a linked folder's source ref has moved past what's currently pulled
+/// in — computed on demand (a network `ls-remote`), separate from the instant,
+/// offline `list_linked_folders`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtreeUpdateStatus {
+    prefix: String,
+    /// `Some(true)` the source moved on (Update will pull), `Some(false)` in sync,
+    /// `None` couldn't tell (offline, unknown source, or no recorded sync point).
+    updates_available: Option<bool>,
+}
+
 /// The most recently active *other* branch — a single context lane for the
 /// timeline. Chosen only when its tip is newer than the trunk's, so a stale
 /// branch never clutters the view.
@@ -3055,6 +3067,30 @@ fn short_sha(sha: &str) -> String {
     sha.chars().take(9).collect()
 }
 
+/// The source ref's current tip SHA via `git ls-remote` — one network round-trip,
+/// no fetch, no local refs touched. Prefers an exact `refs/heads/<ref>` match, else
+/// the first ref the remote reports for the name (covers a tag or exact ref).
+/// `None` on network failure or when the ref isn't found.
+fn remote_tip_sha(repo_path: &Path, url: &str, git_ref: &str) -> Option<String> {
+    let output = git(repo_path, &["ls-remote", url, git_ref]).ok()?;
+    let head_ref = format!("refs/heads/{git_ref}");
+    let mut fallback: Option<String> = None;
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        let sha = match parts.next() {
+            Some(sha) if !sha.is_empty() => sha,
+            _ => continue,
+        };
+        if parts.next().unwrap_or("") == head_ref {
+            return Some(sha.to_string());
+        }
+        if fallback.is_none() {
+            fallback = Some(sha.to_string());
+        }
+    }
+    fallback
+}
+
 /// Infer a subtree's origin from configured remotes: find a remote-tracking
 /// branch that contains the split commit and return that remote's URL + the
 /// branch name. Local-only — works whenever the source remote has been fetched,
@@ -3160,6 +3196,49 @@ fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
         .collect();
 
     Ok(folders)
+}
+
+/// Check each linked folder against its source ref's current tip
+/// (`git ls-remote`, one round-trip per folder, no fetch). Network-bound, so it's
+/// deliberately split from the instant `list_linked_folders` and called on demand
+/// — when the settings drawer opens and on manual refresh — keeping the list
+/// itself offline. A folder with an unknown source or no recorded sync point, or
+/// one the network can't reach, comes back `updates_available: None` (neutral).
+#[tauri::command]
+fn check_subtree_updates(path: String) -> Result<Vec<SubtreeUpdateStatus>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let manifest = read_subtree_manifest(repo_path);
+    let discovered = discover_subtree_prefixes(repo_path);
+
+    let mut prefixes: Vec<String> = discovered.keys().cloned().collect();
+    for entry in &manifest {
+        prefixes.push(entry.folder.clone());
+    }
+    prefixes.sort();
+    prefixes.dedup();
+
+    let statuses = prefixes
+        .into_iter()
+        .filter(|prefix| repo_path.join(prefix).exists())
+        .map(|prefix| {
+            let split = discovered.get(&prefix).cloned().flatten();
+            let source = resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest);
+            let updates_available = match (split, source) {
+                (Some(split), Some((url, branch, _))) if !url.is_empty() && !branch.is_empty() => {
+                    remote_tip_sha(repo_path, &url, &branch).map(|tip| tip != split)
+                }
+                _ => None,
+            };
+            SubtreeUpdateStatus {
+                prefix,
+                updates_available,
+            }
+        })
+        .collect();
+
+    Ok(statuses)
 }
 
 /// Add a folder that mirrors another repo (`git subtree add --squash`), then
@@ -4076,6 +4155,7 @@ pub fn run() {
             update_status,
             pull_repo,
             list_linked_folders,
+            check_subtree_updates,
             add_linked_folder,
             update_linked_folder,
             set_linked_folder_source,

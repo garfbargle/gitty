@@ -1,9 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActionResult, LinkedFolder, UpdateOutcome } from "../types";
+import type { ActionResult, LinkedFolder, SubtreeUpdateStatus, UpdateOutcome } from "../types";
 
 /// List this repo's linked folders (git subtrees). Local-only and instant.
 export function listLinkedFolders(path: string) {
   return invoke<LinkedFolder[]>("list_linked_folders", { path });
+}
+
+/// Check each linked folder against its source ref's tip (one `ls-remote` per
+/// folder, no fetch). Network-bound — call on demand, not on every render.
+export function checkSubtreeUpdates(path: string) {
+  return invoke<SubtreeUpdateStatus[]>("check_subtree_updates", { path });
 }
 
 /// Add a folder that mirrors another repo, recording its origin in the manifest.
