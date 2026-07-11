@@ -12,6 +12,7 @@ import { IdePicker } from "./IdePicker";
 import { PullButton, type PullPhase } from "./PullButton";
 import { PushButton, type PushPhase } from "./PushButton";
 import { LinkedFolderUpdatesButton } from "./LinkedFolderUpdatesButton";
+import { LinkedFolderPublishButton } from "./LinkedFolderPublishButton";
 import { RepoPicker } from "./RepoPicker";
 
 type TopBarProps = {
@@ -48,6 +49,9 @@ type TopBarProps = {
   linkedUpdates?: LinkedFolder[];
   linkedBusyPrefix?: string | null;
   onUpdateLinkedFolder?: (prefix: string) => Promise<void>;
+  linkedPublishable?: LinkedFolder[];
+  linkedPushBusyPrefix?: string | null;
+  onPublishLinkedFolder?: (prefix: string) => Promise<void>;
   /** Deep-link from the chip to the Linked folders settings section. Kept
    * separate from `onOpenRepoSettings` so the chip doesn't drag in the top-bar
    * settings gear. */
@@ -89,6 +93,9 @@ export function TopBar({
   linkedUpdates = [],
   linkedBusyPrefix = null,
   onUpdateLinkedFolder,
+  linkedPublishable = [],
+  linkedPushBusyPrefix = null,
+  onPublishLinkedFolder,
   onManageLinkedFolders,
   sidebarVisible = true,
   onToggleSidebar,
@@ -206,6 +213,15 @@ export function TopBar({
             busyPrefix={linkedBusyPrefix}
             loading={loading}
             onUpdate={onUpdateLinkedFolder}
+            onOpenSettings={onManageLinkedFolders}
+          />
+        ) : null}
+        {onPublishLinkedFolder && !repoSwitching ? (
+          <LinkedFolderPublishButton
+            folders={linkedPublishable}
+            busyPrefix={linkedPushBusyPrefix}
+            loading={loading}
+            onPublish={onPublishLinkedFolder}
             onOpenSettings={onManageLinkedFolders}
           />
         ) : null}

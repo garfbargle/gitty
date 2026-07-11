@@ -51,7 +51,7 @@ import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsK
 import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
-import { checkSubtreeUpdates, listLinkedFolders } from "./lib/subtrees";
+import { checkSubtreeUpdates, listLinkedFolders, pushLinkedFolder } from "./lib/subtrees";
 import {
   buildTimelineItems,
   moveTimelineSelection,
@@ -212,6 +212,10 @@ function App() {
   // Linked folders whose source has moved on, driving the top-bar chip. Computed
   // on the network only at deliberate moments (repo open + fetch), never polled.
   const [behindFolders, setBehindFolders] = useState<LinkedFolder[]>([]);
+  // Known-source linked folders that can be published (subtree push). Instant/
+  // local — publishing is deliberate, so this isn't gated on a network check.
+  const [publishableFolders, setPublishableFolders] = useState<LinkedFolder[]>([]);
+  const [linkedPushBusyPrefix, setLinkedPushBusyPrefix] = useState<string | null>(null);
   const [linkedBusyPrefix, setLinkedBusyPrefix] = useState<string | null>(null);
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [discardFilesOpen, setDiscardFilesOpen] = useState(false);
@@ -436,10 +440,14 @@ function App() {
   // fast repo switch landing stale results). Fetch refreshes it after that.
   useEffect(() => {
     setBehindFolders([]);
+    setPublishableFolders([]);
     if (!selectedPath) return;
     let cancelled = false;
     const path = selectedPath;
     void (async () => {
+      // Publishable set is instant (local, no network); seed it first.
+      const folders = await listLinkedFolders(path).catch(() => [] as LinkedFolder[]);
+      if (!cancelled) setPublishableFolders(folders.filter((folder) => folder.knownSource));
       const behind = await computeBehindFolders(path).catch(() => [] as LinkedFolder[]);
       if (!cancelled) setBehindFolders(behind);
     })();
@@ -1495,6 +1503,35 @@ function App() {
       // runLinkedFolderUpdate already surfaced the error.
     } finally {
       setLinkedBusyPrefix(null);
+    }
+  }
+
+  async function refreshPublishableFolders(path: string) {
+    try {
+      const folders = await listLinkedFolders(path);
+      setPublishableFolders(folders.filter((folder) => folder.knownSource));
+    } catch {
+      // Best-effort — leave the last known set in place.
+    }
+  }
+
+  // Chip-triggered Publish: subtree-push a folder's committed changes to its
+  // source. No conflict path (a push either lands or is rejected). Guardrails
+  // (uncommitted edits, non-fast-forward) come back as thrown error strings.
+  async function publishLinkedFolderFromChip(prefix: string) {
+    if (!selectedPath) return;
+    setLinkedPushBusyPrefix(prefix);
+    setError("");
+    setMessage("");
+    try {
+      const result = await pushLinkedFolder(selectedPath, prefix);
+      setMessage(result.message);
+      await refreshBehindFolders(selectedPath);
+      await refreshPublishableFolders(selectedPath);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLinkedPushBusyPrefix(null);
     }
   }
 
@@ -2558,6 +2595,9 @@ function App() {
               linkedUpdates={behindFolders}
               linkedBusyPrefix={linkedBusyPrefix}
               onUpdateLinkedFolder={updateLinkedFolderFromChip}
+              linkedPublishable={publishableFolders}
+              linkedPushBusyPrefix={linkedPushBusyPrefix}
+              onPublishLinkedFolder={publishLinkedFolderFromChip}
               onManageLinkedFolders={() => openRepoSettings()}
             />
 
