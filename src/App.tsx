@@ -51,7 +51,12 @@ import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsK
 import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
-import { checkSubtreeUpdates, listLinkedFolders, pushLinkedFolder } from "./lib/subtrees";
+import {
+  checkSubtreePublishable,
+  checkSubtreeUpdates,
+  listLinkedFolders,
+  pushLinkedFolder,
+} from "./lib/subtrees";
 import {
   buildTimelineItems,
   moveTimelineSelection,
@@ -445,9 +450,9 @@ function App() {
     let cancelled = false;
     const path = selectedPath;
     void (async () => {
-      // Publishable set is instant (local, no network); seed it first.
-      const folders = await listLinkedFolders(path).catch(() => [] as LinkedFolder[]);
-      if (!cancelled) setPublishableFolders(folders.filter((folder) => folder.knownSource));
+      // Publishable set is instant (local content comparison, no network).
+      const publishable = await computePublishableFolders(path).catch(() => [] as LinkedFolder[]);
+      if (!cancelled) setPublishableFolders(publishable);
       const behind = await computeBehindFolders(path).catch(() => [] as LinkedFolder[]);
       if (!cancelled) setBehindFolders(behind);
     })();
@@ -1491,6 +1496,19 @@ function App() {
     }
   }
 
+  // Which linked folders have local content to publish. Content comparison
+  // (folder tree vs the source's last-fetched tip), so it clears once the source
+  // has the changes — unlike the split-SHA trailer, which push leaves stale.
+  async function computePublishableFolders(path: string): Promise<LinkedFolder[]> {
+    const folders = await listLinkedFolders(path);
+    if (!folders.some((folder) => folder.knownSource)) return [];
+    const statuses = await checkSubtreePublishable(path);
+    const publishable = new Set(
+      statuses.filter((status) => status.publishable === true).map((status) => status.prefix),
+    );
+    return folders.filter((folder) => publishable.has(folder.prefix));
+  }
+
   // Chip-triggered Update: reuse the drawer's update path (so a conflict routes
   // into the same resolver), then recompute the chip.
   async function updateLinkedFolderFromChip(prefix: string) {
@@ -1499,6 +1517,7 @@ function App() {
     try {
       await runLinkedFolderUpdate(prefix);
       await refreshBehindFolders(selectedPath);
+      await refreshPublishableFolders(selectedPath);
     } catch {
       // runLinkedFolderUpdate already surfaced the error.
     } finally {
@@ -1508,8 +1527,7 @@ function App() {
 
   async function refreshPublishableFolders(path: string) {
     try {
-      const folders = await listLinkedFolders(path);
-      setPublishableFolders(folders.filter((folder) => folder.knownSource));
+      setPublishableFolders(await computePublishableFolders(path));
     } catch {
       // Best-effort — leave the last known set in place.
     }
@@ -1988,6 +2006,7 @@ function App() {
       await refreshRepo();
       // Fetch is the network moment we piggyback the linked-folder check on.
       await refreshBehindFolders(selectedPath);
+      await refreshPublishableFolders(selectedPath);
     }
   }
 

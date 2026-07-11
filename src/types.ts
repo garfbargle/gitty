@@ -208,6 +208,15 @@ export type SubtreeUpdateStatus = {
   updatesAvailable: boolean | null;
 };
 
+/// Whether a linked folder has local content to Publish (a subtree push). A
+/// content comparison, so it clears once the source has your changes.
+export type SubtreePublishStatus = {
+  prefix: string;
+  /// `true` the folder differs from its source tip, `false` in sync, `null`
+  /// couldn't tell (unknown source, or its remote hasn't been fetched).
+  publishable: boolean | null;
+};
+
 /// Whether an update (rebase) is paused mid-flight, so the UI can resume it.
 export type UpdateStatus = {
   rebasing: boolean;

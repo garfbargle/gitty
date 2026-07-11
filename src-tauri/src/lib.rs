@@ -259,6 +259,20 @@ struct SubtreeUpdateStatus {
     updates_available: Option<bool>,
 }
 
+/// Whether a linked folder has local content its source doesn't have yet — i.e.
+/// there's something to Publish. Judged by comparing the folder's tree to the
+/// source's last-fetched tip tree (content, not the split-SHA trailer, which
+/// `git subtree push` leaves stale). Instant/local — no network.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubtreePublishStatus {
+    prefix: String,
+    /// `Some(true)` the folder differs from its source tip (Publish has work),
+    /// `Some(false)` identical, `None` couldn't tell (unknown source, or its
+    /// remote hasn't been fetched so there's nothing local to compare against).
+    publishable: Option<bool>,
+}
+
 /// The most recently active *other* branch — a single context lane for the
 /// timeline. Chosen only when its tip is newer than the trunk's, so a stale
 /// branch never clutters the view.
@@ -3133,9 +3147,52 @@ fn infer_subtree_source(repo_path: &Path, split_sha: &str) -> Option<(String, St
     None
 }
 
+/// Every split SHA ever recorded for a prefix, newest-first, deduped. Used as a
+/// fallback when the newest split isn't in a fetched remote (e.g. after a push
+/// advanced the source past the last locally-recorded sync point): an older
+/// split that a remote-tracking branch still contains resolves the source just
+/// as well.
+fn all_subtree_splits(repo_path: &Path, prefix: &str) -> Vec<String> {
+    let log = match git(
+        repo_path,
+        &[
+            "log",
+            "--no-merges",
+            "--grep=git-subtree-dir:",
+            "--pretty=format:%x1e%b",
+        ],
+    ) {
+        Ok(text) => text,
+        Err(_) => return Vec::new(),
+    };
+    let mut splits = Vec::new();
+    let mut seen = HashSet::new();
+    for record in log.split('\u{1e}') {
+        let mut dir: Option<String> = None;
+        let mut split: Option<String> = None;
+        for line in record.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("git-subtree-dir:") {
+                dir = Some(rest.trim().trim_matches('/').to_string());
+            } else if let Some(rest) = line.strip_prefix("git-subtree-split:") {
+                split = Some(rest.trim().to_string());
+            }
+        }
+        if dir.as_deref() == Some(prefix) {
+            if let Some(s) = split.filter(|s| !s.is_empty()) {
+                if seen.insert(s.clone()) {
+                    splits.push(s);
+                }
+            }
+        }
+    }
+    splits
+}
+
 /// Resolve a folder's source URL + branch: the manifest hint if present, else
-/// inferred from remotes via the split commit. Returns `(url, branch,
-/// from_manifest)`. `None` when neither is available (truly unknown).
+/// inferred from remotes via a recorded split commit. Tries the newest split
+/// first, then falls back through older ones (the newest may not be in a fetched
+/// remote). Returns `(url, branch, from_manifest)`. `None` when truly unknown.
 fn resolve_subtree_source(
     repo_path: &Path,
     prefix: &str,
@@ -3145,8 +3202,20 @@ fn resolve_subtree_source(
     if let Some(entry) = manifest.iter().find(|entry| entry.folder == prefix) {
         return Some((entry.url.clone(), entry.branch.clone(), true));
     }
-    let (url, branch) = infer_subtree_source(repo_path, split_sha?)?;
-    Some((url, branch, false))
+    if let Some(split) = split_sha {
+        if let Some((url, branch)) = infer_subtree_source(repo_path, split) {
+            return Some((url, branch, false));
+        }
+    }
+    for split in all_subtree_splits(repo_path, prefix) {
+        if Some(split.as_str()) == split_sha {
+            continue;
+        }
+        if let Some((url, branch)) = infer_subtree_source(repo_path, &split) {
+            return Some((url, branch, false));
+        }
+    }
+    None
 }
 
 /// List this repo's linked folders, merging what history records with the
@@ -3235,6 +3304,79 @@ fn check_subtree_updates(path: String) -> Result<Vec<SubtreeUpdateStatus>, Strin
                 prefix,
                 updates_available,
             }
+        })
+        .collect();
+
+    Ok(statuses)
+}
+
+/// The configured remote whose URL matches a source, if any.
+fn remote_name_for_url(repo_path: &Path, url: &str) -> Option<String> {
+    remote_list(repo_path)
+        .into_iter()
+        .find(|remote| remote.url == url)
+        .map(|remote| remote.name)
+}
+
+/// Tree SHA of a linked folder's content at HEAD.
+fn prefix_tree_at_head(repo_path: &Path, prefix: &str) -> Option<String> {
+    git(repo_path, &["rev-parse", &format!("HEAD:{prefix}")])
+        .ok()
+        .map(|sha| sha.trim().to_string())
+        .filter(|sha| !sha.is_empty())
+}
+
+/// Tip tree of the source's remote-tracking ref (`<remote>/<branch>`), or None
+/// when that remote hasn't been fetched. Local-only, no network.
+fn tracking_tip_tree(repo_path: &Path, url: &str, branch: &str) -> Option<String> {
+    let remote = remote_name_for_url(repo_path, url)?;
+    git(
+        repo_path,
+        &["rev-parse", &format!("{remote}/{branch}^{{tree}}")],
+    )
+    .ok()
+    .map(|sha| sha.trim().to_string())
+    .filter(|sha| !sha.is_empty())
+}
+
+/// Which linked folders have local content their source doesn't have yet (so
+/// Publish has work). Content comparison — the folder's tree vs the source's
+/// last-fetched tip tree — because the split-SHA trailer goes stale after a
+/// push. Instant/local; freshness of "behind" edge cases follows the last fetch.
+#[tauri::command]
+fn check_subtree_publishable(path: String) -> Result<Vec<SubtreePublishStatus>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    let manifest = read_subtree_manifest(repo_path);
+    let discovered = discover_subtree_prefixes(repo_path);
+
+    let mut prefixes: Vec<String> = discovered.keys().cloned().collect();
+    for entry in &manifest {
+        prefixes.push(entry.folder.clone());
+    }
+    prefixes.sort();
+    prefixes.dedup();
+
+    let statuses = prefixes
+        .into_iter()
+        .filter(|prefix| repo_path.join(prefix).exists())
+        .map(|prefix| {
+            let split = discovered.get(&prefix).cloned().flatten();
+            let source = resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest);
+            let publishable = match source {
+                Some((url, branch, _)) if !url.is_empty() && !branch.is_empty() => {
+                    match (
+                        prefix_tree_at_head(repo_path, &prefix),
+                        tracking_tip_tree(repo_path, &url, &branch),
+                    ) {
+                        (Some(local), Some(remote)) => Some(local != remote),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            SubtreePublishStatus { prefix, publishable }
         })
         .collect();
 
@@ -3423,6 +3565,11 @@ fn push_linked_folder(path: String, prefix: String) -> Result<ActionResult, Stri
     let output = combine_output(&stdout, &stderr);
 
     if success {
+        // Push moved the source to our content but left refs/remotes untouched;
+        // advance the tracking ref so the Publish chip clears right away.
+        if let Some(remote) = remote_name_for_url(repo_path, &url) {
+            let _ = git_raw(repo_path, &["fetch", "--quiet", &remote, &branch]);
+        }
         let up_to_date = output.contains("Everything up-to-date") || output.contains("up to date");
         return Ok(ActionResult {
             message: if up_to_date {
@@ -4222,6 +4369,7 @@ pub fn run() {
             pull_repo,
             list_linked_folders,
             check_subtree_updates,
+            check_subtree_publishable,
             add_linked_folder,
             update_linked_folder,
             push_linked_folder,
