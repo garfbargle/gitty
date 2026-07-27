@@ -13,6 +13,12 @@ pub struct AppSettings {
     pub push_on_commit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nvidia_api_key: Option<String>,
+    /// A reusable backup remote profile. `{repo}` is replaced with each saved
+    /// repository's directory name when the user applies it in bulk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_remote_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_url_template: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -21,6 +27,8 @@ impl Default for AppSettings {
             auto_summarize_enabled: default_auto_summarize_enabled(),
             push_on_commit: false,
             nvidia_api_key: None,
+            backup_remote_name: None,
+            backup_url_template: None,
         }
     }
 }
@@ -36,6 +44,8 @@ pub struct AppSettingsView {
     pub push_on_commit: bool,
     pub nvidia_api_key_configured: bool,
     pub nvidia_api_key_preview: Option<String>,
+    pub backup_remote_name: Option<String>,
+    pub backup_url_template: Option<String>,
 }
 
 fn settings_file(app: &AppHandle) -> Result<PathBuf, String> {
@@ -82,6 +92,8 @@ pub fn settings_view(app: &AppHandle) -> Result<AppSettingsView, String> {
             .as_ref()
             .filter(|_| nvidia_api_key_configured)
             .map(|key| mask_nvidia_api_key(key)),
+        backup_remote_name: settings.backup_remote_name,
+        backup_url_template: settings.backup_url_template,
     })
 }
 

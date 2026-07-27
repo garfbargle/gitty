@@ -1433,6 +1433,16 @@ struct RepoChanges {
     is_clean: bool,
 }
 
+/// Metadata that can change while Gitty is in the background. This deliberately
+/// excludes the working tree: an edited file can retain the same porcelain
+/// status, so the frontend refreshes that separately when the window regains
+/// focus.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoFocusState {
+    fingerprint: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RepoEnrichment {
@@ -1494,6 +1504,31 @@ fn repo_changes(path: String) -> Result<RepoChanges, String> {
     Ok(RepoChanges {
         is_clean: changes.is_empty(),
         changes,
+    })
+}
+
+#[tauri::command]
+fn repo_focus_state(path: String) -> Result<RepoFocusState, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+
+    // `for-each-ref` includes local branches, fetched remote refs, and tags;
+    // `current_branch` also catches switching between branches at the same tip.
+    // Remote URLs live in config rather than refs, so include those as well.
+    let refs = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)%00%(*objectname)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ],
+    )?;
+    let remotes = git(repo_path, &["remote", "-v"])?;
+
+    Ok(RepoFocusState {
+        fingerprint: format!("{}\n{refs}\n{remotes}", current_branch(repo_path)),
     })
 }
 
@@ -4432,6 +4467,127 @@ fn set_push_on_commit(app: AppHandle, enabled: bool) -> Result<settings::AppSett
     settings::settings_view(&app)
 }
 
+fn validate_backup_profile(remote_name: &str, url_template: &str) -> Result<(String, String), String> {
+    let remote_name = remote_name.trim().to_string();
+    let url_template = url_template.trim().trim_end_matches('/').to_string();
+    if remote_name.is_empty()
+        || remote_name.starts_with('-')
+        || !remote_name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err("Use a remote name made of letters, numbers, dots, dashes, or underscores.".to_string());
+    }
+    if url_template.is_empty() || !url_template.contains("{repo}") || url_template.contains(char::is_whitespace) {
+        return Err("The backup URL template must contain {repo}, for example https://git.example.com/alice/{repo}.git.".to_string());
+    }
+    Ok((remote_name, url_template))
+}
+
+#[tauri::command]
+fn set_backup_profile(
+    app: AppHandle,
+    remote_name: String,
+    url_template: String,
+) -> Result<settings::AppSettingsView, String> {
+    let (remote_name, url_template) = validate_backup_profile(&remote_name, &url_template)?;
+    let mut current = settings::load_settings(&app)?;
+    current.backup_remote_name = Some(remote_name);
+    current.backup_url_template = Some(url_template);
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+fn backup_repo_slug(repo: &RepoEntry) -> Result<&str, String> {
+    let slug = repo.name.trim();
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err("its folder name cannot be used safely in a remote URL".to_string());
+    }
+    Ok(slug)
+}
+
+/// Set up one repository's backup when the user opens that repository. A
+/// manual remote is never overwritten, and the initial sync copies every local
+/// branch and tag so the backup starts complete rather than at just HEAD.
+fn configure_backup_remote_blocking(
+    path: String,
+    remote_name: String,
+    url_template: String,
+) -> Result<ActionResult, String> {
+    let (remote_name, url_template) = validate_backup_profile(&remote_name, &url_template)?;
+    let repo = normalize_repo(&path)?;
+    let slug = backup_repo_slug(&repo)?;
+    let url = url_template.replace("{repo}", slug);
+    let repo_path = Path::new(&repo.path);
+    let remotes = git(repo_path, &["remote"])?;
+
+    if remotes.lines().any(|name| name == remote_name) {
+        let existing = git(repo_path, &["remote", "get-url", &remote_name])?;
+        if existing.trim() != url {
+            return Err(format!(
+                "{} already points to {}. Gitty will not overwrite an existing backup remote.",
+                remote_name,
+                existing.trim()
+            ));
+        }
+    } else {
+        git_owned(
+            repo_path,
+            vec![
+                "remote".to_string(),
+                "add".to_string(),
+                remote_name.clone(),
+                url.clone(),
+            ],
+        )?;
+    }
+
+    let branches = git_owned(
+        repo_path,
+        vec!["push".to_string(), remote_name.clone(), "--all".to_string()],
+    );
+    let (message, output) = match branches {
+        Ok(branches) => match git_owned(
+            repo_path,
+            vec!["push".to_string(), remote_name.clone(), "--tags".to_string()],
+        ) {
+            Ok(tags) => (
+                format!("Backup {remote_name} configured and synced."),
+                format!("{branches}\n{tags}"),
+            ),
+            Err(error) => (
+                format!("Backup {remote_name} was configured, but its initial sync failed."),
+                error,
+            ),
+        },
+        Err(error) => (
+            format!("Backup {remote_name} was configured, but its initial sync failed."),
+            error,
+        ),
+    };
+    Ok(ActionResult {
+        message,
+        output,
+    })
+}
+
+#[tauri::command]
+async fn configure_backup_remote(
+    path: String,
+    remote_name: String,
+    url_template: String,
+) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        configure_backup_remote_blocking(path, remote_name, url_template)
+    })
+    .await
+    .map_err(|err| format!("Backup setup task failed: {err}"))?
+}
+
 #[tauri::command]
 fn set_nvidia_api_key(app: AppHandle, api_key: String) -> Result<settings::AppSettingsView, String> {
     let mut current = settings::load_settings(&app)?;
@@ -4507,6 +4663,7 @@ pub fn run() {
             repo_enrich,
             repo_commits,
             repo_changes,
+            repo_focus_state,
             commit_files_command,
             commit_diff,
             file_diff,
@@ -4565,6 +4722,8 @@ pub fn run() {
             get_app_settings,
             set_auto_summarize_enabled,
             set_push_on_commit,
+            set_backup_profile,
+            configure_backup_remote,
             set_nvidia_api_key,
             delete_nvidia_api_key,
             test_nvidia_api_key,

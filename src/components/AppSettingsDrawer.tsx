@@ -13,12 +13,20 @@ type AppSettingsDrawerProps = {
   nvidiaKeyTesting?: boolean;
   nvidiaKeyTestMessage?: string | null;
   nvidiaKeyTestError?: boolean;
+  backupRemoteName: string;
+  backupUrlTemplate: string;
+  backupSaving?: boolean;
+  backupSaveMessage?: string | null;
+  backupSaveError?: boolean;
   onClose: () => void;
   onAutoSummarizeEnabledChange: (enabled: boolean) => void;
   onSettingsNvidiaKeyChange: (value: string) => void;
   onSaveNvidiaApiKey: () => void;
   onDeleteNvidiaApiKey: () => void;
   onTestNvidiaApiKey: () => void;
+  onBackupRemoteNameChange: (value: string) => void;
+  onBackupUrlTemplateChange: (value: string) => void;
+  onSaveBackupProfile: () => void;
   disabled?: boolean;
 };
 
@@ -31,12 +39,20 @@ export function AppSettingsDrawer({
   nvidiaKeyTesting = false,
   nvidiaKeyTestMessage = null,
   nvidiaKeyTestError = false,
+  backupRemoteName,
+  backupUrlTemplate,
+  backupSaving = false,
+  backupSaveMessage = null,
+  backupSaveError = false,
   onClose,
   onAutoSummarizeEnabledChange,
   onSettingsNvidiaKeyChange,
   onSaveNvidiaApiKey,
   onDeleteNvidiaApiKey,
   onTestNvidiaApiKey,
+  onBackupRemoteNameChange,
+  onBackupUrlTemplateChange,
+  onSaveBackupProfile,
   disabled,
 }: AppSettingsDrawerProps) {
   const hasDraftKey = settingsNvidiaKey.trim().length > 0;
@@ -123,6 +139,52 @@ export function AppSettingsDrawer({
             </button>
           ) : null}
         </div>
+      </div>
+
+      <div className="settings-field">
+        <div className="settings-field-head">
+          <label>Backup default</label>
+        </div>
+        <p className="settings-field-note">
+          Save a default remote name and URL pattern. Repositories without that backup offer setup
+          when you open their Repository settings.
+        </p>
+        <div className="settings-inline-actions backup-template-fields">
+          <input
+            className="settings-input settings-input-compact"
+            value={backupRemoteName}
+            onChange={(event) => onBackupRemoteNameChange(event.currentTarget.value)}
+            placeholder="backup"
+            aria-label="Backup remote name"
+            disabled={disabled || backupSaving}
+          />
+          <input
+            className="settings-input"
+            value={backupUrlTemplate}
+            onChange={(event) => onBackupUrlTemplateChange(event.currentTarget.value)}
+            placeholder="https://git.example.com/alice/{repo}.git"
+            aria-label="Backup URL template"
+            disabled={disabled || backupSaving}
+          />
+        </div>
+        <p className="settings-field-note">
+          Include <code>{"{repo}"}</code>; it becomes each local repository name. The destination
+          must already exist unless your host supports create-on-push. Gitty never stores credentials.
+        </p>
+        <button
+          type="button"
+          className="settings-btn primary"
+          disabled={disabled || backupSaving || !backupRemoteName.trim() || !backupUrlTemplate.trim()}
+          onClick={onSaveBackupProfile}
+        >
+          {backupSaving ? <Loader2 size={14} className="spin" /> : null}
+          Save backup default
+        </button>
+        {backupSaveMessage ? (
+          <p className={`settings-field-note backup-result ${backupSaveError ? "error" : "success"}`}>
+            {backupSaveMessage}
+          </p>
+        ) : null}
       </div>
     </SettingsModal>
   );

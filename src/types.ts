@@ -77,6 +77,13 @@ export type RepoChanges = {
   isClean: boolean;
 };
 
+/// A compact signature of the repository metadata that affects Gitty's
+/// history, branch, remote, and tag views. The working tree is refreshed
+/// separately, since its contents can change without its status changing.
+export type RepoFocusState = {
+  fingerprint: string;
+};
+
 export type RepoEnrichment = {
   aheadCommits: CommitEntry[];
   aheadBranch?: string | null;
@@ -137,6 +144,8 @@ export type AppSettingsView = {
   pushOnCommit: boolean;
   nvidiaApiKeyConfigured: boolean;
   nvidiaApiKeyPreview?: string | null;
+  backupRemoteName?: string | null;
+  backupUrlTemplate?: string | null;
 };
 
 export type ChangeSummary = {

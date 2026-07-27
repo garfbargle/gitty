@@ -3862,6 +3862,17 @@ button.context-chip.pullable:disabled {
   gap: 8px;
 }
 
+.backup-template-fields .settings-input:not(.settings-input-compact) {
+  flex: 1;
+  min-width: 200px;
+}
+
+.backup-result {
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .settings-btn {
   align-items: center;
   background: var(--bg-elevated);

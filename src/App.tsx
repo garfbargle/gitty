@@ -39,6 +39,7 @@ import type {
   RepoEntry,
   RepoChanges,
   RepoEnrichment,
+  RepoFocusState,
   RepoSnapshot,
   SelectionAnchor,
   MergeOutcome,
@@ -238,6 +239,11 @@ function App() {
   const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
   const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
   const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
+  const [backupRemoteName, setBackupRemoteName] = useState("backup");
+  const [backupUrlTemplate, setBackupUrlTemplate] = useState("");
+  const [backupSaving, setBackupSaving] = useState(false);
+  const [backupSaveMessage, setBackupSaveMessage] = useState<string | null>(null);
+  const [backupSaveError, setBackupSaveError] = useState(false);
   const [nvidiaApiKey, setNvidiaApiKey] = useState("");
   const [settingsNvidiaKey, setSettingsNvidiaKey] = useState("");
   const [nvidiaKeyTesting, setNvidiaKeyTesting] = useState(false);
@@ -351,6 +357,7 @@ function App() {
   const workingTreeRefreshInFlightRef = useRef(false);
   const focusRefreshTimerRef = useRef<number | null>(null);
   const lastFocusRefreshAtRef = useRef(0);
+  const focusFingerprintByPathRef = useRef(new Map<string, string>());
   const snapshotGenerationRef = useRef(0);
   const FOCUS_REFRESH_DEBOUNCE_MS = 400;
   const FOCUS_REFRESH_MIN_INTERVAL_MS = 2000;
@@ -494,6 +501,8 @@ function App() {
     setNvidiaApiKeyPreview(settings.nvidiaApiKeyPreview ?? null);
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
     setPushOnCommit(settings.pushOnCommit);
+    setBackupRemoteName(settings.backupRemoteName?.trim() || "backup");
+    setBackupUrlTemplate(settings.backupUrlTemplate ?? "");
   }
 
   async function handlePushOnCommitChange(enabled: boolean) {
@@ -503,6 +512,45 @@ function App() {
       applyAppSettings(settings);
     } catch (err) {
       setError(String(err));
+    }
+  }
+
+  async function saveBackupProfile() {
+    const remoteName = backupRemoteName.trim();
+    const urlTemplate = backupUrlTemplate.trim();
+    if (!remoteName || !urlTemplate) return;
+    setBackupSaving(true);
+    setBackupSaveMessage(null);
+    setBackupSaveError(false);
+    try {
+      const settings = await invoke<AppSettingsView>("set_backup_profile", {
+        remoteName,
+        urlTemplate,
+      });
+      applyAppSettings(settings);
+      setBackupSaveMessage("Backup default saved. Repositories will offer setup when opened.");
+    } catch (err) {
+      setBackupSaveMessage(String(err));
+      setBackupSaveError(true);
+    } finally {
+      setBackupSaving(false);
+    }
+  }
+
+  async function setupBackupForSelectedRepo(): Promise<boolean> {
+    if (!selectedPath || !backupUrlTemplate.trim()) return false;
+    try {
+      const result = await invoke<ActionResult>("configure_backup_remote", {
+        path: selectedPath,
+        remoteName: backupRemoteName,
+        urlTemplate: backupUrlTemplate,
+      });
+      setMessage([result.message, result.output].filter(Boolean).join("\n"));
+      await refreshRepo();
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
     }
   }
 
@@ -775,17 +823,39 @@ function App() {
     });
   }
 
-  async function refreshWorkingTree() {
+  async function refreshOnFocus() {
     if (workingTreeRefreshInFlightRef.current) return;
     const { selectedPath: path } = focusRefreshContextRef.current;
     if (!path) return;
 
     workingTreeRefreshInFlightRef.current = true;
     try {
-      const changes = await refreshChangesQuiet(path);
+      const focusState = await invoke<RepoFocusState>("repo_focus_state", { path }).catch(
+        () => null,
+      );
+      if (focusRefreshContextRef.current.selectedPath !== path) return;
+
+      const priorFingerprint = focusState
+        ? focusFingerprintByPathRef.current.get(path)
+        : undefined;
+      if (focusState) focusFingerprintByPathRef.current.set(path, focusState.fingerprint);
+      // A full snapshot is only needed when history or repository metadata
+      // changed while Gitty was away. The first return to a repo establishes a
+      // trustworthy baseline; later returns only pay for this when it changed.
+      const shouldRefreshSnapshot =
+        !!focusState &&
+        (priorFingerprint === undefined || priorFingerprint !== focusState.fingerprint);
+      const snapshot = shouldRefreshSnapshot ? await refreshRepoQuiet(path) : null;
+      if (shouldRefreshSnapshot) {
+        if (focusRefreshContextRef.current.selectedPath !== path) return;
+      }
+
+      const changes = snapshot?.changes ?? (await refreshChangesQuiet(path));
       if (!changes) return;
 
-      const currentFocus = focusRefreshContextRef.current.focus;
+      const currentContext = focusRefreshContextRef.current;
+      if (currentContext.selectedPath !== path || currentContext.viewingCommit) return;
+      const currentFocus = currentContext.focus;
       if (currentFocus?.kind === "file" && currentFocus.section !== "commit") {
         const list =
           currentFocus.section === "unstaged"
@@ -806,8 +876,8 @@ function App() {
     }
   }
 
-  const refreshWorkingTreeRef = useRef(refreshWorkingTree);
-  refreshWorkingTreeRef.current = refreshWorkingTree;
+  const refreshOnFocusRef = useRef(refreshOnFocus);
+  refreshOnFocusRef.current = refreshOnFocus;
 
   useEffect(() => {
     let active = true;
@@ -816,8 +886,8 @@ function App() {
     void getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (!focused || !active) return;
-        const { selectedPath, viewingCommit } = focusRefreshContextRef.current;
-        if (!selectedPath || viewingCommit) return;
+        const { selectedPath } = focusRefreshContextRef.current;
+        if (!selectedPath) return;
         if (Date.now() - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
           return;
         }
@@ -827,7 +897,7 @@ function App() {
         focusRefreshTimerRef.current = window.setTimeout(() => {
           focusRefreshTimerRef.current = null;
           lastFocusRefreshAtRef.current = Date.now();
-          void refreshWorkingTreeRef.current();
+          void refreshOnFocusRef.current();
         }, FOCUS_REFRESH_DEBOUNCE_MS);
       })
       .then((fn) => {
@@ -3026,6 +3096,9 @@ function App() {
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             onUpdateFolder={runLinkedFolderUpdate}
+            backupRemoteName={backupUrlTemplate.trim() ? backupRemoteName : null}
+            backupUrlTemplate={backupUrlTemplate || null}
+            onSetupBackup={setupBackupForSelectedRepo}
             disabled={loading}
           />
         </>
@@ -3040,12 +3113,20 @@ function App() {
         nvidiaKeyTesting={nvidiaKeyTesting}
         nvidiaKeyTestMessage={nvidiaKeyTestMessage}
         nvidiaKeyTestError={nvidiaKeyTestError}
+        backupRemoteName={backupRemoteName}
+        backupUrlTemplate={backupUrlTemplate}
+        backupSaving={backupSaving}
+        backupSaveMessage={backupSaveMessage}
+        backupSaveError={backupSaveError}
         onClose={() => setSettingsOpen(false)}
         onAutoSummarizeEnabledChange={(enabled) => void setAutoSummarizeEnabledSetting(enabled)}
         onSettingsNvidiaKeyChange={setSettingsNvidiaKey}
         onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromSettings()}
         onDeleteNvidiaApiKey={() => void deleteNvidiaApiKey()}
         onTestNvidiaApiKey={() => void testNvidiaApiKey()}
+        onBackupRemoteNameChange={setBackupRemoteName}
+        onBackupUrlTemplateChange={setBackupUrlTemplate}
+        onSaveBackupProfile={() => void saveBackupProfile()}
         disabled={loading}
       />
     </main>
