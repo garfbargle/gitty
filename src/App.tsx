@@ -2388,7 +2388,8 @@ function App() {
     hasRemotes &&
     ((snapshot?.ahead ?? 0) > 0 ||
       (snapshot?.unpushedTags?.length ?? 0) > 0 ||
-      (snapshot?.branchUnpublished ?? false));
+      (snapshot?.branchUnpublished ?? false) ||
+      (snapshot?.backupPushPending ?? false));
   const unpushedTagSet = useMemo(
     () => new Set(snapshot?.unpushedTags ?? []),
     [snapshot?.unpushedTags],

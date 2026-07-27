@@ -662,9 +662,16 @@ export function RepoSettingsDrawer({
   }
 
   function addDraft() {
+    const taken = new Set(drafts.map((draft) => draft.name.trim()).filter(Boolean));
+    let number = 1;
+    let name = "backup";
+    while (taken.has(name)) {
+      number += 1;
+      name = `backup-${number}`;
+    }
     setDrafts((current) => [
       ...current,
-      { id: `new-${Date.now()}`, name: "", url: "", existed: false },
+      { id: `new-${Date.now()}`, name, url: "", existed: false },
     ]);
   }
 
@@ -767,7 +774,7 @@ export function RepoSettingsDrawer({
 
       <div className="settings-field">
         <div className="settings-field-head">
-          <label>Remote URL</label>
+          <label>Primary remote & backups</label>
           <button
             type="button"
             className="settings-inline-link"
@@ -775,7 +782,7 @@ export function RepoSettingsDrawer({
             onClick={addDraft}
           >
             <Plus size={12} />
-            Add remote
+            Add backup
           </button>
         </div>
 
@@ -790,7 +797,7 @@ export function RepoSettingsDrawer({
                       className="settings-input settings-input-compact"
                       value={draft.name}
                       onChange={(event) => updateDraft(draft.id, { name: event.currentTarget.value })}
-                      placeholder="origin"
+                      placeholder="backup"
                       aria-label="Remote name"
                       disabled={disabled || saving || draft.existed}
                     />
@@ -822,7 +829,10 @@ export function RepoSettingsDrawer({
 
         {saveError ? <p className="settings-field-note error">{saveError}</p> : null}
         {!dirty && canFetch ? (
-          <p className="settings-field-note">Changes are saved to this repo&apos;s git config.</p>
+          <p className="settings-field-note">
+            <code>origin</code> (or the first remote) is the primary for fetches and branch tracking.
+            Every other remote is a backup copy and receives pushes after the primary succeeds.
+          </p>
         ) : null}
       </div>
 

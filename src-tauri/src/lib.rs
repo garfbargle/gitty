@@ -140,6 +140,10 @@ struct RepoSnapshot {
     /// The current branch exists locally but not on any remote, so pushing it
     /// would publish it. Lights the push button even with no commits ahead.
     branch_unpublished: bool,
+    /// A previous primary push succeeded but at least one backup copy failed.
+    /// Keep Push enabled so the user can repair the backup without creating a
+    /// throwaway commit first.
+    backup_push_pending: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -471,6 +475,20 @@ fn default_remote_name(repo_path: &Path) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+/// The primary remote is the repository's source of truth: Gitty fetches from
+/// it, tracks branches against it, and pushes there before attempting any
+/// backup copies. `origin` is Git's conventional primary name; fall back to
+/// the first configured remote for repos which use another convention.
+fn backup_remote_names(repo_path: &Path, primary: &str) -> Vec<String> {
+    git(repo_path, &["remote"])
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && *name != primary)
+        .map(str::to_string)
+        .collect()
+}
+
 fn parse_ahead_behind(output: &str) -> (u32, u32) {
     let mut parts = output.split_whitespace();
     let ahead = parts
@@ -550,22 +568,40 @@ fn remote_tag_hashes(repo_path: &Path, remote: &str) -> HashMap<String, String> 
     map
 }
 
-fn unpushed_tags(repo_path: &Path) -> Vec<String> {
-    let Some(remote) = default_remote_name(repo_path) else {
-        return Vec::new();
-    };
-
+fn unpushed_tags_to_remote(repo_path: &Path, remote: &str) -> Vec<String> {
     let local = local_tag_hashes(repo_path);
     if local.is_empty() {
         return Vec::new();
     }
 
-    let remote = remote_tag_hashes(repo_path, &remote);
+    let remote = remote_tag_hashes(repo_path, remote);
     local
         .into_iter()
         .filter(|(name, hash)| remote.get(name).map_or(true, |remote_hash| remote_hash != hash))
         .map(|(name, _)| name)
         .collect()
+}
+
+fn unpushed_tags(repo_path: &Path) -> Vec<String> {
+    default_remote_name(repo_path)
+        .map(|remote| unpushed_tags_to_remote(repo_path, &remote))
+        .unwrap_or_default()
+}
+
+fn backup_push_pending(repo_path: &Path) -> bool {
+    git(repo_path, &["config", "--bool", "--get", "gitty.backup-push-pending"])
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
+fn set_backup_push_pending(repo_path: &Path, pending: bool) {
+    if pending {
+        let _ = git(repo_path, &["config", "gitty.backup-push-pending", "true"]);
+    } else if backup_push_pending(repo_path) {
+        // This is local Gitty bookkeeping, never a repository file or shared
+        // config. Ignore a failed cleanup: it merely leaves Retry Push visible.
+        let _ = git(repo_path, &["config", "--unset-all", "gitty.backup-push-pending"]);
+    }
 }
 
 fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
@@ -1386,6 +1422,7 @@ fn repo_snapshot_blocking(
         tags,
         unpushed_tags: unpushed_tag_names,
         branch_unpublished,
+        backup_push_pending: backup_push_pending(&repo_path),
     })
 }
 
@@ -3939,9 +3976,14 @@ fn init_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
 #[tauri::command]
 fn fetch_repo(path: String) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
-    let output = git(Path::new(&repo.path), &["fetch", "--all", "--prune"])?;
+    let repo_path = Path::new(&repo.path);
+    let remote = default_remote_name(repo_path)
+        .ok_or_else(|| "Add a primary remote before fetching.".to_string())?;
+    // Extra remotes are backup destinations. Fetching only the primary keeps a
+    // backup from becoming an accidental source of branch state or merges.
+    let output = git(repo_path, &["fetch", "--prune", &remote])?;
     Ok(ActionResult {
-        message: "Fetch completed.".to_string(),
+        message: format!("Fetched {remote}."),
         output,
     })
 }
@@ -3970,12 +4012,38 @@ fn push_tags(repo_path: &Path, remote: &str, tags: &[String]) -> Result<String, 
     git_owned(repo_path, args)
 }
 
+/// Replicate the current branch and/or freshly-pushed tags to one backup
+/// remote. This deliberately does not set an upstream: backups are write-only
+/// copies, while the primary remains the only tracking remote.
+fn push_backup(
+    repo_path: &Path,
+    remote: &str,
+    branch: Option<&str>,
+    tags: &[String],
+    force: bool,
+    hard: bool,
+) -> Result<String, String> {
+    let mut args = vec!["push".to_string()];
+    if hard {
+        args.push("--force".to_string());
+    } else if force {
+        args.push("--force-with-lease".to_string());
+    }
+    args.push(remote.to_string());
+    if let Some(branch) = branch {
+        args.push(format!("{branch}:{branch}"));
+    }
+    args.extend(tags.iter().cloned());
+    git_owned(repo_path, args)
+}
+
 fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let branch = current_branch(repo_path);
     let tags_to_push = unpushed_tags(repo_path);
     let remote = default_remote_name(repo_path);
+    let retrying_backup = backup_push_pending(repo_path);
     let mut outputs = Vec::new();
     let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
     let forcing = force || hard;
@@ -4018,12 +4086,55 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
         outputs.push(push_tags(repo_path, remote_name, &tags_to_push)?);
     }
 
-    if outputs.is_empty() {
+    if outputs.is_empty() && !retrying_backup {
         return Err("Nothing to push.".to_string());
     }
 
+    // Treat every non-primary remote as a push-only backup. Run these after the
+    // primary push so a backup outage never leaves the user wondering whether
+    // their main remote received the changes. A failed backup is reported in
+    // the successful action result, making it visible and retryable on the
+    // next Push without masking the primary success.
+    let primary_name = remote.as_deref().unwrap_or_default();
+    let backups = backup_remote_names(repo_path, primary_name);
+    let backup_branch = (!is_detached_branch(&branch)
+        && (branch_pushed || !tags_to_push.is_empty() || retrying_backup))
+        .then_some(branch.as_str());
+    let mut backed_up = Vec::new();
+    let mut backup_failures = Vec::new();
+    for backup in backups {
+        // Compare each backup independently. This repairs tags that reached the
+        // primary before a backup failed, and makes a retry complete rather
+        // than merely re-sending the branch.
+        let backup_tags = unpushed_tags_to_remote(repo_path, &backup);
+        if backup_branch.is_none() && backup_tags.is_empty() {
+            continue;
+        }
+        match push_backup(
+            repo_path,
+            &backup,
+            backup_branch,
+            &backup_tags,
+            force,
+            hard,
+        ) {
+            Ok(output) => {
+                backed_up.push(backup.clone());
+                outputs.push(format!("Backup {backup}:\n{output}"));
+            }
+            Err(error) => backup_failures.push(format!("{backup}: {error}")),
+        }
+    }
+
+    if !backup_failures.is_empty() {
+        set_backup_push_pending(repo_path, true);
+    } else {
+        set_backup_push_pending(repo_path, false);
+    }
+
+    let retry_only = retrying_backup && !branch_pushed && tags_to_push.is_empty();
     let tag_count = tags_to_push.len();
-    let message = match (branch_pushed, tag_count) {
+    let primary_message = match (branch_pushed, tag_count) {
         (true, 0) if hard => "Force push completed (--force, remote overwritten).".to_string(),
         (true, 0) if force => "Force push completed with --force-with-lease.".to_string(),
         (true, 0) => "Push completed.".to_string(),
@@ -4032,6 +4143,38 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
         (false, 1) => "Pushed 1 tag.".to_string(),
         (false, count) => format!("Pushed {count} tags."),
     };
+
+    let message = if retry_only && backup_failures.is_empty() && backed_up.is_empty() {
+        "No backup remotes remain; cleared the backup retry.".to_string()
+    } else if retry_only && backup_failures.is_empty() {
+        format!("Backup retry completed for {}.", backed_up.join(", "))
+    } else if retry_only {
+        format!(
+            "Backup retry failed for {}. Retry Push to try again.",
+            backup_failures
+                .iter()
+                .map(|failure| failure.split_once(':').map(|(name, _)| name).unwrap_or(failure.as_str()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    } else if backup_failures.is_empty() && backed_up.is_empty() {
+        primary_message
+    } else if backup_failures.is_empty() {
+        format!("{primary_message} Backed up to {}.", backed_up.join(", "))
+    } else {
+        format!(
+            "{primary_message} Backup failed for {}. Retry Push to try again.",
+            backup_failures
+                .iter()
+                .map(|failure| failure.split_once(':').map(|(name, _)| name).unwrap_or(failure.as_str()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    };
+
+    if !backup_failures.is_empty() {
+        outputs.push(format!("Backup failures:\n{}", backup_failures.join("\n")));
+    }
 
     Ok(ActionResult {
         message,

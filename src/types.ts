@@ -111,6 +111,9 @@ export type RepoSnapshot = {
   /// The current branch exists locally but not on any remote, so pushing it
   /// would publish it — lights the push button even with no commits ahead.
   branchUnpublished?: boolean;
+  /// A prior primary push made it, but one or more backup remotes did not.
+  /// Keeps Push available so the backup can be retried.
+  backupPushPending?: boolean;
 };
 
 /// The most recently active branch other than the current one and the trunk,
