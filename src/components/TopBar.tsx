@@ -42,6 +42,7 @@ type TopBarProps = {
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
   backupSetupAvailable?: boolean;
+  backupRetryPending?: boolean;
   backupRemoteName?: string | null;
   onSetupBackup?: () => Promise<boolean>;
   onPull?: () => Promise<boolean>;
@@ -90,6 +91,7 @@ export function TopBar({
   onForcePush,
   onOverwrite,
   backupSetupAvailable = false,
+  backupRetryPending = false,
   backupRemoteName,
   onSetupBackup,
   onPull,
@@ -212,6 +214,7 @@ export function TopBar({
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
             backupSetupAvailable={backupSetupAvailable}
+            backupRetryPending={backupRetryPending}
             backupRemoteName={backupRemoteName}
             onSetupBackup={onSetupBackup}
           />

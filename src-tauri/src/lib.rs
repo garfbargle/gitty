@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Write,
+    io::{BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
@@ -20,7 +20,7 @@ use std::{
 
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
 const SNAPSHOT_SUPERSEDED: &str = "__superseded__";
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +153,25 @@ struct RepoSnapshot {
 struct ActionResult {
     message: String,
     output: String,
+}
+
+/// A line (or progress fragment) emitted while a network Git operation runs.
+/// The frontend streams these into the status console instead of waiting for
+/// the command to exit before explaining what it is doing.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitProgress {
+    path: String,
+    phase: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupSetupResult {
+    message: String,
+    output: String,
+    synced: bool,
 }
 
 /// A safety preview of merging `source` into `target`, computed without
@@ -443,6 +462,118 @@ fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, Stri
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn emit_git_progress(app: &AppHandle, path: &str, phase: impl Into<String>, message: impl Into<String>) {
+    let _ = app.emit(
+        "git-progress",
+        GitProgress {
+            path: path.to_string(),
+            phase: phase.into(),
+            message: message.into(),
+        },
+    );
+}
+
+/// The streaming counterpart to `git_network_owned`, used for pushes. Git
+/// writes transfer progress to stderr, so capture it in a reader thread and
+/// emit fragments immediately. `--progress` forces this information even when
+/// the app is not attached to a terminal.
+fn git_network_owned_with_progress(
+    app: &AppHandle,
+    repo_path: &Path,
+    args: Vec<String>,
+    phase: &str,
+) -> Result<String, String> {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    let mut command_args = args;
+    if command_args.first().is_some_and(|arg| arg == "push")
+        && !command_args.iter().any(|arg| arg == "--progress")
+    {
+        command_args.insert(1, "--progress".to_string());
+    }
+
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .arg("-c")
+        .arg("http.lowSpeedLimit=1")
+        .arg("-c")
+        .arg("http.lowSpeedTime=30")
+        .args(&command_args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("Could not run git: {err}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture git output.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Could not capture git progress.".to_string())?;
+    let stdout_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = BufReader::new(stdout).read_to_end(&mut bytes);
+        bytes
+    });
+    let progress_app = app.clone();
+    let progress_path = repo_path.to_string_lossy().to_string();
+    let progress_phase = phase.to_string();
+    let stderr_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut all = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let Ok(count) = reader.read(&mut buffer) else {
+                break;
+            };
+            if count == 0 {
+                break;
+            }
+            let chunk = &buffer[..count];
+            all.extend_from_slice(chunk);
+            let text = String::from_utf8_lossy(chunk).replace('\r', "\n");
+            for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                emit_git_progress(&progress_app, &progress_path, progress_phase.clone(), line);
+            }
+        }
+        all
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|err| format!("Could not wait for git: {err}"))?
+        {
+            break status;
+        }
+        if started.elapsed() >= TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            // Do not wait for the reader threads here. A misbehaving Git
+            // transport helper can retain the inherited pipe after its parent
+            // dies; waiting for it would recreate the very UI stall this guard
+            // is meant to prevent.
+            let message = format!("Timed out after {} seconds.", TIMEOUT.as_secs());
+            emit_git_progress(app, &repo_path.to_string_lossy(), phase, message.clone());
+            return Err(format!(
+                "git -C {} {}\nNetwork operation {} Check the remote and try again.",
+                repo_path.display(),
+                command_args.join(" "),
+                message.to_lowercase()
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+    let output = Output {
+        status,
+        stdout: stdout_reader.join().unwrap_or_default(),
+        stderr: stderr_reader.join().unwrap_or_default(),
+    };
+    git_output_result(repo_path, &command_args, output)
 }
 
 /// Runs git and returns (success, stdout, stderr) without folding a non-zero
@@ -4111,20 +4242,28 @@ fn remove_remote(path: String, name: String) -> Result<ActionResult, String> {
     })
 }
 
-fn push_tags(repo_path: &Path, remote: &str, tags: &[String]) -> Result<String, String> {
+fn push_tags(
+    app: &AppHandle,
+    repo_path: &Path,
+    remote: &str,
+    tags: &[String],
+) -> Result<String, String> {
     if tags.is_empty() {
         return Ok(String::new());
     }
 
     let mut args = vec!["push".to_string(), remote.to_string()];
     args.extend(tags.iter().cloned());
-    git_network_owned(repo_path, args)
+    let phase = format!("Pushing tags to {remote}");
+    emit_git_progress(app, &repo_path.to_string_lossy(), phase.clone(), "Starting…");
+    git_network_owned_with_progress(app, repo_path, args, &phase)
 }
 
 /// Replicate the current branch and/or freshly-pushed tags to one backup
 /// remote. This deliberately does not set an upstream: backups are write-only
 /// copies, while the primary remains the only tracking remote.
 fn push_backup(
+    app: &AppHandle,
     repo_path: &Path,
     remote: &str,
     branch: Option<&str>,
@@ -4143,15 +4282,25 @@ fn push_backup(
         args.push(format!("{branch}:{branch}"));
     }
     args.extend(tags.iter().cloned());
-    git_network_owned(repo_path, args)
+    let phase = format!("Backing up to {remote}");
+    emit_git_progress(app, &repo_path.to_string_lossy(), phase.clone(), "Starting…");
+    git_network_owned_with_progress(app, repo_path, args, &phase)
 }
 
-fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
+fn push_repo_blocking(
+    app: AppHandle,
+    path: String,
+    force: bool,
+    hard: bool,
+) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let branch = current_branch(repo_path);
-    let tags_to_push = unpushed_tags(repo_path);
     let remote = default_remote_name(repo_path);
+    if let Some(remote) = remote.as_deref() {
+        emit_git_progress(&app, &repo.path, format!("Checking {remote}"), "Checking tags and remote state…");
+    }
+    let tags_to_push = unpushed_tags(repo_path);
     let retrying_backup = backup_push_pending(repo_path);
     let mut outputs = Vec::new();
     let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
@@ -4185,14 +4334,17 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
             }
         }
 
-        outputs.push(git_network_owned(repo_path, args)?);
+        let primary = remote.as_deref().unwrap_or("primary");
+        let phase = format!("Pushing to {primary}");
+        emit_git_progress(&app, &repo.path, phase.clone(), "Starting…");
+        outputs.push(git_network_owned_with_progress(&app, repo_path, args, &phase)?);
     }
 
     if !tags_to_push.is_empty() {
         let remote_name = remote
             .as_deref()
             .ok_or_else(|| "Add a remote before pushing tags.".to_string())?;
-        outputs.push(push_tags(repo_path, remote_name, &tags_to_push)?);
+        outputs.push(push_tags(&app, repo_path, remote_name, &tags_to_push)?);
     }
 
     if outputs.is_empty() && !retrying_backup {
@@ -4220,6 +4372,7 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
             continue;
         }
         match push_backup(
+            &app,
             repo_path,
             &backup,
             backup_branch,
@@ -4292,8 +4445,13 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
 }
 
 #[tauri::command]
-async fn push_repo(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(path, force, hard))
+async fn push_repo(
+    app: AppHandle,
+    path: String,
+    force: bool,
+    hard: bool,
+) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(app, path, force, hard))
         .await
         .map_err(|err| format!("Push task failed: {err}"))?
 }
@@ -4588,10 +4746,11 @@ fn backup_repo_slug(repo: &RepoEntry) -> Result<&str, String> {
 /// manual remote is never overwritten, and the initial sync copies every local
 /// branch and tag so the backup starts complete rather than at just HEAD.
 fn configure_backup_remote_blocking(
+    app: AppHandle,
     path: String,
     remote_name: String,
     url_template: String,
-) -> Result<ActionResult, String> {
+) -> Result<BackupSetupResult, String> {
     let (remote_name, url_template) = validate_backup_profile(&remote_name, &url_template)?;
     let repo = normalize_repo(&path)?;
     let slug = backup_repo_slug(&repo)?;
@@ -4620,43 +4779,58 @@ fn configure_backup_remote_blocking(
         )?;
     }
 
-    let branches = git_network_owned(
+    let phase = format!("Setting up backup {remote_name}");
+    emit_git_progress(&app, &repo.path, phase.clone(), "Pushing all local branches…");
+    let branches = git_network_owned_with_progress(
+        &app,
         repo_path,
         vec!["push".to_string(), remote_name.clone(), "--all".to_string()],
+        &phase,
     );
-    let (message, output) = match branches {
-        Ok(branches) => match git_network_owned(
+    let (message, output, synced) = match branches {
+        Ok(branches) => {
+            emit_git_progress(&app, &repo.path, phase.clone(), "Pushing tags…");
+            match git_network_owned_with_progress(
+            &app,
             repo_path,
             vec!["push".to_string(), remote_name.clone(), "--tags".to_string()],
+            &phase,
         ) {
             Ok(tags) => (
                 format!("Backup {remote_name} configured and synced."),
                 format!("{branches}\n{tags}"),
+                true,
             ),
             Err(error) => (
                 format!("Backup {remote_name} was configured, but its initial sync failed."),
                 error,
+                false,
             ),
-        },
+            }
+        }
         Err(error) => (
             format!("Backup {remote_name} was configured, but its initial sync failed."),
             error,
+            false,
         ),
     };
-    Ok(ActionResult {
+    set_backup_push_pending(repo_path, !synced);
+    Ok(BackupSetupResult {
         message,
         output,
+        synced,
     })
 }
 
 #[tauri::command]
 async fn configure_backup_remote(
+    app: AppHandle,
     path: String,
     remote_name: String,
     url_template: String,
-) -> Result<ActionResult, String> {
+) -> Result<BackupSetupResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        configure_backup_remote_blocking(path, remote_name, url_template)
+        configure_backup_remote_blocking(app, path, remote_name, url_template)
     })
     .await
     .map_err(|err| format!("Backup setup task failed: {err}"))?

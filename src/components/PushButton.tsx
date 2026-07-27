@@ -21,6 +21,7 @@ type PushButtonProps = {
   onOverwrite: () => Promise<boolean>;
   /** A backup default exists, but this repository has not been set up for it yet. */
   backupSetupAvailable?: boolean;
+  backupRetryPending?: boolean;
   backupRemoteName?: string | null;
   onSetupBackup?: () => Promise<boolean>;
 };
@@ -39,6 +40,7 @@ export function PushButton({
   onForcePush,
   onOverwrite,
   backupSetupAvailable = false,
+  backupRetryPending = false,
   backupRemoteName,
   onSetupBackup,
 }: PushButtonProps) {
@@ -112,12 +114,12 @@ export function PushButton({
         <button
           type="button"
           className="push-btn-main"
-          title={`Set up ${backupRemoteName || "the"} backup and sync this repository`}
+          title={`${backupRetryPending ? "Retry" : "Set up"} ${backupRemoteName || "the"} backup and sync this repository`}
           disabled={isLocked || settingUpBackup}
           onClick={() => void setupBackup()}
         >
           {settingUpBackup ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
-          {settingUpBackup ? "Setting up…" : "Set up backup"}
+          {settingUpBackup ? "Setting up…" : backupRetryPending ? "Retry backup" : "Set up backup"}
         </button>
       </div>
     );

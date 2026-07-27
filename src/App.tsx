@@ -67,6 +67,14 @@ import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
 
+type GitProgress = {
+  path: string;
+  phase: string;
+  message: string;
+};
+
+type BackupSetupResult = ActionResult & { synced: boolean };
+
 function discoveredInsertIndex(repos: DiscoveredRepoEntry[], lastEditedAt: number): number {
   let lo = 0;
   let hi = repos.length;
@@ -381,6 +389,22 @@ function App() {
     void loadAppSettings();
   }, []);
 
+  // Git push progress is written to stderr by Git. The Rust side forwards it
+  // as events so the bottom console stays alive during longer uploads instead
+  // of appearing frozen until the command exits.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<GitProgress>("git-progress", (event) => {
+      if (event.payload.path !== selectedPath) return;
+      const line = `${event.payload.phase}: ${event.payload.message}`.trim();
+      if (!line) return;
+      setMessage((current) => [...current.split("\n"), line].filter(Boolean).slice(-120).join("\n"));
+    }).then((stop) => {
+      unlisten = stop;
+    });
+    return () => unlisten?.();
+  }, [selectedPath]);
+
   const rescanDiscovery = useCallback(() => {
     startDiscovery(savedPaths);
   }, [savedPaths, startDiscovery]);
@@ -546,14 +570,14 @@ function App() {
   async function setupBackupForSelectedRepo(): Promise<boolean> {
     if (!selectedPath || !savedBackupUrlTemplate.trim()) return false;
     try {
-      const result = await invoke<ActionResult>("configure_backup_remote", {
+      const result = await invoke<BackupSetupResult>("configure_backup_remote", {
         path: selectedPath,
         remoteName: savedBackupRemoteName,
         urlTemplate: savedBackupUrlTemplate,
       });
-      setMessage([result.message, result.output].filter(Boolean).join("\n"));
+      setMessage((current) => [current, result.message, result.output].filter(Boolean).join("\n"));
       await refreshRepo();
-      return true;
+      return result.synced;
     } catch (err) {
       setError(String(err));
       return false;
@@ -1461,7 +1485,7 @@ function App() {
     const branch = snapshot.branch;
     setIntegrationRunning(true);
     setError("");
-    setMessage("");
+    setMessage("Pushing…");
     try {
       const outcome = await invoke<UpdateOutcome>("update_branch", {
         path: selectedPath,
@@ -2106,12 +2130,12 @@ function App() {
     pushLockRef.current = true;
     setPushPhase("pushing");
     setError("");
-    setMessage("");
+    setMessage("Pushing…");
     await waitForPaint();
 
     try {
       const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force, hard });
-      setMessage([result.message, result.output].filter(Boolean).join("\n"));
+      setMessage((current) => [current, result.message, result.output].filter(Boolean).join("\n"));
       setPushRejected(false);
       const snap = await refreshRepoQuiet(selectedPath);
       const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
@@ -2422,7 +2446,9 @@ function App() {
     hasRemotes &&
     savedBackupRemoteName.trim().length > 0 &&
     savedBackupUrlTemplate.trim().includes("{repo}") &&
-    !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
+    (!snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim()) ||
+      (snapshot?.backupPushPending ?? false));
+  const backupRetryPending = !!snapshot?.backupPushPending;
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
 
@@ -2709,6 +2735,7 @@ function App() {
               onOverwrite={() => push(true, true)}
               backupSetupAvailable={backupSetupAvailable}
               backupRemoteName={backupSetupAvailable ? savedBackupRemoteName : null}
+              backupRetryPending={backupRetryPending}
               onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
