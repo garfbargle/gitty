@@ -19,6 +19,10 @@ type PushButtonProps = {
   onForcePush: () => Promise<boolean>;
   /** Hard `git push --force` — overwrites the remote unconditionally, for when the lease is stale. */
   onOverwrite: () => Promise<boolean>;
+  /** A backup default exists, but this repository has not been set up for it yet. */
+  backupSetupAvailable?: boolean;
+  backupRemoteName?: string | null;
+  onSetupBackup?: () => Promise<boolean>;
 };
 
 export function PushButton({
@@ -34,8 +38,12 @@ export function PushButton({
   onPush,
   onForcePush,
   onOverwrite,
+  backupSetupAvailable = false,
+  backupRemoteName,
+  onSetupBackup,
 }: PushButtonProps) {
   const [open, setOpen] = useState(false);
+  const [settingUpBackup, setSettingUpBackup] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const badgeAheadRef = useRef(ahead + unpushedTags);
 
@@ -43,7 +51,8 @@ export function PushButton({
   const suggestsForcePush = behind > 0 || forceSuggested;
   const visible =
     hasRemotes &&
-    (pushCount > 0 ||
+    (backupSetupAvailable ||
+      pushCount > 0 ||
       unpublished ||
       suggestsForcePush ||
       pushPhase === "pushing" ||
@@ -85,6 +94,33 @@ export function PushButton({
 
   if (!visible) {
     return null;
+  }
+
+  async function setupBackup() {
+    if (!onSetupBackup || settingUpBackup || isLocked) return;
+    setSettingUpBackup(true);
+    try {
+      await onSetupBackup();
+    } finally {
+      setSettingUpBackup(false);
+    }
+  }
+
+  if (backupSetupAvailable && onSetupBackup) {
+    return (
+      <div className="push-btn-group backup-setup" aria-live="polite">
+        <button
+          type="button"
+          className="push-btn-main"
+          title={`Set up ${backupRemoteName || "the"} backup and sync this repository`}
+          disabled={isLocked || settingUpBackup}
+          onClick={() => void setupBackup()}
+        >
+          {settingUpBackup ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
+          {settingUpBackup ? "Setting up…" : "Set up backup"}
+        </button>
+      </div>
+    );
   }
 
   const badgeCount = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;

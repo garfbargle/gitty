@@ -1542,6 +1542,16 @@ button:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+.push-btn-group.backup-setup .push-btn-main {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, #000);
+  color: #fff;
+}
+
+.push-btn-group.backup-setup .push-btn-main:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 .push-btn-main:hover:not(:disabled),
 .push-btn-chevron:hover:not(:disabled) {
   filter: brightness(1.05);

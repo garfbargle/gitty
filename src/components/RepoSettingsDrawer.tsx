@@ -42,11 +42,6 @@ type RepoSettingsDrawerProps = {
   onRemoveRemote: (name: string) => Promise<boolean>;
   onFetch: () => void;
   onRemoveRepo: () => void;
-  /// Optional app-wide backup profile. When present, this repository gets a
-  /// one-click setup offer until the named backup remote exists.
-  backupRemoteName?: string | null;
-  backupUrlTemplate?: string | null;
-  onSetupBackup: () => Promise<boolean>;
   /// Pull a linked folder from its source. Owns conflict handling (may close this
   /// drawer to show the resolver) and refreshing the repo.
   onUpdateFolder: (prefix: string) => Promise<void>;
@@ -630,9 +625,6 @@ export function RepoSettingsDrawer({
   onRemoveRemote,
   onFetch,
   onRemoveRepo,
-  backupRemoteName,
-  backupUrlTemplate,
-  onSetupBackup,
   onUpdateFolder,
   disabled,
 }: RepoSettingsDrawerProps) {
@@ -640,8 +632,6 @@ export function RepoSettingsDrawer({
   const [baseline, setBaseline] = useState<RemoteDraft[]>(() => remotesToDrafts(remotes));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [settingUpBackup, setSettingUpBackup] = useState(false);
-  const [backupNotice, setBackupNotice] = useState<string | null>(null);
   // Canonical URLs of linked-folder sources, reported by the section below. A
   // saved remote whose URL matches one is hidden here — it lives under Linked
   // folders instead of masquerading as a repo remote.
@@ -658,12 +648,6 @@ export function RepoSettingsDrawer({
   const dirty = useMemo(() => draftsDirty(baseline, drafts), [baseline, drafts]);
   const canSave = dirty && validDrafts(drafts).length > 0 && !saving;
   const canFetch = uniqueRemotes(remotes).length > 0;
-  const configuredBackup = backupRemoteName
-    ? uniqueRemotes(remotes).find((remote) => remote.name === backupRemoteName)
-    : undefined;
-  const backupUrl = backupUrlTemplate?.split("{repo}").join(repoName) ?? "";
-  const backupReady = !!configuredBackup && configuredBackup.url.trim() === backupUrl.trim();
-  const backupConflict = !!configuredBackup && !backupReady;
 
   // Hide saved remotes that only back a linked folder; always keep unsaved rows.
   const visibleDrafts = drafts.filter(
@@ -745,16 +729,6 @@ export function RepoSettingsDrawer({
     }
 
     removeDraft(id);
-  }
-
-  async function setupBackup() {
-    if (!backupRemoteName || !backupUrlTemplate || settingUpBackup) return;
-    setSettingUpBackup(true);
-    setBackupNotice(null);
-    const ok = await onSetupBackup();
-    if (ok) setBackupNotice(`Backup ${backupRemoteName} is configured and synced.`);
-    else setBackupNotice(`Could not set up backup ${backupRemoteName}.`);
-    setSettingUpBackup(false);
   }
 
   return (
@@ -861,40 +835,6 @@ export function RepoSettingsDrawer({
           </p>
         ) : null}
       </div>
-
-      {backupRemoteName && backupUrlTemplate ? (
-        <div className="settings-field">
-          <div className="settings-field-head">
-            <label>Backup</label>
-          </div>
-          {backupReady ? (
-            <p className="settings-field-note success">
-              {backupRemoteName} is configured for this repository.
-            </p>
-          ) : backupConflict ? (
-            <p className="settings-field-note error">
-              {backupRemoteName} already points somewhere else. Gitty will leave it unchanged.
-            </p>
-          ) : (
-            <>
-              <p className="settings-field-note">
-                Set up <code>{backupRemoteName}</code> at <code>{backupUrl}</code>, then copy all
-                local branches and tags.
-              </p>
-              <button
-                type="button"
-                className="settings-btn primary"
-                disabled={disabled || settingUpBackup}
-                onClick={() => void setupBackup()}
-              >
-                {settingUpBackup ? <Loader2 size={14} className="spin" /> : null}
-                Set up backup & sync
-              </button>
-            </>
-          )}
-          {backupNotice ? <p className="settings-field-note">{backupNotice}</p> : null}
-        </div>
-      ) : null}
 
       <LinkedFoldersSection
         open={open}

@@ -241,6 +241,8 @@ function App() {
   const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
   const [backupRemoteName, setBackupRemoteName] = useState("backup");
   const [backupUrlTemplate, setBackupUrlTemplate] = useState("");
+  const [savedBackupRemoteName, setSavedBackupRemoteName] = useState("backup");
+  const [savedBackupUrlTemplate, setSavedBackupUrlTemplate] = useState("");
   const [backupSaving, setBackupSaving] = useState(false);
   const [backupSaveMessage, setBackupSaveMessage] = useState<string | null>(null);
   const [backupSaveError, setBackupSaveError] = useState(false);
@@ -501,8 +503,12 @@ function App() {
     setNvidiaApiKeyPreview(settings.nvidiaApiKeyPreview ?? null);
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
     setPushOnCommit(settings.pushOnCommit);
-    setBackupRemoteName(settings.backupRemoteName?.trim() || "backup");
-    setBackupUrlTemplate(settings.backupUrlTemplate ?? "");
+    const savedName = settings.backupRemoteName?.trim() || "backup";
+    const savedTemplate = settings.backupUrlTemplate ?? "";
+    setBackupRemoteName(savedName);
+    setBackupUrlTemplate(savedTemplate);
+    setSavedBackupRemoteName(savedName);
+    setSavedBackupUrlTemplate(savedTemplate);
   }
 
   async function handlePushOnCommitChange(enabled: boolean) {
@@ -538,12 +544,12 @@ function App() {
   }
 
   async function setupBackupForSelectedRepo(): Promise<boolean> {
-    if (!selectedPath || !backupUrlTemplate.trim()) return false;
+    if (!selectedPath || !savedBackupUrlTemplate.trim()) return false;
     try {
       const result = await invoke<ActionResult>("configure_backup_remote", {
         path: selectedPath,
-        remoteName: backupRemoteName,
-        urlTemplate: backupUrlTemplate,
+        remoteName: savedBackupRemoteName,
+        urlTemplate: savedBackupUrlTemplate,
       });
       setMessage([result.message, result.output].filter(Boolean).join("\n"));
       await refreshRepo();
@@ -2409,6 +2415,14 @@ function App() {
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
+  // Only replace Push with backup setup once Settings contains a usable default
+  // and this repo has a primary remote but lacks the named backup. Existing
+  // remotes are never silently repurposed.
+  const backupSetupAvailable =
+    hasRemotes &&
+    savedBackupRemoteName.trim().length > 0 &&
+    savedBackupUrlTemplate.trim().includes("{repo}") &&
+    !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
 
@@ -2693,6 +2707,9 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
+              backupSetupAvailable={backupSetupAvailable}
+              backupRemoteName={backupSetupAvailable ? savedBackupRemoteName : null}
+              onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
@@ -3096,9 +3113,6 @@ function App() {
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             onUpdateFolder={runLinkedFolderUpdate}
-            backupRemoteName={backupUrlTemplate.trim() ? backupRemoteName : null}
-            backupUrlTemplate={backupUrlTemplate || null}
-            onSetupBackup={setupBackupForSelectedRepo}
             disabled={loading}
           />
         </>

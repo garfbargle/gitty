@@ -41,6 +41,9 @@ type TopBarProps = {
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
+  backupSetupAvailable?: boolean;
+  backupRemoteName?: string | null;
+  onSetupBackup?: () => Promise<boolean>;
   onPull?: () => Promise<boolean>;
   onPullMerge?: () => Promise<boolean>;
   onSetupRemote?: () => void;
@@ -86,6 +89,9 @@ export function TopBar({
   onPush,
   onForcePush,
   onOverwrite,
+  backupSetupAvailable = false,
+  backupRemoteName,
+  onSetupBackup,
   onPull,
   onPullMerge,
   onSetupRemote,
@@ -205,6 +211,9 @@ export function TopBar({
             onPush={onPush}
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
+            backupSetupAvailable={backupSetupAvailable}
+            backupRemoteName={backupRemoteName}
+            onSetupBackup={onSetupBackup}
           />
         ) : null}
         {onUpdateLinkedFolder && !repoSwitching ? (
