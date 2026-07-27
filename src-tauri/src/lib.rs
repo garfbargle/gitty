@@ -14,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
+    thread,
+    time::{Duration, Instant},
 };
 
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -369,6 +371,15 @@ fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
         .output()
         .map_err(|err| format!("Could not run git: {err}"))?;
 
+    git_output_result(repo_path, &args, output)
+}
+
+fn git_output_result(
+    repo_path: &Path,
+    args: &[String],
+    output: std::process::Output,
+) -> Result<String, String> {
+
     let stdout = String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_string();
@@ -386,6 +397,51 @@ fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
             .collect::<Vec<_>>()
             .join("\n");
         Err(format!("{command}\n{detail}"))
+    }
+}
+
+/// Network Git actions must not strand the entire app if a remote stops
+/// responding. Git's low-speed knobs make HTTPS fail quickly during an idle
+/// transfer, and the wall-clock guard covers servers that never start one.
+fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .arg("-c")
+        .arg("http.lowSpeedLimit=1")
+        .arg("-c")
+        .arg("http.lowSpeedTime=30")
+        .args(&args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("Could not run git: {err}"))?;
+    let started = Instant::now();
+
+    loop {
+        if child
+            .try_wait()
+            .map_err(|err| format!("Could not wait for git: {err}"))?
+            .is_some()
+        {
+            let output = child
+                .wait_with_output()
+                .map_err(|err| format!("Could not collect git output: {err}"))?;
+            return git_output_result(repo_path, &args, output);
+        }
+        if started.elapsed() >= TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "git -C {} {}\nNetwork operation timed out after {} seconds. Check the remote and try again.",
+                repo_path.display(),
+                args.join(" "),
+                TIMEOUT.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -467,6 +523,15 @@ fn upstream(repo_path: &Path) -> Option<String> {
 
 fn default_remote_name(repo_path: &Path) -> Option<String> {
     let output = git(repo_path, &["remote"]).ok()?;
+    // A branch's upstream is the strongest signal of the user's primary
+    // remote. This matters once a backup named alphabetically before (for
+    // example) `github` is added: it must never become the push/fetch source
+    // merely because `git remote` sorts names.
+    if let Some((remote, _)) = upstream(repo_path).as_deref().and_then(|name| name.split_once('/')) {
+        if output.lines().any(|name| name == remote) {
+            return Some(remote.to_string());
+        }
+    }
     output
         .lines()
         .find(|name| *name == "origin")
@@ -543,7 +608,10 @@ fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
 }
 
 fn remote_tag_hashes(repo_path: &Path, remote: &str) -> HashMap<String, String> {
-    let Ok(output) = git(repo_path, &["ls-remote", "--tags", remote]) else {
+    let Ok(output) = git_network_owned(
+        repo_path,
+        vec!["ls-remote".to_string(), "--tags".to_string(), remote.to_string()],
+    ) else {
         return HashMap::new();
     };
 
@@ -2998,7 +3066,10 @@ fn pull_repo_blocking(path: String, merge: bool) -> Result<UpdateOutcome, String
         .map(|(remote, _)| remote.to_string())
         .or_else(|| default_remote_name(repo_path));
     if let Some(remote) = remote.as_deref() {
-        git(repo_path, &["fetch", "--prune", remote])?;
+        git_network_owned(
+            repo_path,
+            vec!["fetch".to_string(), "--prune".to_string(), remote.to_string()],
+        )?;
     }
 
     if merge {
@@ -4016,7 +4087,10 @@ fn fetch_repo(path: String) -> Result<ActionResult, String> {
         .ok_or_else(|| "Add a primary remote before fetching.".to_string())?;
     // Extra remotes are backup destinations. Fetching only the primary keeps a
     // backup from becoming an accidental source of branch state or merges.
-    let output = git(repo_path, &["fetch", "--prune", &remote])?;
+    let output = git_network_owned(
+        repo_path,
+        vec!["fetch".to_string(), "--prune".to_string(), remote.clone()],
+    )?;
     Ok(ActionResult {
         message: format!("Fetched {remote}."),
         output,
@@ -4044,7 +4118,7 @@ fn push_tags(repo_path: &Path, remote: &str, tags: &[String]) -> Result<String, 
 
     let mut args = vec!["push".to_string(), remote.to_string()];
     args.extend(tags.iter().cloned());
-    git_owned(repo_path, args)
+    git_network_owned(repo_path, args)
 }
 
 /// Replicate the current branch and/or freshly-pushed tags to one backup
@@ -4069,7 +4143,7 @@ fn push_backup(
         args.push(format!("{branch}:{branch}"));
     }
     args.extend(tags.iter().cloned());
-    git_owned(repo_path, args)
+    git_network_owned(repo_path, args)
 }
 
 fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionResult, String> {
@@ -4111,7 +4185,7 @@ fn push_repo_blocking(path: String, force: bool, hard: bool) -> Result<ActionRes
             }
         }
 
-        outputs.push(git_owned(repo_path, args)?);
+        outputs.push(git_network_owned(repo_path, args)?);
     }
 
     if !tags_to_push.is_empty() {
@@ -4241,7 +4315,7 @@ fn push_branch_blocking(path: String, branch: String, force: bool) -> Result<Act
     }
     args.push(remote.clone());
     args.push(format!("{branch}:{branch}"));
-    let output = git_owned(repo_path, args)?;
+    let output = git_network_owned(repo_path, args)?;
     Ok(ActionResult {
         message: format!("Pushed {branch} to {remote}."),
         output,
@@ -4546,12 +4620,12 @@ fn configure_backup_remote_blocking(
         )?;
     }
 
-    let branches = git_owned(
+    let branches = git_network_owned(
         repo_path,
         vec!["push".to_string(), remote_name.clone(), "--all".to_string()],
     );
     let (message, output) = match branches {
-        Ok(branches) => match git_owned(
+        Ok(branches) => match git_network_owned(
             repo_path,
             vec!["push".to_string(), remote_name.clone(), "--tags".to_string()],
         ) {
