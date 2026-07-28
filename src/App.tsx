@@ -1835,6 +1835,40 @@ function App() {
     }
   }
 
+  async function stageAll() {
+    if (!selectedPath) return;
+    setLoading(true);
+    setError("");
+    try {
+      await invoke<ActionResult>("stage_all", {
+        path: selectedPath,
+        stage: true,
+      });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+      await refreshChangesQuiet();
+    }
+  }
+
+  async function unstageAll() {
+    if (!selectedPath) return;
+    setLoading(true);
+    setError("");
+    try {
+      await invoke<ActionResult>("stage_all", {
+        path: selectedPath,
+        stage: false,
+      });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+      await refreshChangesQuiet();
+    }
+  }
+
   async function stageFiles(files: string[], anchor?: SelectionAnchor) {
     if (!selectedPath || files.length === 0) return;
 
@@ -1846,22 +1880,19 @@ function App() {
 
     setLoading(true);
     setError("");
-    let success = false;
     try {
       await invoke<ActionResult>("stage_files", {
         path: selectedPath,
         files,
         stage: true,
       });
-      success = true;
     } catch (err) {
       setError(String(err));
     } finally {
       setLoading(false);
+      applyChangesOptimistic(files, true);
     }
-    if (!success) return;
 
-    applyChangesOptimistic(files, true);
     const changes = await refreshChangesQuiet();
     if (!changes) return;
 
@@ -1889,22 +1920,19 @@ function App() {
 
     setLoading(true);
     setError("");
-    let success = false;
     try {
       await invoke<ActionResult>("stage_files", {
         path: selectedPath,
         files,
         stage: false,
       });
-      success = true;
     } catch (err) {
       setError(String(err));
     } finally {
       setLoading(false);
+      applyChangesOptimistic(files, false);
     }
-    if (!success) return;
 
-    applyChangesOptimistic(files, false);
     const changes = await refreshChangesQuiet();
     if (!changes) return;
 
@@ -2234,9 +2262,7 @@ function App() {
   const stageAllRef = useRef(async () => {});
   stageAllRef.current = async () => {
     if (!selectedPath || !snapshot || snapshot.repo.path !== selectedPath) return;
-    const paths = snapshot.changes.filter(isUnstaged).map((file) => file.path);
-    if (paths.length === 0) return;
-    await stageFiles(paths);
+    await stageAll();
   };
 
   async function reset() {
@@ -2933,6 +2959,8 @@ function App() {
                           }
                           onStage={(files, anchor) => void stageFiles(files, anchor)}
                           onUnstage={(files, anchor) => void unstageFiles(files, anchor)}
+                          onStageAll={workingTreeActive ? () => void stageAll() : undefined}
+                          onUnstageAll={workingTreeActive ? () => void unstageAll() : undefined}
                           onResetAll={
                             workingTreeActive && displaySnapshot.changes.length > 0
                               ? () => setResetAllOpen(true)

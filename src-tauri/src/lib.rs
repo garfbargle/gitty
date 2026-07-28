@@ -4197,12 +4197,49 @@ fn stage_files(path: String, files: Vec<String>, stage: bool) -> Result<ActionRe
         return Err("Select at least one file.".to_string());
     }
 
+    let mut valid_files = Vec::new();
+    for file in files {
+        let file_trimmed = file.trim().to_string();
+        if file_trimmed.is_empty() {
+            continue;
+        }
+        if stage {
+            let full_path = repo_path.join(&file_trimmed);
+            let tracked = git_owned(
+                repo_path,
+                vec!["ls-files".to_string(), "--error-unmatch".to_string(), "--".to_string(), file_trimmed.clone()],
+            ).is_ok();
+            if full_path.exists() || tracked {
+                valid_files.push(file_trimmed);
+            }
+        } else {
+            let is_staged = git_owned(
+                repo_path,
+                vec!["ls-files".to_string(), "--staged".to_string(), "--".to_string(), file_trimmed.clone()],
+            ).map(|out| !out.trim().is_empty()).unwrap_or(false);
+            if is_staged {
+                valid_files.push(file_trimmed);
+            }
+        }
+    }
+
+    if valid_files.is_empty() {
+        return Ok(ActionResult {
+            message: if stage {
+                "No remaining valid files to stage.".to_string()
+            } else {
+                "No remaining valid files to unstage.".to_string()
+            },
+            output: String::new(),
+        });
+    }
+
     let mut args = if stage {
         vec!["add".to_string(), "--".to_string()]
     } else {
         vec!["restore".to_string(), "--staged".to_string(), "--".to_string()]
     };
-    args.extend(files.iter().cloned());
+    args.extend(valid_files);
     let output = git_owned(repo_path, args)?;
 
     Ok(ActionResult {

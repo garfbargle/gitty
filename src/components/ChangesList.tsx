@@ -27,6 +27,8 @@ type ChangesListProps = {
   onSelectionChange?: (selection: ChangeSelectionEntry[]) => void;
   onStage: (files: string[], anchor?: SelectionAnchor) => void;
   onUnstage: (files: string[], anchor?: SelectionAnchor) => void;
+  onStageAll?: () => void;
+  onUnstageAll?: () => void;
   onRequestDiscard?: (paths: string[]) => void;
   onResetAll?: () => void;
   onFocusZone?: () => void;
@@ -75,6 +77,8 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
     onSelectionChange,
     onStage,
     onUnstage,
+    onStageAll,
+    onUnstageAll,
     onRequestDiscard,
     onResetAll,
     onFocusZone,
@@ -379,7 +383,7 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
                   type="button"
                   className="badge stage-all"
                   disabled={disabled}
-                  onClick={() => onStage(unstaged.map((file) => file.path))}
+                  onClick={() => (onStageAll ? onStageAll() : onStage(unstaged.map((file) => file.path)))}
                   title="Stage all changes (⌘A)"
                 >
                   Stage all
@@ -397,7 +401,20 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
           </section>
 
           <section className="change-group">
-            <h4>Staged ({staged.length})</h4>
+            <div className="change-group-header">
+              <h4>Staged ({staged.length})</h4>
+              {staged.length > 0 ? (
+                <button
+                  type="button"
+                  className="badge stage-all"
+                  disabled={disabled}
+                  onClick={() => (onUnstageAll ? onUnstageAll() : onUnstage(staged.map((file) => file.path)))}
+                  title="Unstage all changes"
+                >
+                  Unstage all
+                </button>
+              ) : null}
+            </div>
             <div className="change-items">
               {staged.length === 0 ? (
                 <p className="empty-hint">Nothing staged</p>
