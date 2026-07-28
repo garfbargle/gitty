@@ -240,6 +240,54 @@ pub fn detect_repo_actions(path: String) -> Vec<RepoAction> {
     actions
 }
 
+use std::path::PathBuf;
+
+fn build_extended_path() -> String {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let home_path = Path::new(&home);
+        dirs.push(home_path.join(".cargo/bin"));
+        dirs.push(home_path.join(".bun/bin"));
+        dirs.push(home_path.join(".local/bin"));
+        dirs.push(home_path.join("bin"));
+
+        let nvm_node_dir = home_path.join(".nvm/versions/node");
+        if nvm_node_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&nvm_node_dir) {
+                for entry in entries.flatten() {
+                    let node_bin = entry.path().join("bin");
+                    if node_bin.exists() {
+                        dirs.push(node_bin);
+                    }
+                }
+            }
+        }
+    }
+
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/opt/homebrew/sbin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs.push(PathBuf::from("/usr/local/sbin"));
+    dirs.push(PathBuf::from("/usr/bin"));
+    dirs.push(PathBuf::from("/bin"));
+    dirs.push(PathBuf::from("/usr/sbin"));
+    dirs.push(PathBuf::from("/sbin"));
+
+    if let Ok(existing) = std::env::var("PATH") {
+        for p in std::env::split_paths(&existing) {
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
+        }
+    }
+
+    std::env::join_paths(dirs)
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
+}
+
 /// Execute a repository command asynchronously, streaming output lines back to frontend.
 #[tauri::command]
 pub fn execute_repo_action(
@@ -260,6 +308,7 @@ pub fn execute_repo_action(
     let app_handle = app.clone();
     let action_id_clone = action_id.clone();
     let path_buf = root.to_path_buf();
+    let extended_path = build_extended_path();
 
     thread::spawn(move || {
         let mut cmd = if cfg!(target_os = "windows") {
@@ -267,20 +316,23 @@ pub fn execute_repo_action(
             c.arg("/C").arg(&command);
             c
         } else {
-            let mut c = Command::new("sh");
+            // Use zsh if available on macOS/Linux so interactive shell paths/aliases work
+            let shell = if Path::new("/bin/zsh").exists() {
+                "/bin/zsh"
+            } else if Path::new("/usr/bin/zsh").exists() {
+                "/usr/bin/zsh"
+            } else {
+                "sh"
+            };
+            let mut c = Command::new(shell);
             c.arg("-c").arg(&command);
             c
         };
 
         cmd.current_dir(&path_buf);
+        cmd.env("PATH", &extended_path);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
-
-        // Ensure PATH includes common dev tools (e.g. node, cargo, homebrew)
-        if let Ok(existing_path) = std::env::var("PATH") {
-            let extra_paths = "/usr/local/bin:/opt/homebrew/bin:~/.cargo/bin:~/.nvm/versions/node";
-            cmd.env("PATH", format!("{}:{}", extra_paths, existing_path));
-        }
 
         match cmd.spawn() {
             Ok(mut child) => {
