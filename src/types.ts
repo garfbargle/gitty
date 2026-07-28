@@ -21,6 +21,10 @@ export type ActionLogEntry = {
 };
 
 export type ActionExecutionState = {
+  /** Unique per invocation; action ids themselves repeat across repositories. */
+  runId: string;
+  /** Keeps output scoped to the repository that started the command. */
+  repoPath: string;
   action: RepoAction;
   status: "running" | "success" | "error";
   startTime: number;

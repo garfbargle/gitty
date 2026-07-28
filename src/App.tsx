@@ -327,7 +327,7 @@ function App() {
       "action-runner-output",
       (event) => {
         setActiveExecution((prev) => {
-          if (!prev || prev.action.id !== event.payload.actionId) return prev;
+          if (!prev || prev.runId !== event.payload.actionId) return prev;
           const newLog: ActionLogEntry = {
             id: `${Date.now()}-${Math.random()}`,
             line: event.payload.line,
@@ -346,7 +346,7 @@ function App() {
       "action-runner-finished",
       (event) => {
         setActiveExecution((prev) => {
-          if (!prev || prev.action.id !== event.payload.actionId) return prev;
+          if (!prev || prev.runId !== event.payload.actionId) return prev;
           return {
             ...prev,
             status: event.payload.success ? "success" : "error",
@@ -366,7 +366,10 @@ function App() {
   const handleRunAction = useCallback(
     (action: RepoAction) => {
       if (!selectedPath) return;
+      const runId = `run:${Date.now()}:${Math.random().toString(36).slice(2)}`;
       const execution: ActionExecutionState = {
+        runId,
+        repoPath: selectedPath,
         action,
         status: "running",
         startTime: Date.now(),
@@ -387,11 +390,11 @@ function App() {
 
       invoke("execute_repo_action", {
         path: selectedPath,
-        actionId: action.id,
+        actionId: runId,
         command: action.command,
       }).catch((err) => {
         setActiveExecution((prev) =>
-          prev
+          prev?.runId === runId
             ? {
                 ...prev,
                 status: "error",
@@ -928,6 +931,13 @@ function App() {
     setRepoSettingsOpen(false);
     setIntegrationOp(null);
     setConflictFiles([]);
+    setMessage("");
+    setError("");
+    // Commands are allowed to finish in the repo that launched them, but their
+    // output must never spill into the next repository's activity feed.
+    setActiveExecution(null);
+    setExecutionFeedDismissed(false);
+    setShowRunnerDrawer(false);
     setResolvedFiles([]);
     setSelectedConflict(null);
     setConflictSides(null);
@@ -2844,6 +2854,11 @@ function App() {
     commitFiles,
   ]);
 
+  const visibleExecution =
+    activeExecution?.repoPath === selectedPath && !executionFeedDismissed
+      ? activeExecution
+      : null;
+
   return (
     <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
       <RepoSidebar
@@ -3273,11 +3288,11 @@ function App() {
           </div>
         )}
 
-        {(message || error || (activeExecution && !executionFeedDismissed)) && (
+        {message || error || visibleExecution ? (
           <ActivityFeed
             message={message}
             error={error}
-            execution={executionFeedDismissed ? null : activeExecution}
+            execution={visibleExecution}
             onOpenExecution={() => setShowRunnerDrawer(true)}
             onRerun={handleRunAction}
             onClearExecution={() =>
@@ -3285,7 +3300,7 @@ function App() {
             }
             onDismissExecution={() => setExecutionFeedDismissed(true)}
           />
-        )}
+        ) : null}
       </section>
 
       {snapshot ? (
@@ -3388,7 +3403,7 @@ function App() {
         disabled={loading}
       />
 
-      {showRunnerDrawer && activeExecution ? (
+      {showRunnerDrawer && activeExecution?.repoPath === selectedPath ? (
         <ActionRunnerDrawer
           execution={activeExecution}
           onClose={() => setShowRunnerDrawer(false)}
