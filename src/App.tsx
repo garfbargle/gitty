@@ -23,9 +23,12 @@ import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialo
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
+import { ActionRunnerDrawer } from "./components/ActionRunnerDrawer";
 import type { PullPhase } from "./components/PullButton";
 import type { PushPhase } from "./components/PushButton";
 import type {
+  ActionExecutionState,
+  ActionLogEntry,
   ActionResult,
   AppSettingsView,
   ChangeSection,
@@ -36,6 +39,7 @@ import type {
   DiscoveredRepoEntry,
   FileChange,
   LinkedFolder,
+  RepoAction,
   RepoEntry,
   RepoChanges,
   RepoEnrichment,
@@ -275,6 +279,131 @@ function App() {
   const [error, setError] = useState("");
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+  const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
+  const [activeExecution, setActiveExecution] = useState<ActionExecutionState | null>(null);
+  const [showRunnerDrawer, setShowRunnerDrawer] = useState(false);
+
+  useEffect(() => {
+    if (!selectedPath) {
+      setRepoActions([]);
+      return;
+    }
+    let cancelled = false;
+    invoke<RepoAction[]>("detect_repo_actions", { path: selectedPath })
+      .then((actions) => {
+        if (!cancelled) {
+          setRepoActions(actions);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRepoActions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPath]);
+
+  useEffect(() => {
+    const unlistenOutput = listen<{ actionId: string; line: string; stream: "stdout" | "stderr" }>(
+      "action-runner-output",
+      (event) => {
+        setActiveExecution((prev) => {
+          if (!prev || prev.action.id !== event.payload.actionId) return prev;
+          const newLog: ActionLogEntry = {
+            id: `${Date.now()}-${Math.random()}`,
+            line: event.payload.line,
+            stream: event.payload.stream,
+            timestamp: Date.now(),
+          };
+          return {
+            ...prev,
+            logs: [...prev.logs, newLog],
+          };
+        });
+      }
+    );
+
+    const unlistenFinished = listen<{ actionId: string; success: boolean; exitCode?: number | null; error?: string | null }>(
+      "action-runner-finished",
+      (event) => {
+        setActiveExecution((prev) => {
+          if (!prev || prev.action.id !== event.payload.actionId) return prev;
+          return {
+            ...prev,
+            status: event.payload.success ? "success" : "error",
+            endTime: Date.now(),
+            exitCode: event.payload.exitCode ?? (event.payload.success ? 0 : 1),
+          };
+        });
+      }
+    );
+
+    return () => {
+      unlistenOutput.then((fn) => fn());
+      unlistenFinished.then((fn) => fn());
+    };
+  }, []);
+
+  const handleRunAction = useCallback(
+    (action: RepoAction) => {
+      if (!selectedPath) return;
+      const execution: ActionExecutionState = {
+        action,
+        status: "running",
+        startTime: Date.now(),
+        logs: [
+          {
+            id: `start-${Date.now()}`,
+            line: `$ ${action.command}`,
+            stream: "stdout",
+            timestamp: Date.now(),
+          },
+        ],
+      };
+      setActiveExecution(execution);
+      setShowRunnerDrawer(true);
+
+      invoke("execute_repo_action", {
+        path: selectedPath,
+        actionId: action.id,
+        command: action.command,
+      }).catch((err) => {
+        setActiveExecution((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "error",
+                endTime: Date.now(),
+                logs: [
+                  ...prev.logs,
+                  {
+                    id: `err-${Date.now()}`,
+                    line: `Execution error: ${String(err)}`,
+                    stream: "stderr",
+                    timestamp: Date.now(),
+                  },
+                ],
+              }
+            : null
+        );
+      });
+    },
+    [selectedPath]
+  );
+
+  const handleRunCustomCommand = useCallback(
+    (cmd: string) => {
+      const customAction: RepoAction = {
+        id: `custom:${Date.now()}`,
+        name: cmd,
+        command: cmd,
+        category: "custom",
+        description: "Custom command",
+      };
+      handleRunAction(customAction);
+    },
+    [handleRunAction]
+  );
 
   const toggleSidebar = useCallback(() => {
     setSidebarVisible((current) => {
@@ -2749,6 +2878,10 @@ function App() {
               forceSuggested={pushRejected}
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
+              repoActions={repoActions}
+              activeExecution={activeExecution}
+              onRunAction={handleRunAction}
+              onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
@@ -3197,6 +3330,17 @@ function App() {
         onSaveBackupProfile={() => void saveBackupProfile()}
         disabled={loading}
       />
+
+      {showRunnerDrawer && activeExecution ? (
+        <ActionRunnerDrawer
+          execution={activeExecution}
+          onClose={() => setShowRunnerDrawer(false)}
+          onRerun={handleRunAction}
+          onClearLogs={() =>
+            setActiveExecution((prev) => (prev ? { ...prev, logs: [] } : null))
+          }
+        />
+      ) : null}
     </main>
   );
 }

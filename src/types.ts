@@ -5,6 +5,30 @@ export type RepoEntry = {
   hasUncommittedChanges?: boolean | null;
 };
 
+export type RepoAction = {
+  id: string;
+  name: string;
+  command: string;
+  category: "npm" | "cargo" | "make" | "script" | "custom";
+  description?: string | null;
+};
+
+export type ActionLogEntry = {
+  id: string;
+  line: string;
+  stream: "stdout" | "stderr";
+  timestamp: number;
+};
+
+export type ActionExecutionState = {
+  action: RepoAction;
+  status: "running" | "success" | "error";
+  startTime: number;
+  endTime?: number;
+  exitCode?: number | null;
+  logs: ActionLogEntry[];
+};
+
 export type DiscoveredRepoEntry = RepoEntry & {
   lastEditedAt: number;
 };

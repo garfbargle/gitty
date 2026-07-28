@@ -7,8 +7,9 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import type { CommitEntry, LinkedFolder, RepoEntry } from "../types";
+import type { ActionExecutionState, CommitEntry, LinkedFolder, RepoAction, RepoEntry } from "../types";
 import { IdePicker } from "./IdePicker";
+import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
 import { PushButton, type PushPhase } from "./PushButton";
 import { LinkedFolderUpdatesButton } from "./LinkedFolderUpdatesButton";
@@ -62,6 +63,10 @@ type TopBarProps = {
   onManageLinkedFolders?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
+  repoActions?: RepoAction[];
+  activeExecution?: ActionExecutionState | null;
+  onRunAction?: (action: RepoAction) => void;
+  onRunCustomCommand?: (command: string) => void;
 };
 
 export function TopBar({
@@ -107,6 +112,10 @@ export function TopBar({
   onManageLinkedFolders,
   sidebarVisible = true,
   onToggleSidebar,
+  repoActions = [],
+  activeExecution = null,
+  onRunAction,
+  onRunCustomCommand,
 }: TopBarProps) {
   const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
@@ -128,6 +137,16 @@ export function TopBar({
         ) : null}
 
         <IdePicker repoPath={selectedPath} />
+
+        {onRunAction ? (
+          <RepoRunner
+            repoPath={selectedPath}
+            actions={repoActions}
+            activeExecution={activeExecution}
+            onRunAction={onRunAction}
+            onRunCustomCommand={onRunCustomCommand}
+          />
+        ) : null}
 
         <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
 

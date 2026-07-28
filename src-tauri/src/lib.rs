@@ -1,6 +1,7 @@
 mod discovery;
 mod editors;
 mod repo_icon;
+mod runner;
 mod settings;
 mod summarize;
 
@@ -5024,6 +5025,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            runner::detect_repo_actions,
+            runner::execute_repo_action,
             init_repo,
             list_repos,
             resolve_repo_icon,
