@@ -280,6 +280,7 @@ function App() {
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
+  const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [activeExecution, setActiveExecution] = useState<ActionExecutionState | null>(null);
   const [showRunnerDrawer, setShowRunnerDrawer] = useState(false);
 
@@ -302,6 +303,22 @@ function App() {
       cancelled = true;
     };
   }, [selectedPath]);
+
+  useEffect(() => {
+    if (!selectedPath || repoActions.length === 0) {
+      setSelectedRepoActionId("");
+      return;
+    }
+
+    const storedActionId = localStorage.getItem(`gitty.defaultAction:${selectedPath}`);
+    const preferredAction =
+      repoActions.find((action) => action.id === storedActionId) ||
+      repoActions.find((action) => action.command.includes("tauri build")) ||
+      repoActions.find((action) => action.command.includes("dev")) ||
+      repoActions.find((action) => action.command.includes("build")) ||
+      repoActions[0];
+    setSelectedRepoActionId(preferredAction.id);
+  }, [selectedPath, repoActions]);
 
   useEffect(() => {
     const unlistenOutput = listen<{ actionId: string; line: string; stream: "stdout" | "stderr" }>(
@@ -404,6 +421,31 @@ function App() {
     },
     [handleRunAction]
   );
+
+  const handleSelectRepoAction = useCallback(
+    (action: RepoAction) => {
+      setSelectedRepoActionId(action.id);
+      localStorage.setItem(`gitty.defaultAction:${selectedPath}`, action.id);
+    },
+    [selectedPath],
+  );
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "r") return;
+
+      const selectedAction =
+        repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
+      if (!selectedPath || !selectedAction) return;
+
+      event.preventDefault();
+      handleRunAction(selectedAction);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedPath, repoActions, selectedRepoActionId, handleRunAction]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarVisible((current) => {
@@ -2879,8 +2921,10 @@ function App() {
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
               repoActions={repoActions}
+              selectedRepoActionId={selectedRepoActionId}
               activeExecution={activeExecution}
               onRunAction={handleRunAction}
+              onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}

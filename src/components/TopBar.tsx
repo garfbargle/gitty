@@ -64,8 +64,10 @@ type TopBarProps = {
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   repoActions?: RepoAction[];
+  selectedRepoActionId?: string;
   activeExecution?: ActionExecutionState | null;
   onRunAction?: (action: RepoAction) => void;
+  onSelectRepoAction?: (action: RepoAction) => void;
   onRunCustomCommand?: (command: string) => void;
 };
 
@@ -113,8 +115,10 @@ export function TopBar({
   sidebarVisible = true,
   onToggleSidebar,
   repoActions = [],
+  selectedRepoActionId = "",
   activeExecution = null,
   onRunAction,
+  onSelectRepoAction,
   onRunCustomCommand,
 }: TopBarProps) {
   const inPreview = !!viewingCommit;
@@ -138,12 +142,14 @@ export function TopBar({
 
         <IdePicker repoPath={selectedPath} />
 
-        {onRunAction ? (
+        {onRunAction && onSelectRepoAction ? (
           <RepoRunner
             repoPath={selectedPath}
             actions={repoActions}
+            selectedActionId={selectedRepoActionId}
             activeExecution={activeExecution}
             onRunAction={onRunAction}
+            onSelectAction={onSelectRepoAction}
             onRunCustomCommand={onRunCustomCommand}
           />
         ) : null}

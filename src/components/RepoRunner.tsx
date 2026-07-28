@@ -15,8 +15,10 @@ import type { ActionExecutionState, RepoAction } from "../types";
 type RepoRunnerProps = {
   repoPath: string;
   actions: RepoAction[];
+  selectedActionId: string;
   activeExecution?: ActionExecutionState | null;
   onRunAction: (action: RepoAction) => void;
+  onSelectAction: (action: RepoAction) => void;
   onRunCustomCommand?: (command: string) => void;
 };
 
@@ -38,37 +40,16 @@ function getCategoryIcon(category: RepoAction["category"], size: number) {
 export function RepoRunner({
   repoPath,
   actions,
+  selectedActionId,
   activeExecution,
   onRunAction,
+  onSelectAction,
   onRunCustomCommand,
 }: RepoRunnerProps) {
   const [open, setOpen] = useState(false);
   const [customCommandInput, setCustomCommandInput] = useState("");
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  const storageKey = `gitty.defaultAction:${repoPath}`;
-  const [defaultActionId, setDefaultActionId] = useState<string>(() => {
-    return localStorage.getItem(storageKey) ?? "";
-  });
-
-  useEffect(() => {
-    if (!repoPath) return;
-    const stored = localStorage.getItem(`gitty.defaultAction:${repoPath}`);
-    if (stored) {
-      setDefaultActionId(stored);
-    } else if (actions.length > 0) {
-      // Pick a smart default: preferred dev/build/tauri script, or first action
-      const preferred =
-        actions.find((a) => a.command.includes("tauri build")) ||
-        actions.find((a) => a.command.includes("dev")) ||
-        actions.find((a) => a.command.includes("build")) ||
-        actions[0];
-      if (preferred) {
-        setDefaultActionId(preferred.id);
-      }
-    }
-  }, [repoPath, actions]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,15 +75,13 @@ export function RepoRunner({
   if (!repoPath || actions.length === 0) return null;
 
   const selectedAction =
-    actions.find((a) => a.id === defaultActionId) ?? actions[0];
+    actions.find((a) => a.id === selectedActionId) ?? actions[0];
 
   const isRunning = activeExecution?.status === "running";
 
   function handleSelectAction(action: RepoAction) {
-    setDefaultActionId(action.id);
-    localStorage.setItem(storageKey, action.id);
+    onSelectAction(action);
     setOpen(false);
-    onRunAction(action);
   }
 
   function handleCustomSubmit(e: React.FormEvent) {
