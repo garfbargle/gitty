@@ -24,6 +24,7 @@ import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
 import { ActionRunnerDrawer } from "./components/ActionRunnerDrawer";
+import { ActivityFeed } from "./components/ActivityFeed";
 import type { PullPhase } from "./components/PullButton";
 import type { PushPhase } from "./components/PushButton";
 import type {
@@ -283,6 +284,7 @@ function App() {
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [activeExecution, setActiveExecution] = useState<ActionExecutionState | null>(null);
   const [showRunnerDrawer, setShowRunnerDrawer] = useState(false);
+  const [executionFeedDismissed, setExecutionFeedDismissed] = useState(false);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -378,7 +380,10 @@ function App() {
         ],
       };
       setActiveExecution(execution);
-      setShowRunnerDrawer(true);
+      setExecutionFeedDismissed(false);
+      // Keep script output in the shared activity feed by default. The full
+      // terminal remains one click away for longer sessions.
+      setShowRunnerDrawer(false);
 
       invoke("execute_repo_action", {
         path: selectedPath,
@@ -3268,10 +3273,18 @@ function App() {
           </div>
         )}
 
-        {(message || error) && (
-          <footer className={`toast ${error ? "error" : ""}`}>
-            <pre>{error || message}</pre>
-          </footer>
+        {(message || error || (activeExecution && !executionFeedDismissed)) && (
+          <ActivityFeed
+            message={message}
+            error={error}
+            execution={executionFeedDismissed ? null : activeExecution}
+            onOpenExecution={() => setShowRunnerDrawer(true)}
+            onRerun={handleRunAction}
+            onClearExecution={() =>
+              setActiveExecution((prev) => (prev ? { ...prev, logs: [] } : null))
+            }
+            onDismissExecution={() => setExecutionFeedDismissed(true)}
+          />
         )}
       </section>
 

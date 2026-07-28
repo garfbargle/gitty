@@ -26,7 +26,8 @@ export function ActionRunnerDrawer({
 }: ActionRunnerDrawerProps) {
   const [copied, setCopied] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
 
   useEffect(() => {
     if (!execution) return;
@@ -45,9 +46,14 @@ export function ActionRunnerDrawer({
   }, [execution]);
 
   useEffect(() => {
-    // Auto-scroll terminal output to bottom
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
+    followLatestRef.current = true;
+  }, [execution?.startTime]);
+
+  useEffect(() => {
+    // Follow new output until the user scrolls away from the bottom.
+    const terminal = terminalRef.current;
+    if (terminal && followLatestRef.current) {
+      terminal.scrollTop = terminal.scrollHeight;
     }
   }, [execution?.logs.length]);
 
@@ -61,6 +67,13 @@ export function ActionRunnerDrawer({
     void navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function handleTerminalScroll() {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const remaining = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight;
+    followLatestRef.current = remaining <= 12;
   }
 
   return (
@@ -131,7 +144,11 @@ export function ActionRunnerDrawer({
         </div>
       </div>
 
-      <div className="action-runner-terminal">
+      <div
+        ref={terminalRef}
+        className="action-runner-terminal"
+        onScroll={handleTerminalScroll}
+      >
         {execution.logs.length === 0 ? (
           <div className="action-runner-terminal-empty">
             Waiting for process output…
@@ -146,7 +163,6 @@ export function ActionRunnerDrawer({
             </div>
           ))
         )}
-        <div ref={terminalEndRef} />
       </div>
     </div>
   );

@@ -4943,6 +4943,94 @@ button.context-chip.pullable:disabled {
   padding: 8px 14px;
 }
 
+.activity-feed-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.activity-feed-title,
+.activity-feed-actions {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.activity-feed-command {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-feed-state {
+  background: var(--bg-input);
+  border-radius: 999px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.activity-feed-icon {
+  flex: 0 0 auto;
+}
+
+.activity-feed-icon.running { color: var(--primary); }
+.activity-feed-icon.success { color: var(--success); }
+.activity-feed-icon.error { color: var(--danger); }
+
+.activity-feed-actions {
+  flex: 0 0 auto;
+}
+
+.activity-feed-actions button {
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 10px;
+  gap: 3px;
+  padding: 3px 5px;
+}
+
+.activity-feed-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.activity-feed-logs {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.activity-feed-log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.activity-feed-log-line.stderr {
+  color: var(--danger);
+}
+
+.activity-feed-empty {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+}
+
 .toast pre {
   font-family: var(--font-mono);
   font-size: 11px;
