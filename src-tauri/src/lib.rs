@@ -13,13 +13,24 @@ use std::{
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
 
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
 const SNAPSHOT_SUPERSEDED: &str = "__superseded__";
+const NETWORK_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+
+fn network_operation_is_idle(elapsed: Duration, last_activity_ms: u64) -> bool {
+    elapsed
+        .as_millis()
+        .saturating_sub(last_activity_ms as u128)
+        >= NETWORK_IDLE_TIMEOUT.as_millis()
+}
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,9 +432,10 @@ fn git_output_result(
 
 /// Network Git actions must not strand the entire app if a remote stops
 /// responding. Git's low-speed knobs make HTTPS fail quickly during an idle
-/// transfer, and the wall-clock guard covers servers that never start one.
+/// transfer, and this activity guard covers servers that never start one.
+/// It deliberately does not impose a total runtime limit: a large backup may
+/// take longer than 45 seconds while still making steady progress.
 fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
-    const TIMEOUT: Duration = Duration::from_secs(45);
     let mut child = Command::new("git")
         .arg("-C")
         .arg(repo_path)
@@ -438,26 +450,73 @@ fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, Stri
         .spawn()
         .map_err(|err| format!("Could not run git: {err}"))?;
     let started = Instant::now();
+    let last_activity = Arc::new(AtomicU64::new(0));
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture git output.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Could not capture git error output.".to_string())?;
+    let stdout_activity = Arc::clone(&last_activity);
+    let stdout_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let Ok(count) = reader.read(&mut buffer) else {
+                break;
+            };
+            if count == 0 {
+                break;
+            }
+            stdout_activity.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        bytes
+    });
+    let stderr_activity = Arc::clone(&last_activity);
+    let stderr_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut bytes = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            let Ok(count) = reader.read(&mut buffer) else {
+                break;
+            };
+            if count == 0 {
+                break;
+            }
+            stderr_activity.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        bytes
+    });
 
     loop {
-        if child
+        if let Some(status) = child
             .try_wait()
             .map_err(|err| format!("Could not wait for git: {err}"))?
-            .is_some()
         {
-            let output = child
-                .wait_with_output()
-                .map_err(|err| format!("Could not collect git output: {err}"))?;
+            let output = Output {
+                status,
+                stdout: stdout_reader.join().unwrap_or_default(),
+                stderr: stderr_reader.join().unwrap_or_default(),
+            };
             return git_output_result(repo_path, &args, output);
         }
-        if started.elapsed() >= TIMEOUT {
+        if network_operation_is_idle(
+            started.elapsed(),
+            last_activity.load(Ordering::Relaxed),
+        ) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "git -C {} {}\nNetwork operation timed out after {} seconds. Check the remote and try again.",
+                "git -C {} {}\nNetwork operation was idle for {} seconds. Check the remote and try again.",
                 repo_path.display(),
                 args.join(" "),
-                TIMEOUT.as_secs()
+                NETWORK_IDLE_TIMEOUT.as_secs()
             ));
         }
         thread::sleep(Duration::from_millis(100));
@@ -485,7 +544,6 @@ fn git_network_owned_with_progress(
     args: Vec<String>,
     phase: &str,
 ) -> Result<String, String> {
-    const TIMEOUT: Duration = Duration::from_secs(45);
     let mut command_args = args;
     if command_args.first().is_some_and(|arg| arg == "push")
         && !command_args.iter().any(|arg| arg == "--progress")
@@ -506,6 +564,8 @@ fn git_network_owned_with_progress(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| format!("Could not run git: {err}"))?;
+    let started = Instant::now();
+    let last_activity = Arc::new(AtomicU64::new(0));
     let stdout = child
         .stdout
         .take()
@@ -514,14 +574,27 @@ fn git_network_owned_with_progress(
         .stderr
         .take()
         .ok_or_else(|| "Could not capture git progress.".to_string())?;
+    let stdout_activity = Arc::clone(&last_activity);
     let stdout_reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
         let mut bytes = Vec::new();
-        let _ = BufReader::new(stdout).read_to_end(&mut bytes);
+        let mut buffer = [0u8; 1024];
+        loop {
+            let Ok(count) = reader.read(&mut buffer) else {
+                break;
+            };
+            if count == 0 {
+                break;
+            }
+            stdout_activity.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            bytes.extend_from_slice(&buffer[..count]);
+        }
         bytes
     });
     let progress_app = app.clone();
     let progress_path = repo_path.to_string_lossy().to_string();
     let progress_phase = phase.to_string();
+    let stderr_activity = Arc::clone(&last_activity);
     let stderr_reader = thread::spawn(move || {
         let mut reader = BufReader::new(stderr);
         let mut all = Vec::new();
@@ -533,6 +606,7 @@ fn git_network_owned_with_progress(
             if count == 0 {
                 break;
             }
+            stderr_activity.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
             let chunk = &buffer[..count];
             all.extend_from_slice(chunk);
             let text = String::from_utf8_lossy(chunk).replace('\r', "\n");
@@ -542,7 +616,6 @@ fn git_network_owned_with_progress(
         }
         all
     });
-    let started = Instant::now();
     let status = loop {
         if let Some(status) = child
             .try_wait()
@@ -550,14 +623,20 @@ fn git_network_owned_with_progress(
         {
             break status;
         }
-        if started.elapsed() >= TIMEOUT {
+        if network_operation_is_idle(
+            started.elapsed(),
+            last_activity.load(Ordering::Relaxed),
+        ) {
             let _ = child.kill();
             let _ = child.wait();
             // Do not wait for the reader threads here. A misbehaving Git
             // transport helper can retain the inherited pipe after its parent
             // dies; waiting for it would recreate the very UI stall this guard
             // is meant to prevent.
-            let message = format!("Timed out after {} seconds.", TIMEOUT.as_secs());
+            let message = format!(
+                "No network activity for {} seconds.",
+                NETWORK_IDLE_TIMEOUT.as_secs()
+            );
             emit_git_progress(app, &repo_path.to_string_lossy(), phase, message.clone());
             return Err(format!(
                 "git -C {} {}\nNetwork operation {} Check the remote and try again.",
@@ -5016,5 +5095,14 @@ mod tests {
             "https://gitto.c0di.com/git/codi/other.git",
             "https://gitto.c0di.com/git/codi/gitty.git"
         ));
+    }
+
+    #[test]
+    fn network_idle_timeout_allows_ongoing_progress() {
+        assert!(!network_operation_is_idle(
+            Duration::from_secs(90),
+            Duration::from_secs(89).as_millis() as u64,
+        ));
+        assert!(network_operation_is_idle(Duration::from_secs(45), 0));
     }
 }
