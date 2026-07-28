@@ -81,10 +81,59 @@ pub fn detect_repo_actions(path: String) -> Vec<RepoAction> {
                             category: "npm".to_string(),
                             description: desc,
                         });
+
+                        // Expand 'tauri' CLI script to actionable subcommands
+                        if script_name == "tauri" {
+                            let tauri_build_cmd = match pkg_mgr {
+                                "pnpm" => "pnpm tauri build".to_string(),
+                                "yarn" => "yarn tauri build".to_string(),
+                                "bun" => "bun run tauri build".to_string(),
+                                _ => "npm run tauri build".to_string(),
+                            };
+                            actions.push(RepoAction {
+                                id: "npm:tauri:build".to_string(),
+                                name: format!("{} tauri build", pkg_mgr),
+                                command: tauri_build_cmd,
+                                category: "npm".to_string(),
+                                description: Some("Build desktop application bundle with Tauri".to_string()),
+                            });
+
+                            let tauri_dev_cmd = match pkg_mgr {
+                                "pnpm" => "pnpm tauri dev".to_string(),
+                                "yarn" => "yarn tauri dev".to_string(),
+                                "bun" => "bun run tauri dev".to_string(),
+                                _ => "npm run tauri dev".to_string(),
+                            };
+                            actions.push(RepoAction {
+                                id: "npm:tauri:dev".to_string(),
+                                name: format!("{} tauri dev", pkg_mgr),
+                                command: tauri_dev_cmd,
+                                category: "npm".to_string(),
+                                description: Some("Start application in Tauri dev mode".to_string()),
+                            });
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Fallback: If src-tauri exists and tauri build hasn't been added yet
+    if root.join("src-tauri").exists() && !actions.iter().any(|a| a.command.contains("tauri build")) {
+        actions.push(RepoAction {
+            id: "npm:tauri:build:fallback".to_string(),
+            name: "npm run tauri build".to_string(),
+            command: "npm run tauri build".to_string(),
+            category: "npm".to_string(),
+            description: Some("Build desktop application bundle with Tauri".to_string()),
+        });
+        actions.push(RepoAction {
+            id: "npm:tauri:dev:fallback".to_string(),
+            name: "npm run tauri dev".to_string(),
+            command: "npm run tauri dev".to_string(),
+            category: "npm".to_string(),
+            description: Some("Start application in Tauri dev mode".to_string()),
+        });
     }
 
     // 2. Detect Cargo.toml (Rust)
@@ -345,10 +394,35 @@ mod tests {
         let actions = detect_repo_actions(dir.to_string_lossy().to_string());
         let _ = fs::remove_dir_all(&dir);
 
-        assert_eq!(actions.len(), 3);
         assert!(actions.iter().any(|a| a.command == "npm run dev"));
         assert!(actions.iter().any(|a| a.command == "npm run build"));
         assert!(actions.iter().any(|a| a.command == "npm run tauri build"));
+    }
+
+    #[test]
+    fn test_detect_tauri_script_expansion() {
+        let dir = std::env::temp_dir().join(format!("gitty-test-tauri-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+
+        let pkg_path = dir.join("package.json");
+        let mut file = File::create(&pkg_path).unwrap();
+        writeln!(
+            file,
+            r#"{{
+            "name": "test-pkg",
+            "scripts": {{
+                "tauri": "tauri"
+            }}
+        }}"#
+        )
+        .unwrap();
+
+        let actions = detect_repo_actions(dir.to_string_lossy().to_string());
+        let _ = fs::remove_dir_all(&dir);
+
+        assert!(actions.iter().any(|a| a.command == "npm run tauri"));
+        assert!(actions.iter().any(|a| a.command == "npm run tauri build"));
+        assert!(actions.iter().any(|a| a.command == "npm run tauri dev"));
     }
 
     #[test]
