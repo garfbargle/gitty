@@ -35,6 +35,13 @@ const CANDIDATES: &[Candidate] = &[
     Candidate { id: "antigravity", name: "Antigravity", bundles: &["Antigravity.app"] },
     Candidate { id: "antigravity-ide", name: "Antigravity IDE", bundles: &["Antigravity IDE.app"] },
     Candidate { id: "xcode", name: "Xcode", bundles: &["Xcode.app"] },
+    Candidate { id: "terminal", name: "Terminal", bundles: &["Terminal.app"] },
+    Candidate { id: "iterm", name: "iTerm", bundles: &["iTerm.app", "iTerm2.app"] },
+    Candidate { id: "ghostty", name: "Ghostty", bundles: &["Ghostty.app"] },
+    Candidate { id: "warp", name: "Warp", bundles: &["Warp.app"] },
+    Candidate { id: "alacritty", name: "Alacritty", bundles: &["Alacritty.app"] },
+    Candidate { id: "kitty", name: "Kitty", bundles: &["kitty.app", "Kitty.app"] },
+    Candidate { id: "wezterm", name: "WezTerm", bundles: &["WezTerm.app"] },
 ];
 
 /// Directories searched for application bundles, in priority order.
@@ -42,9 +49,12 @@ fn app_search_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![
         PathBuf::from("/Applications"),
         PathBuf::from("/System/Applications"),
+        PathBuf::from("/Applications/Utilities"),
+        PathBuf::from("/System/Applications/Utilities"),
     ];
     if let Some(home) = std::env::var_os("HOME") {
         dirs.push(Path::new(&home).join("Applications"));
+        dirs.push(Path::new(&home).join("Applications/Utilities"));
     }
     dirs
 }
@@ -182,3 +192,23 @@ pub fn open_in_editor(target_id: String, app_path: String, path: String) -> Resu
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_editors_includes_terminal_on_macos() {
+        let editors = detect_editors();
+        assert!(editors.iter().any(|e| e.id == "default"));
+        assert!(editors.iter().any(|e| e.id == "finder"));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(
+                editors.iter().any(|e| e.id == "terminal"),
+                "Terminal should be detected on macOS"
+            );
+        }
+    }
+}
+

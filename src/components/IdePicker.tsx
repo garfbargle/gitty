@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronDown, Code2 } from "lucide-react";
+import { ChevronDown, Code2, Folder, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 type Editor = {
@@ -20,6 +20,20 @@ function EditorGlyph({ editor, size }: { editor: Editor; size: number }) {
         className="ide-picker-glyph"
       />
     );
+  }
+  if (
+    editor.id === "terminal" ||
+    editor.id === "iterm" ||
+    editor.id === "ghostty" ||
+    editor.id === "warp" ||
+    editor.id === "alacritty" ||
+    editor.id === "kitty" ||
+    editor.id === "wezterm"
+  ) {
+    return <Terminal size={size} className="ide-picker-item-icon" />;
+  }
+  if (editor.id === "finder" || editor.id === "default") {
+    return <Folder size={size} className="ide-picker-item-icon" />;
   }
   return <Code2 size={size} className="ide-picker-item-icon" />;
 }
