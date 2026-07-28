@@ -2446,8 +2446,7 @@ function App() {
     hasRemotes &&
     savedBackupRemoteName.trim().length > 0 &&
     savedBackupUrlTemplate.trim().includes("{repo}") &&
-    (!snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim()) ||
-      (snapshot?.backupPushPending ?? false));
+    !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
   const backupRetryPending = !!snapshot?.backupPushPending;
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
@@ -2734,7 +2733,7 @@ function App() {
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
               backupSetupAvailable={backupSetupAvailable}
-              backupRemoteName={backupSetupAvailable ? savedBackupRemoteName : null}
+              backupRemoteName={savedBackupRemoteName.trim() || null}
               backupRetryPending={backupRetryPending}
               onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
               onPull={() => pull(false)}

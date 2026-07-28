@@ -4742,6 +4742,17 @@ fn backup_repo_slug(repo: &RepoEntry) -> Result<&str, String> {
     Ok(slug)
 }
 
+fn git_urls_equal(a: &str, b: &str) -> bool {
+    let normalize = |u: &str| {
+        let trimmed = u.trim().trim_end_matches('/');
+        trimmed
+            .strip_suffix(".git")
+            .unwrap_or(trimmed)
+            .to_lowercase()
+    };
+    normalize(a) == normalize(b)
+}
+
 /// Set up one repository's backup when the user opens that repository. A
 /// manual remote is never overwritten, and the initial sync copies every local
 /// branch and tag so the backup starts complete rather than at just HEAD.
@@ -4760,7 +4771,7 @@ fn configure_backup_remote_blocking(
 
     if remotes.lines().any(|name| name == remote_name) {
         let existing = git(repo_path, &["remote", "get-url", &remote_name])?;
-        if existing.trim() != url {
+        if !git_urls_equal(&existing, &url) {
             return Err(format!(
                 "{} already points to {}. Gitty will not overwrite an existing backup remote.",
                 remote_name,
@@ -4981,4 +4992,29 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_git_urls_equal() {
+        assert!(git_urls_equal(
+            "https://gitto.c0di.com/git/codi/Gitty.git",
+            "https://gitto.c0di.com/git/codi/gitty.git"
+        ));
+        assert!(git_urls_equal(
+            "https://gitto.c0di.com/git/codi/gitty",
+            "https://gitto.c0di.com/git/codi/gitty.git"
+        ));
+        assert!(git_urls_equal(
+            "https://gitto.c0di.com/git/codi/gitty/",
+            "https://gitto.c0di.com/git/codi/gitty.git"
+        ));
+        assert!(!git_urls_equal(
+            "https://gitto.c0di.com/git/codi/other.git",
+            "https://gitto.c0di.com/git/codi/gitty.git"
+        ));
+    }
 }

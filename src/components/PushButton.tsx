@@ -57,6 +57,7 @@ export function PushButton({
       pushCount > 0 ||
       unpublished ||
       suggestsForcePush ||
+      backupRetryPending ||
       pushPhase === "pushing" ||
       pushPhase === "done");
   const isBusy = pushPhase !== "idle";
@@ -114,12 +115,12 @@ export function PushButton({
         <button
           type="button"
           className="push-btn-main"
-          title={`${backupRetryPending ? "Retry" : "Set up"} ${backupRemoteName || "the"} backup and sync this repository`}
+          title={`Set up ${backupRemoteName || "the"} backup and sync this repository`}
           disabled={isLocked || settingUpBackup}
           onClick={() => void setupBackup()}
         >
           {settingUpBackup ? <Loader2 size={15} className="spin" /> : <Upload size={15} />}
-          {settingUpBackup ? "Setting up…" : backupRetryPending ? "Retry backup" : "Set up backup"}
+          {settingUpBackup ? "Setting up…" : "Set up backup"}
         </button>
       </div>
     );
@@ -165,6 +166,12 @@ export function PushButton({
     if (suggestsForcePush) {
       return `Push ${summary} — remote rejected the last push${forceHint}`;
     }
+    if (backupRetryPending && pushCount === 0) {
+      return `Retry pushing backup to ${backupRemoteName || "remote"}${forceHint}`;
+    }
+    if (backupRetryPending) {
+      return `Push ${summary} and retry backup${forceHint}`;
+    }
     return `Push ${summary}${forceHint}`;
   }
 
@@ -201,7 +208,7 @@ export function PushButton({
         ) : (
           <>
             <Upload size={15} />
-            Push
+            {backupRetryPending && pushCount === 0 ? "Retry backup" : "Push"}
             <kbd>⌘⇧↵</kbd>
           </>
         )}
