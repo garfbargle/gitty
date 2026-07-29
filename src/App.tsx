@@ -282,9 +282,8 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
-  const [activeExecution, setActiveExecution] = useState<ActionExecutionState | null>(null);
-  const [showRunnerDrawer, setShowRunnerDrawer] = useState(false);
-  const [executionFeedDismissed, setExecutionFeedDismissed] = useState(false);
+  const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
+  const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -326,34 +325,38 @@ function App() {
     const unlistenOutput = listen<{ actionId: string; line: string; stream: "stdout" | "stderr" }>(
       "action-runner-output",
       (event) => {
-        setActiveExecution((prev) => {
-          if (!prev || prev.runId !== event.payload.actionId) return prev;
-          const newLog: ActionLogEntry = {
-            id: `${Date.now()}-${Math.random()}`,
-            line: event.payload.line,
-            stream: event.payload.stream,
-            timestamp: Date.now(),
-          };
-          return {
-            ...prev,
-            logs: [...prev.logs, newLog],
-          };
-        });
+        setTerminalSessions((sessions) =>
+          sessions.map((session) => {
+            if (session.runId !== event.payload.actionId) return session;
+            const newLog: ActionLogEntry = {
+              id: `${Date.now()}-${Math.random()}`,
+              line: event.payload.line,
+              stream: event.payload.stream,
+              timestamp: Date.now(),
+            };
+            return {
+              ...session,
+              logs: [...session.logs, newLog],
+            };
+          })
+        );
       }
     );
 
     const unlistenFinished = listen<{ actionId: string; success: boolean; exitCode?: number | null; error?: string | null }>(
       "action-runner-finished",
       (event) => {
-        setActiveExecution((prev) => {
-          if (!prev || prev.runId !== event.payload.actionId) return prev;
-          return {
-            ...prev,
-            status: event.payload.success ? "success" : "error",
-            endTime: Date.now(),
-            exitCode: event.payload.exitCode ?? (event.payload.success ? 0 : 1),
-          };
-        });
+        setTerminalSessions((sessions) =>
+          sessions.map((session) => {
+            if (session.runId !== event.payload.actionId) return session;
+            return {
+              ...session,
+              status: event.payload.success ? "success" : "error",
+              endTime: Date.now(),
+              exitCode: event.payload.exitCode ?? (event.payload.success ? 0 : 1),
+            };
+          })
+        );
       }
     );
 
@@ -382,34 +385,33 @@ function App() {
           },
         ],
       };
-      setActiveExecution(execution);
-      setExecutionFeedDismissed(false);
-      // Keep script output in the shared activity feed by default. The full
-      // terminal remains one click away for longer sessions.
-      setShowRunnerDrawer(false);
+      setTerminalSessions((sessions) => [...sessions, execution]);
+      setDrawerSessionId(null);
 
       invoke("execute_repo_action", {
         path: selectedPath,
         actionId: runId,
         command: action.command,
       }).catch((err) => {
-        setActiveExecution((prev) =>
-          prev?.runId === runId
-            ? {
-                ...prev,
-                status: "error",
-                endTime: Date.now(),
-                logs: [
-                  ...prev.logs,
-                  {
-                    id: `err-${Date.now()}`,
-                    line: `Execution error: ${String(err)}`,
-                    stream: "stderr",
-                    timestamp: Date.now(),
-                  },
-                ],
-              }
-            : null
+        setTerminalSessions((sessions) =>
+          sessions.map((session) =>
+            session.runId === runId
+              ? {
+                  ...session,
+                  status: "error",
+                  endTime: Date.now(),
+                  logs: [
+                    ...session.logs,
+                    {
+                      id: `err-${Date.now()}`,
+                      line: `Execution error: ${String(err)}`,
+                      stream: "stderr",
+                      timestamp: Date.now(),
+                    },
+                  ],
+                }
+              : session
+          )
         );
       });
     },
@@ -933,11 +935,9 @@ function App() {
     setConflictFiles([]);
     setMessage("");
     setError("");
-    // Commands are allowed to finish in the repo that launched them, but their
-    // output must never spill into the next repository's activity feed.
-    setActiveExecution(null);
-    setExecutionFeedDismissed(false);
-    setShowRunnerDrawer(false);
+    // Commands may finish in the repo that launched them, but their sessions
+    // are scoped to that repo and never appear in the next repository's feed.
+    setDrawerSessionId(null);
     setResolvedFiles([]);
     setSelectedConflict(null);
     setConflictSides(null);
@@ -2854,10 +2854,13 @@ function App() {
     commitFiles,
   ]);
 
-  const visibleExecution =
-    activeExecution?.repoPath === selectedPath && !executionFeedDismissed
-      ? activeExecution
-      : null;
+  const visibleTerminalSessions = terminalSessions.filter(
+    (session) => session.repoPath === selectedPath,
+  );
+  const runningExecution =
+    visibleTerminalSessions.find((session) => session.status === "running") ?? null;
+  const drawerExecution =
+    visibleTerminalSessions.find((session) => session.runId === drawerSessionId) ?? null;
 
   return (
     <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
@@ -2942,7 +2945,7 @@ function App() {
               onToggleSidebar={toggleSidebar}
               repoActions={repoActions}
               selectedRepoActionId={selectedRepoActionId}
-              activeExecution={activeExecution}
+              activeExecution={runningExecution}
               onRunAction={handleRunAction}
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
@@ -3288,17 +3291,26 @@ function App() {
           </div>
         )}
 
-        {message || error || visibleExecution ? (
+        {message || error || visibleTerminalSessions.length > 0 ? (
           <ActivityFeed
             message={message}
             error={error}
-            execution={visibleExecution}
-            onOpenExecution={() => setShowRunnerDrawer(true)}
+            gitBusy={pushPhase === "pushing" || pullPhase === "pulling"}
+            sessions={visibleTerminalSessions}
+            onOpenExecution={(session) => setDrawerSessionId(session.runId)}
             onRerun={handleRunAction}
-            onClearExecution={() =>
-              setActiveExecution((prev) => (prev ? { ...prev, logs: [] } : null))
+            onClearExecution={(session) =>
+              setTerminalSessions((sessions) =>
+                sessions.map((current) =>
+                  current.runId === session.runId ? { ...current, logs: [] } : current,
+                ),
+              )
             }
-            onDismissExecution={() => setExecutionFeedDismissed(true)}
+            onDismissExecution={(session) =>
+              setTerminalSessions((sessions) =>
+                sessions.filter((current) => current.runId !== session.runId),
+              )
+            }
           />
         ) : null}
       </section>
@@ -3403,13 +3415,17 @@ function App() {
         disabled={loading}
       />
 
-      {showRunnerDrawer && activeExecution?.repoPath === selectedPath ? (
+      {drawerExecution ? (
         <ActionRunnerDrawer
-          execution={activeExecution}
-          onClose={() => setShowRunnerDrawer(false)}
+          execution={drawerExecution}
+          onClose={() => setDrawerSessionId(null)}
           onRerun={handleRunAction}
           onClearLogs={() =>
-            setActiveExecution((prev) => (prev ? { ...prev, logs: [] } : null))
+            setTerminalSessions((sessions) =>
+              sessions.map((current) =>
+                current.runId === drawerExecution.runId ? { ...current, logs: [] } : current,
+              ),
+            )
           }
         />
       ) : null}
