@@ -42,21 +42,10 @@ export function ActivityFeed({
   const terminalScrollRef = useRef<HTMLDivElement>(null);
   const gitFollowLatestRef = useRef(true);
   const terminalFollowLatestRef = useRef(new Map<string, boolean>());
-  const didMountRef = useRef(false);
 
   const activeSession = sessions.find((session) => session.runId === activeTab) ?? null;
   const latestSession = sessions[sessions.length - 1] ?? null;
   const latestLogId = activeSession?.logs[activeSession.logs.length - 1]?.id;
-
-  useEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
-    // Git actions take focus when they post status, so a push cannot be hidden
-    // behind a terminal session that happened to run earlier.
-    setActiveTab("git");
-  }, [message, error]);
 
   useEffect(() => {
     if (!latestSession) return;
