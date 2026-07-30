@@ -207,6 +207,45 @@ button:focus-visible {
   gap: 4px;
 }
 
+.repo-sort-control {
+  align-items: center;
+  background: var(--bg-hover);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  display: inline-flex;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 5px;
+}
+
+.repo-sort-control:focus-within,
+.repo-sort-control:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  color: var(--text-secondary);
+}
+
+.repo-sort-control select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  max-width: 102px;
+  outline: 0;
+  padding: 0 2px;
+  text-transform: none;
+}
+
+.repo-sort-control option {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
 .repo-list {
   flex: 1;
   min-height: 0;
@@ -242,6 +281,10 @@ button:focus-visible {
 
 .repo-item.saved {
   cursor: grab;
+}
+
+.repo-item.saved[draggable="false"] {
+  cursor: default;
 }
 
 .repo-item.saved.dragging {
@@ -1084,6 +1127,11 @@ button:focus-visible {
 
 .action-runner-log-line.stderr {
   color: #f87171;
+}
+
+.log-timestamp {
+  color: #64748b;
+  user-select: none;
 }
 
 /* Segmented Changes | History switch */
@@ -5158,6 +5206,10 @@ button.context-chip.pullable:disabled {
 
 .activity-feed-log-line.stderr {
   color: var(--danger);
+}
+
+.activity-feed-log-line .log-timestamp {
+  color: var(--text-muted);
 }
 
 .activity-feed-empty {

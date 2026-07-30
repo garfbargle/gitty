@@ -7,9 +7,10 @@ import {
   Radar,
   RefreshCw,
   Settings,
+  SlidersHorizontal,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
-import type { DiscoveredRepoEntry, RepoEntry } from "../types";
+import type { DiscoveredRepoEntry, RepoEntry, RepoSortMode } from "../types";
 import { shortenPath } from "../lib/git";
 import { revealInFinder } from "../lib/finder";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -25,6 +26,8 @@ type RepoSidebarProps = {
   onSaveDiscovered: (path: string) => void;
   onRemoveRepo: (path: string) => void;
   onReorder: (orderedPaths: string[]) => void;
+  sortMode: RepoSortMode;
+  onSortModeChange: (mode: RepoSortMode) => void;
   onAddExisting: () => void;
   onOpenSettings: () => void;
   onOpenRepoSettings: (path: string) => void;
@@ -42,6 +45,8 @@ export const RepoSidebar = memo(function RepoSidebar({
   onSaveDiscovered,
   onRemoveRepo,
   onReorder,
+  sortMode,
+  onSortModeChange,
   onAddExisting,
   onOpenSettings,
   onOpenRepoSettings,
@@ -121,6 +126,20 @@ export const RepoSidebar = memo(function RepoSidebar({
       <header className="sidebar-header">
         <span>Repositories</span>
         <div className="sidebar-header-actions">
+          <label className="repo-sort-control" title="Sort repositories">
+            <SlidersHorizontal size={14} aria-hidden="true" />
+            <select
+              aria-label="Sort repositories"
+              value={sortMode}
+              onChange={(event) => onSortModeChange(event.target.value as RepoSortMode)}
+            >
+              <option value="manual">Manual</option>
+              <option value="name-asc">Name A–Z</option>
+              <option value="name-desc">Name Z–A</option>
+              <option value="recent">Recent activity</option>
+              <option value="changes">Changes first</option>
+            </select>
+          </label>
           <button type="button" className="icon-btn sm" title="Add repository" onClick={onAddExisting}>
             <Plus size={16} />
           </button>
@@ -145,9 +164,14 @@ export const RepoSidebar = memo(function RepoSidebar({
               dragPath === repo.path ? " dragging" : ""
             }${dragOverPath === repo.path && dragPath !== repo.path ? " drag-over" : ""}`}
             key={repo.id}
-            title={repo.path}
-            draggable
+            title={
+              sortMode === "manual"
+                ? repo.path
+                : `${repo.path}\nSwitch to Manual order to drag repositories.`
+            }
+            draggable={sortMode === "manual"}
             onDragStart={(event) => {
+              if (sortMode !== "manual") return;
               setDragPath(repo.path);
               event.dataTransfer.effectAllowed = "move";
               // WebKit requires drag data to be set for drop events to fire.
@@ -155,10 +179,10 @@ export const RepoSidebar = memo(function RepoSidebar({
             }}
             onDragEnter={(event) => {
               event.preventDefault();
-              if (dragPath) setDragOverPath(repo.path);
+              if (sortMode === "manual" && dragPath) setDragOverPath(repo.path);
             }}
             onDragOver={(event) => {
-              if (dragPath) {
+              if (sortMode === "manual" && dragPath) {
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
               }

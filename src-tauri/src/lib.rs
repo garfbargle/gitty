@@ -19,7 +19,7 @@ use std::{
         Arc,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -42,6 +42,8 @@ pub struct RepoEntry {
     path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     has_uncommitted_changes: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_activity_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -383,6 +385,7 @@ fn save_repos_to_disk(app: &AppHandle, repos: &[RepoEntry]) -> Result<(), String
             name: repo.name.clone(),
             path: repo.path.clone(),
             has_uncommitted_changes: None,
+            last_activity_at: None,
         })
         .collect::<Vec<_>>();
     let data = serde_json::to_string_pretty(&persistent_repos)
@@ -709,6 +712,7 @@ fn normalize_repo(path: &str) -> Result<RepoEntry, String> {
         name,
         path,
         has_uncommitted_changes: None,
+        last_activity_at: None,
     })
 }
 
@@ -1043,8 +1047,25 @@ fn repo_has_uncommitted_changes(repo_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// The reflog changes whenever HEAD moves, which makes it a cheap, local signal
+/// for which repositories have seen Git activity most recently.
+fn repo_last_activity_at(repo_path: &Path) -> Option<u64> {
+    fs::metadata(repo_path.join(".git/logs/HEAD"))
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .or_else(|| {
+            git(repo_path, &["log", "-1", "--format=%ct"])
+                .ok()
+                .and_then(|timestamp| timestamp.trim().parse::<u64>().ok())
+                .map(|seconds| seconds.saturating_mul(1_000))
+        })
+}
+
 fn with_repo_status(mut repo: RepoEntry) -> RepoEntry {
     repo.has_uncommitted_changes = Some(repo_has_uncommitted_changes(Path::new(&repo.path)));
+    repo.last_activity_at = repo_last_activity_at(Path::new(&repo.path));
     repo
 }
 
@@ -1581,7 +1602,7 @@ fn add_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
         repo_icon::warm_repo_icon_cache(&app, &repo.path)?;
     }
 
-    Ok(repos)
+    Ok(repos.into_iter().map(with_repo_status).collect())
 }
 
 #[tauri::command]
@@ -1590,7 +1611,7 @@ fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     repos.retain(|repo| repo.path != path);
     save_repos_to_disk(&app, &repos)?;
     repo_icon::clear_repo_icon_cache(&app, &path)?;
-    Ok(repos)
+    Ok(repos.into_iter().map(with_repo_status).collect())
 }
 
 #[tauri::command]
@@ -1616,6 +1637,7 @@ fn repo_snapshot_blocking(
 ) -> Result<RepoSnapshot, String> {
     let mut repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
+    repo.last_activity_at = repo_last_activity_at(&repo_path);
     let log_limit = limit.unwrap_or(40);
 
     let branch = current_branch(&repo_path);

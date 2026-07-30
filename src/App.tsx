@@ -46,6 +46,7 @@ import type {
   RepoEnrichment,
   RepoFocusState,
   RepoSnapshot,
+  RepoSortMode,
   SelectionAnchor,
   MergeOutcome,
   MergeStatus,
@@ -54,6 +55,7 @@ import type {
   ConflictSides,
 } from "./types";
 import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
+import { timestampLogOutput } from "./lib/logs";
 import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
 import { INITIAL_COMMIT_LIMIT } from "./lib/commits";
@@ -177,6 +179,15 @@ function emptySummaryCache(): SummaryCache {
 
 const SNAPSHOT_SUPERSEDED = "__superseded__";
 const SIDEBAR_VISIBLE_KEY = "gitty.sidebarVisible";
+const REPO_SORT_KEY = "gitty.repoSort";
+
+const repoSortModes = new Set<RepoSortMode>([
+  "manual",
+  "name-asc",
+  "name-desc",
+  "recent",
+  "changes",
+]);
 
 function readSidebarVisible(): boolean {
   try {
@@ -184,6 +195,34 @@ function readSidebarVisible(): boolean {
   } catch {
     return true;
   }
+}
+
+function readRepoSortMode(): RepoSortMode {
+  try {
+    const saved = localStorage.getItem(REPO_SORT_KEY);
+    return saved && repoSortModes.has(saved as RepoSortMode)
+      ? (saved as RepoSortMode)
+      : "manual";
+  } catch {
+    return "manual";
+  }
+}
+
+function sortRepos(repos: RepoEntry[], mode: RepoSortMode): RepoEntry[] {
+  if (mode === "manual") return repos;
+
+  const byName = (left: RepoEntry, right: RepoEntry) =>
+    left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
+    left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" });
+
+  return [...repos].sort((left, right) => {
+    if (mode === "name-asc") return byName(left, right);
+    if (mode === "name-desc") return byName(right, left);
+    if (mode === "recent") {
+      return (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0) || byName(left, right);
+    }
+    return Number(Boolean(right.hasUncommittedChanges)) - Number(Boolean(left.hasUncommittedChanges)) || byName(left, right);
+  });
 }
 
 function isSupersededSnapshotError(err: unknown): boolean {
@@ -285,10 +324,19 @@ function App() {
   // Set when a normal push is rejected as non-fast-forward, so the push button
   // surfaces the force-push affordance even without a fresh fetch.
   const [pushRejected, setPushRejected] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [message, setMessageValue] = useState("");
+  const [error, setErrorValue] = useState("");
+  // The Git tab is also used for one-off Git actions, so timestamp their
+  // completed output just like the streamed push and backup activity.
+  const setMessage = useCallback((next: string) => {
+    setMessageValue(next ? timestampLogOutput(next) : "");
+  }, []);
+  const setError = useCallback((next: string) => {
+    setErrorValue(next ? timestampLogOutput(next) : "");
+  }, []);
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+  const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
@@ -524,6 +572,7 @@ function App() {
   const canUpdateFromMain = canIntegrate && behindMain > 0;
   const canMergeIntoMain = canIntegrate && aheadOfMain > 0;
 
+  const sortedRepos = useMemo(() => sortRepos(repos, repoSortMode), [repos, repoSortMode]);
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
   const displaySnapshot =
@@ -588,7 +637,7 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen<GitProgress>("git-progress", (event) => {
-      const line = `${event.payload.phase}: ${event.payload.message}`.trim();
+      const line = timestampLogOutput(`${event.payload.phase}: ${event.payload.message}`.trim());
       if (!line) return;
       setGitActivityByPath((current) => {
         const activity = current[event.payload.path] ?? { message: "", error: "" };
@@ -774,7 +823,7 @@ function App() {
     if (backupLockRef.current.has(path)) return false;
     backupLockRef.current.add(path);
     setBackupPhases((current) => ({ ...current, [path]: "pushing" }));
-    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Setting up backup…", error: "" } }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: timestampLogOutput("Setting up backup…"), error: "" } }));
     try {
       const result = await invoke<BackupSetupResult>("configure_backup_remote", {
         path,
@@ -783,7 +832,7 @@ function App() {
       });
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
-        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+        return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       await refreshRepoQuiet(path);
       if (result.synced) {
@@ -800,7 +849,7 @@ function App() {
       }
       return result.synced;
     } catch (err) {
-      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: String(err) } }));
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: timestampLogOutput(String(err)) } }));
       setBackupPhases((current) => ({ ...current, [path]: "idle" }));
       return false;
     } finally {
@@ -928,16 +977,22 @@ function App() {
     if (result) {
       setRepos(result);
       if (result.length > 0 && !selectedPath) {
-        await selectRepo(result[0].path);
+        await selectRepo(sortRepos(result, repoSortMode)[0].path);
       }
     }
     setReposLoaded(true);
   }
 
-  function updateRepoDirtyState(path: string, hasUncommittedChanges: boolean) {
+  function updateRepoDirtyState(
+    path: string,
+    hasUncommittedChanges: boolean,
+    lastActivityAt?: number | null,
+  ) {
     setRepos((current) =>
       current.map((repo) =>
-        repo.path === path ? { ...repo, hasUncommittedChanges } : repo,
+        repo.path === path
+          ? { ...repo, hasUncommittedChanges, ...(lastActivityAt === undefined ? {} : { lastActivityAt }) }
+          : repo,
       ),
     );
   }
@@ -962,7 +1017,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      updateRepoDirtyState(result.repo.path, !result.isClean);
+      updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       void enrichRepoSnapshot(path, requestId);
       return;
     }
@@ -1036,7 +1091,7 @@ function App() {
     if (result) {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
-      updateRepoDirtyState(result.repo.path, !result.isClean);
+      updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       return result;
     }
     return null;
@@ -1060,7 +1115,7 @@ function App() {
         setSnapshot(result);
         setSelectedPath(result.repo.path);
       }
-      updateRepoDirtyState(result.repo.path, !result.isClean);
+      updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       return result;
     } catch (err) {
       if (isSupersededSnapshotError(err)) return null;
@@ -2411,14 +2466,14 @@ function App() {
 
     pushLockRef.current.add(path);
     setPushPhases((current) => ({ ...current, [path]: "pushing" }));
-    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Pushing…", error: "" } }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: timestampLogOutput("Pushing…"), error: "" } }));
     await waitForPaint();
 
     try {
       const result = await invoke<ActionResult>("push_repo", { path, force, hard });
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
-        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+        return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       if (selectedPath === path) setPushRejected(false);
       const snap = await refreshRepoQuiet(path);
@@ -2445,7 +2500,7 @@ function App() {
       return true;
     } catch (err) {
       const errText = String(err);
-      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: errText } }));
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: timestampLogOutput(errText) } }));
       // A non-fast-forward / stale-info rejection means the remote moved under us.
       // Surface the force-push affordances even though our cached `behind` count
       // may still be 0. (A hard `--force` already overwrites, so nothing to add.)
@@ -2470,13 +2525,13 @@ function App() {
     ) return false;
     backupLockRef.current.add(path);
     setBackupPhases((current) => ({ ...current, [path]: "pushing" }));
-    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Backing up…", error: "" } }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: timestampLogOutput("Backing up…"), error: "" } }));
     await waitForPaint();
     try {
       const result = await invoke<ActionResult>("backup_repo", { path });
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
-        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+        return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       await refreshRepoQuiet(path);
       setBackupPhases((current) => ({ ...current, [path]: "done" }));
@@ -2489,7 +2544,7 @@ function App() {
       backupDoneTimerRef.current.set(path, timer);
       return true;
     } catch (err) {
-      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: String(err) } }));
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: timestampLogOutput(String(err)) } }));
       setBackupPhases((current) => ({ ...current, [path]: "idle" }));
       await refreshRepoQuiet(path);
       return false;
@@ -2712,6 +2767,15 @@ function App() {
       invoke<RepoEntry[]>("reorder_repos", { paths: orderedPaths }),
     );
     if (result) setRepos(result);
+  }
+
+  function changeRepoSortMode(mode: RepoSortMode) {
+    setRepoSortMode(mode);
+    try {
+      localStorage.setItem(REPO_SORT_KEY, mode);
+    } catch {
+      // Sorting still works for this session when browser storage is unavailable.
+    }
   }
 
   const stagedCount = snapshot?.changes.filter(isStaged).length ?? 0;
@@ -2975,7 +3039,7 @@ function App() {
   return (
     <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
       <RepoSidebar
-        repos={repos}
+        repos={sortedRepos}
         discoveredRepos={discoveredRepos}
         discovering={discovering}
         selectedPath={selectedPath}
@@ -2984,6 +3048,8 @@ function App() {
         onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
         onRemoveRepo={(path) => void removeRepo(path)}
         onReorder={(paths) => void reorderRepos(paths)}
+        sortMode={repoSortMode}
+        onSortModeChange={changeRepoSortMode}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenRepoSettings={(path) => {
@@ -3012,7 +3078,7 @@ function App() {
         {repoSwitching ? (
           <>
             <TopBar
-              repos={repos}
+              repos={sortedRepos}
               selectedPath={selectedPath}
               branch="…"
               branches={["…"]}
@@ -3036,7 +3102,7 @@ function App() {
         ) : displaySnapshot ? (
           <>
             <TopBar
-              repos={repos}
+              repos={sortedRepos}
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}

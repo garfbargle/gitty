@@ -9,6 +9,7 @@ import {
   Check,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { formatLogTimestamp } from "../lib/logs";
 import type { ActionExecutionState, RepoAction } from "../types";
 
 type ActionRunnerDrawerProps = {
@@ -63,7 +64,9 @@ export function ActionRunnerDrawer({
 
   function handleCopy() {
     if (!execution) return;
-    const text = execution.logs.map((l) => l.line).join("\n");
+    const text = execution.logs
+      .map((log) => `[${formatLogTimestamp(log.timestamp)}] ${log.line}`)
+      .join("\n");
     void navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -159,6 +162,7 @@ export function ActionRunnerDrawer({
               key={log.id}
               className={`action-runner-log-line ${log.stream}`}
             >
+              <span className="log-timestamp">[{formatLogTimestamp(log.timestamp)}]</span>{" "}
               {log.line}
             </div>
           ))

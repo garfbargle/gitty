@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { formatLogTimestamp } from "../lib/logs";
 import type { ActionExecutionState, RepoAction } from "../types";
 
 type ActivityFeedProps = {
@@ -88,7 +89,11 @@ export function ActivityFeed({
   }
 
   function handleCopy(session: ActionExecutionState) {
-    void navigator.clipboard.writeText(session.logs.map((log) => log.line).join("\n"));
+    void navigator.clipboard.writeText(
+      session.logs
+        .map((log) => `[${formatLogTimestamp(log.timestamp)}] ${log.line}`)
+        .join("\n"),
+    );
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   }
@@ -171,7 +176,10 @@ export function ActivityFeed({
           </div>
           <div ref={terminalScrollRef} className="activity-feed-scroll activity-feed-logs" onScroll={() => handleScroll("terminal")}>
             {activeSession.logs.length ? activeSession.logs.map((log) => (
-              <div key={log.id} className={`activity-feed-log-line ${log.stream}`}>{log.line}</div>
+              <div key={log.id} className={`activity-feed-log-line ${log.stream}`}>
+                <span className="log-timestamp">[{formatLogTimestamp(log.timestamp)}]</span>{" "}
+                {log.line}
+              </div>
             )) : <div className="activity-feed-empty">Waiting for process output…</div>}
           </div>
         </>

@@ -3,7 +3,11 @@ export type RepoEntry = {
   name: string;
   path: string;
   hasUncommittedChanges?: boolean | null;
+  /** Last local Git activity, used for repository-list sorting. */
+  lastActivityAt?: number | null;
 };
+
+export type RepoSortMode = "manual" | "name-asc" | "name-desc" | "recent" | "changes";
 
 export type RepoAction = {
   id: string;

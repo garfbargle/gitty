@@ -103,6 +103,7 @@ fn quick_repo_entry(path: &Path) -> Option<RepoEntry> {
         name,
         path: path_string,
         has_uncommitted_changes: None,
+        last_activity_at: None,
     })
 }
 
