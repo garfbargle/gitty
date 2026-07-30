@@ -1776,6 +1776,50 @@ button:focus-visible {
   position: relative;
 }
 
+.backup-btn-group {
+  display: inline-flex;
+  position: relative;
+}
+
+.backup-btn-main {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.backup-btn-main:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.backup-btn-main:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.backup-btn-main:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.backup-btn-group.pushing .backup-btn-main {
+  animation: push-active-pulse 1.2s ease-in-out infinite;
+  cursor: wait;
+}
+
+.backup-btn-group.done .backup-btn-main {
+  animation: push-done-pop 0.35s ease-out;
+  background: color-mix(in srgb, var(--success) 22%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--success) 60%, transparent);
+}
+
 .push-btn-badge {
   align-items: center;
   background: #111827;

@@ -166,6 +166,11 @@ type SummaryCache = {
   displayScope: SummaryScope;
 };
 
+type RepoGitActivity = {
+  message: string;
+  error: string;
+};
+
 function emptySummaryCache(): SummaryCache {
   return { all: null, staged: null, displayScope: "staged" };
 }
@@ -271,7 +276,11 @@ function App() {
   const [changeSummaryVisible, setChangeSummaryVisible] = useState(false);
   const [workspaceSplit, setWorkspaceSplit] = useState(0.3);
   const [loading, setLoading] = useState(false);
-  const [pushPhase, setPushPhase] = useState<PushPhase>("idle");
+  const [pushPhases, setPushPhases] = useState<Record<string, PushPhase>>({});
+  const [backupPhases, setBackupPhases] = useState<Record<string, PushPhase>>({});
+  const [gitActivityByPath, setGitActivityByPath] = useState<Record<string, RepoGitActivity>>({});
+  const pushPhase = pushPhases[selectedPath] ?? "idle";
+  const backupPhase = backupPhases[selectedPath] ?? "idle";
   const [pullPhase, setPullPhase] = useState<PullPhase>("idle");
   // Set when a normal push is rejected as non-fast-forward, so the push button
   // surfaces the force-push affordance even without a fresh fetch.
@@ -541,8 +550,10 @@ function App() {
     past: { filePath: string; before: string; after: string }[];
     future: { filePath: string; before: string; after: string }[];
   }>({ past: [], future: [] });
-  const pushLockRef = useRef(false);
-  const pushDoneTimerRef = useRef<number | null>(null);
+  const pushLockRef = useRef(new Set<string>());
+  const backupLockRef = useRef(new Set<string>());
+  const pushDoneTimerRef = useRef(new Map<string, number>());
+  const backupDoneTimerRef = useRef(new Map<string, number>());
   const pullLockRef = useRef(false);
   const pullDoneTimerRef = useRef<number | null>(null);
   const workingTreeRefreshInFlightRef = useRef(false);
@@ -571,21 +582,29 @@ function App() {
     void loadAppSettings();
   }, []);
 
-  // Git push progress is written to stderr by Git. The Rust side forwards it
-  // as events so the bottom console stays alive during longer uploads instead
-  // of appearing frozen until the command exits.
+  // Network Git activity is keyed by repository, like terminal sessions. A
+  // push can finish after the user has moved to another repository, so its
+  // output must never bleed into the repository currently on screen.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen<GitProgress>("git-progress", (event) => {
-      if (event.payload.path !== selectedPath) return;
       const line = `${event.payload.phase}: ${event.payload.message}`.trim();
       if (!line) return;
-      setMessage((current) => [...current.split("\n"), line].filter(Boolean).slice(-120).join("\n"));
+      setGitActivityByPath((current) => {
+        const activity = current[event.payload.path] ?? { message: "", error: "" };
+        return {
+          ...current,
+          [event.payload.path]: {
+            ...activity,
+            message: [...activity.message.split("\n"), line].filter(Boolean).slice(-120).join("\n"),
+          },
+        };
+      });
     }).then((stop) => {
       unlisten = stop;
     });
     return () => unlisten?.();
-  }, [selectedPath]);
+  }, []);
 
   const rescanDiscovery = useCallback(() => {
     startDiscovery(savedPaths);
@@ -751,15 +770,51 @@ function App() {
 
   async function setupBackupForSelectedRepo(): Promise<boolean> {
     if (!selectedPath || !savedBackupUrlTemplate.trim()) return false;
+    const path = selectedPath;
+    if (backupLockRef.current.has(path)) return false;
+    backupLockRef.current.add(path);
+    setBackupPhases((current) => ({ ...current, [path]: "pushing" }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Setting up backup…", error: "" } }));
     try {
       const result = await invoke<BackupSetupResult>("configure_backup_remote", {
-        path: selectedPath,
+        path,
         remoteName: savedBackupRemoteName,
         urlTemplate: savedBackupUrlTemplate,
       });
-      setMessage((current) => [current, result.message, result.output].filter(Boolean).join("\n"));
-      await refreshRepo();
+      setGitActivityByPath((current) => {
+        const activity = current[path] ?? { message: "", error: "" };
+        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+      });
+      await refreshRepoQuiet(path);
+      if (result.synced) {
+        setBackupPhases((current) => ({ ...current, [path]: "done" }));
+        const previousTimer = backupDoneTimerRef.current.get(path);
+        if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+        const timer = window.setTimeout(() => {
+          setBackupPhases((current) => ({ ...current, [path]: "idle" }));
+          backupDoneTimerRef.current.delete(path);
+        }, 1600);
+        backupDoneTimerRef.current.set(path, timer);
+      } else {
+        setBackupPhases((current) => ({ ...current, [path]: "idle" }));
+      }
       return result.synced;
+    } catch (err) {
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: String(err) } }));
+      setBackupPhases((current) => ({ ...current, [path]: "idle" }));
+      return false;
+    } finally {
+      backupLockRef.current.delete(path);
+    }
+  }
+
+  async function setBackupAfterPush(enabled: boolean): Promise<boolean> {
+    const path = selectedPath;
+    if (!path) return false;
+    try {
+      await invoke("set_backup_on_push", { path, enabled });
+      await refreshRepoQuiet(path);
+      return true;
     } catch (err) {
       setError(String(err));
       return false;
@@ -2332,7 +2387,13 @@ function App() {
   }
 
   async function push(force: boolean, hard = false): Promise<boolean> {
-    if (!selectedPath || pushLockRef.current || pushPhase !== "idle") return false;
+    const path = selectedPath;
+    if (
+      !path ||
+      pushLockRef.current.has(path) ||
+      backupLockRef.current.has(path) ||
+      (pushPhases[path] ?? "idle") !== "idle"
+    ) return false;
     if (hard) {
       if (
         !window.confirm(
@@ -2348,49 +2409,92 @@ function App() {
       return false;
     }
 
-    pushLockRef.current = true;
-    setPushPhase("pushing");
-    setError("");
-    setMessage("Pushing…");
+    pushLockRef.current.add(path);
+    setPushPhases((current) => ({ ...current, [path]: "pushing" }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Pushing…", error: "" } }));
     await waitForPaint();
 
     try {
-      const result = await invoke<ActionResult>("push_repo", { path: selectedPath, force, hard });
-      setMessage((current) => [current, result.message, result.output].filter(Boolean).join("\n"));
-      setPushRejected(false);
-      const snap = await refreshRepoQuiet(selectedPath);
+      const result = await invoke<ActionResult>("push_repo", { path, force, hard });
+      setGitActivityByPath((current) => {
+        const activity = current[path] ?? { message: "", error: "" };
+        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+      });
+      if (selectedPath === path) setPushRejected(false);
+      const snap = await refreshRepoQuiet(path);
       const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
       if (remaining === 0) {
-        if (pushDoneTimerRef.current !== null) {
-          window.clearTimeout(pushDoneTimerRef.current);
-          pushDoneTimerRef.current = null;
+        const timer = pushDoneTimerRef.current.get(path);
+        if (timer !== undefined) {
+          window.clearTimeout(timer);
+          pushDoneTimerRef.current.delete(path);
         }
-        setPushPhase("idle");
+        setPushPhases((current) => ({ ...current, [path]: "idle" }));
       } else {
-        setPushPhase("done");
-        if (pushDoneTimerRef.current !== null) {
-          window.clearTimeout(pushDoneTimerRef.current);
+        setPushPhases((current) => ({ ...current, [path]: "done" }));
+        const previousTimer = pushDoneTimerRef.current.get(path);
+        if (previousTimer !== undefined) {
+          window.clearTimeout(previousTimer);
         }
-        pushDoneTimerRef.current = window.setTimeout(() => {
-          setPushPhase("idle");
-          pushDoneTimerRef.current = null;
+        const timer = window.setTimeout(() => {
+          setPushPhases((current) => ({ ...current, [path]: "idle" }));
+          pushDoneTimerRef.current.delete(path);
         }, 1600);
+        pushDoneTimerRef.current.set(path, timer);
       }
       return true;
     } catch (err) {
       const errText = String(err);
-      setError(errText);
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: errText } }));
       // A non-fast-forward / stale-info rejection means the remote moved under us.
       // Surface the force-push affordances even though our cached `behind` count
       // may still be 0. (A hard `--force` already overwrites, so nothing to add.)
       if (!hard && /non-fast-forward|\[rejected\]|fetch first|stale info|failed to push some refs/i.test(errText)) {
-        setPushRejected(true);
+        if (selectedPath === path) setPushRejected(true);
       }
-      setPushPhase("idle");
-      await refreshRepoQuiet(selectedPath);
+      setPushPhases((current) => ({ ...current, [path]: "idle" }));
+      await refreshRepoQuiet(path);
       return false;
     } finally {
-      pushLockRef.current = false;
+      pushLockRef.current.delete(path);
+    }
+  }
+
+  async function backup(): Promise<boolean> {
+    const path = selectedPath;
+    if (
+      !path ||
+      backupLockRef.current.has(path) ||
+      pushLockRef.current.has(path) ||
+      (backupPhases[path] ?? "idle") !== "idle"
+    ) return false;
+    backupLockRef.current.add(path);
+    setBackupPhases((current) => ({ ...current, [path]: "pushing" }));
+    setGitActivityByPath((current) => ({ ...current, [path]: { message: "Backing up…", error: "" } }));
+    await waitForPaint();
+    try {
+      const result = await invoke<ActionResult>("backup_repo", { path });
+      setGitActivityByPath((current) => {
+        const activity = current[path] ?? { message: "", error: "" };
+        return { ...current, [path]: { message: [activity.message, result.message, result.output].filter(Boolean).join("\n"), error: "" } };
+      });
+      await refreshRepoQuiet(path);
+      setBackupPhases((current) => ({ ...current, [path]: "done" }));
+      const previousTimer = backupDoneTimerRef.current.get(path);
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+      const timer = window.setTimeout(() => {
+        setBackupPhases((current) => ({ ...current, [path]: "idle" }));
+        backupDoneTimerRef.current.delete(path);
+      }, 1600);
+      backupDoneTimerRef.current.set(path, timer);
+      return true;
+    } catch (err) {
+      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: String(err) } }));
+      setBackupPhases((current) => ({ ...current, [path]: "idle" }));
+      await refreshRepoQuiet(path);
+      return false;
+    } finally {
+      backupLockRef.current.delete(path);
     }
   }
 
@@ -2666,7 +2770,7 @@ function App() {
     savedBackupRemoteName.trim().length > 0 &&
     savedBackupUrlTemplate.trim().includes("{repo}") &&
     !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
-  const backupRetryPending = !!snapshot?.backupPushPending;
+  const hasBackupRemote = hasRemotes && (snapshot?.remotes.length ?? 0) > 1;
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
 
@@ -2739,9 +2843,8 @@ function App() {
 
   useEffect(() => {
     return () => {
-      if (pushDoneTimerRef.current !== null) {
-        window.clearTimeout(pushDoneTimerRef.current);
-      }
+      pushDoneTimerRef.current.forEach((timer) => window.clearTimeout(timer));
+      backupDoneTimerRef.current.forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
 
@@ -2965,10 +3068,12 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
+              disabled={backupPhase !== "idle"}
               backupSetupAvailable={backupSetupAvailable}
               backupRemoteName={savedBackupRemoteName.trim() || null}
-              backupRetryPending={backupRetryPending}
               onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
+              backupPhase={backupPhase}
+              onBackup={hasBackupRemote ? backup : undefined}
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
@@ -3298,11 +3403,11 @@ function App() {
           </div>
         )}
 
-        {message || error || visibleTerminalSessions.length > 0 ? (
+        {message || error || gitActivityByPath[selectedPath]?.message || gitActivityByPath[selectedPath]?.error || visibleTerminalSessions.length > 0 ? (
           <ActivityFeed
-            message={message}
-            error={error}
-            gitBusy={pushPhase === "pushing" || pullPhase === "pulling"}
+            message={[message, gitActivityByPath[selectedPath]?.message].filter(Boolean).join("\n")}
+            error={[error, gitActivityByPath[selectedPath]?.error].filter(Boolean).join("\n")}
+            gitBusy={pushPhase === "pushing" || backupPhase === "pushing" || pullPhase === "pulling"}
             sessions={visibleTerminalSessions}
             onOpenExecution={(session) => setDrawerSessionId(session.runId)}
             onRerun={handleRunAction}
@@ -3328,7 +3433,7 @@ function App() {
             open={resetAllOpen}
             repoName={snapshot.repo.name}
             changes={snapshot.changes}
-            loading={loading}
+            loading={loading || pushPhase !== "idle"}
             onConfirm={(includeUntracked) => void resetAllWorkingTree(includeUntracked)}
             onCancel={() => setResetAllOpen(false)}
           />
@@ -3391,6 +3496,9 @@ function App() {
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             onUpdateFolder={runLinkedFolderUpdate}
+            backupOnPush={snapshot.backupOnPush ?? false}
+            hasBackupRemote={hasBackupRemote}
+            onBackupOnPushChange={setBackupAfterPush}
             disabled={loading}
           />
         </>

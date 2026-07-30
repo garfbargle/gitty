@@ -12,6 +12,7 @@ import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
 import { PushButton, type PushPhase } from "./PushButton";
+import { BackupButton } from "./BackupButton";
 import { LinkedFolderUpdatesButton } from "./LinkedFolderUpdatesButton";
 import { LinkedFolderPublishButton } from "./LinkedFolderPublishButton";
 import { RepoPicker } from "./RepoPicker";
@@ -34,6 +35,7 @@ type TopBarProps = {
   hasUpstream?: boolean;
   branchUnpublished?: boolean;
   forceSuggested?: boolean;
+  disabled?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
   onReturnToWorkingTree: () => void;
@@ -43,9 +45,10 @@ type TopBarProps = {
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
   backupSetupAvailable?: boolean;
-  backupRetryPending?: boolean;
   backupRemoteName?: string | null;
   onSetupBackup?: () => Promise<boolean>;
+  backupPhase?: PushPhase;
+  onBackup?: () => Promise<boolean>;
   onPull?: () => Promise<boolean>;
   onPullMerge?: () => Promise<boolean>;
   onSetupRemote?: () => void;
@@ -89,6 +92,7 @@ export function TopBar({
   hasUpstream = false,
   branchUnpublished = false,
   forceSuggested = false,
+  disabled = false,
   onRepoChange,
   onBranchChange,
   onReturnToWorkingTree,
@@ -98,9 +102,10 @@ export function TopBar({
   onForcePush,
   onOverwrite,
   backupSetupAvailable = false,
-  backupRetryPending = false,
   backupRemoteName,
   onSetupBackup,
+  backupPhase = "idle",
+  onBackup,
   onPull,
   onPullMerge,
   onSetupRemote,
@@ -235,13 +240,20 @@ export function TopBar({
             forceSuggested={forceSuggested}
             pushPhase={pushPhase}
             loading={loading}
+            disabled={disabled}
             onPush={onPush}
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
-            backupSetupAvailable={backupSetupAvailable}
-            backupRetryPending={backupRetryPending}
-            backupRemoteName={backupRemoteName}
-            onSetupBackup={onSetupBackup}
+          />
+        ) : null}
+        {(backupSetupAvailable || onBackup) && !repoSwitching ? (
+          <BackupButton
+            configured={!backupSetupAvailable}
+            remoteName={backupRemoteName}
+            phase={backupPhase}
+            loading={loading}
+            onSetup={backupSetupAvailable ? onSetupBackup : undefined}
+            onBackup={onBackup}
           />
         ) : null}
         {onUpdateLinkedFolder && !repoSwitching ? (

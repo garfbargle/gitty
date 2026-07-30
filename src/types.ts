@@ -149,6 +149,8 @@ export type RepoSnapshot = {
   /// A prior primary push made it, but one or more backup remotes did not.
   /// Keeps Push available so the backup can be retried.
   backupPushPending?: boolean;
+  /** This repository copies successful primary pushes to its backup remotes. */
+  backupOnPush?: boolean;
 };
 
 /// The most recently active branch other than the current one and the trunk,

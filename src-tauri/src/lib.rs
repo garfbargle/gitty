@@ -158,6 +158,10 @@ struct RepoSnapshot {
     /// Keep Push enabled so the user can repair the backup without creating a
     /// throwaway commit first.
     backup_push_pending: bool,
+    /// Whether this repository should copy a successful primary push to its
+    /// configured backup remotes. Disabled by default: Push and Backup are
+    /// intentionally separate actions unless the user opts in here.
+    backup_on_push: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -881,6 +885,24 @@ fn set_backup_push_pending(repo_path: &Path, pending: bool) {
         // config. Ignore a failed cleanup: it merely leaves Retry Push visible.
         let _ = git(repo_path, &["config", "--unset-all", "gitty.backup-push-pending"]);
     }
+}
+
+fn backup_on_push(repo_path: &Path) -> bool {
+    git(repo_path, &["config", "--bool", "--get", "gitty.backup-on-push"])
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
+fn write_backup_on_push(repo_path: &Path, enabled: bool) -> Result<(), String> {
+    git_owned(
+        repo_path,
+        vec![
+            "config".to_string(),
+            "gitty.backup-on-push".to_string(),
+            enabled.to_string(),
+        ],
+    )?;
+    Ok(())
 }
 
 fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
@@ -1702,6 +1724,7 @@ fn repo_snapshot_blocking(
         unpushed_tags: unpushed_tag_names,
         branch_unpublished,
         backup_push_pending: backup_push_pending(&repo_path),
+        backup_on_push: backup_on_push(&repo_path),
     })
 }
 
@@ -4418,7 +4441,8 @@ fn push_repo_blocking(
         emit_git_progress(&app, &repo.path, format!("Checking {remote}"), "Checking tags and remote state…");
     }
     let tags_to_push = unpushed_tags(repo_path);
-    let retrying_backup = backup_push_pending(repo_path);
+    let backup_after_push = backup_on_push(repo_path);
+    let retrying_backup = backup_push_pending(repo_path) && backup_after_push;
     let mut outputs = Vec::new();
     let (ahead, behind) = ahead_behind(repo_path, &branch, &upstream(repo_path));
     let forcing = force || hard;
@@ -4468,13 +4492,15 @@ fn push_repo_blocking(
         return Err("Nothing to push.".to_string());
     }
 
-    // Treat every non-primary remote as a push-only backup. Run these after the
-    // primary push so a backup outage never leaves the user wondering whether
-    // their main remote received the changes. A failed backup is reported in
-    // the successful action result, making it visible and retryable on the
-    // next Push without masking the primary success.
+    // Backup is a separate action by default. When the repository has opted
+    // into "Back up after push", copy to its backup remotes only after the
+    // primary push succeeds.
     let primary_name = remote.as_deref().unwrap_or_default();
-    let backups = backup_remote_names(repo_path, primary_name);
+    let backups = if backup_after_push {
+        backup_remote_names(repo_path, primary_name)
+    } else {
+        Vec::new()
+    };
     let backup_branch = (!is_detached_branch(&branch)
         && (branch_pushed || !tags_to_push.is_empty() || retrying_backup))
         .then_some(branch.as_str());
@@ -4505,10 +4531,12 @@ fn push_repo_blocking(
         }
     }
 
-    if !backup_failures.is_empty() {
-        set_backup_push_pending(repo_path, true);
-    } else {
-        set_backup_push_pending(repo_path, false);
+    if backup_after_push {
+        if !backup_failures.is_empty() {
+            set_backup_push_pending(repo_path, true);
+        } else {
+            set_backup_push_pending(repo_path, false);
+        }
     }
 
     let retry_only = retrying_backup && !branch_pushed && tags_to_push.is_empty();
@@ -4559,6 +4587,72 @@ fn push_repo_blocking(
         message,
         output: outputs.join("\n\n"),
     })
+}
+
+/// Copy every local branch and tag to every backup remote without touching the
+/// primary remote. This is the explicit Backup action.
+fn backup_repo_blocking(app: AppHandle, path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let primary = default_remote_name(repo_path).unwrap_or_default();
+    let backups = backup_remote_names(repo_path, &primary);
+    if backups.is_empty() {
+        return Err("Set up a backup remote before backing up this repository.".to_string());
+    }
+
+    let mut outputs = Vec::new();
+    let mut succeeded = Vec::new();
+    let mut failures = Vec::new();
+
+    for backup in backups {
+        let phase = format!("Backing up to {backup}");
+        emit_git_progress(&app, &repo.path, phase.clone(), "Pushing all local branches…");
+        let branches = git_network_owned_with_progress(
+            &app,
+            repo_path,
+            vec!["push".to_string(), backup.clone(), "--all".to_string()],
+            &phase,
+        );
+        match branches {
+            Ok(branches) => {
+                emit_git_progress(&app, &repo.path, phase.clone(), "Pushing tags…");
+                match git_network_owned_with_progress(
+                    &app,
+                    repo_path,
+                    vec!["push".to_string(), backup.clone(), "--tags".to_string()],
+                    &phase,
+                ) {
+                    Ok(tags) => {
+                        succeeded.push(backup.clone());
+                        outputs.push(format!("Backup {backup}:\n{branches}\n{tags}"));
+                    }
+                    Err(error) => failures.push(format!("{backup}: {error}")),
+                }
+            }
+            Err(error) => failures.push(format!("{backup}: {error}")),
+        }
+    }
+
+    set_backup_push_pending(repo_path, !failures.is_empty());
+    if !failures.is_empty() && succeeded.is_empty() {
+        return Err(format!("Backup failed for {}.", failures.join("\n")));
+    }
+    if !failures.is_empty() {
+        outputs.push(format!("Backup failures:\n{}", failures.join("\n")));
+    }
+    let message = if failures.is_empty() {
+        format!("Backup completed to {}.", succeeded.join(", "))
+    } else {
+        format!("Backed up to {}. Backup failed for {}.", succeeded.join(", "), failures.join(", "))
+    };
+    Ok(ActionResult { message, output: outputs.join("\n\n") })
+}
+
+#[tauri::command]
+async fn backup_repo(app: AppHandle, path: String) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || backup_repo_blocking(app, path))
+        .await
+        .map_err(|err| format!("Backup task failed: {err}"))?
 }
 
 #[tauri::command]
@@ -4965,6 +5059,17 @@ async fn configure_backup_remote(
 }
 
 #[tauri::command]
+fn set_backup_on_push(path: String, enabled: bool) -> Result<(), String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = Path::new(&repo.path);
+    let primary = default_remote_name(repo_path).unwrap_or_default();
+    if enabled && backup_remote_names(repo_path, &primary).is_empty() {
+        return Err("Set up a backup remote before enabling backup after push.".to_string());
+    }
+    write_backup_on_push(repo_path, enabled)
+}
+
+#[tauri::command]
 fn set_nvidia_api_key(app: AppHandle, api_key: String) -> Result<settings::AppSettingsView, String> {
     let mut current = settings::load_settings(&app)?;
     let normalized = settings::normalize_nvidia_api_key(&api_key);
@@ -5087,6 +5192,7 @@ pub fn run() {
             fetch_repo,
             remove_remote,
             push_repo,
+            backup_repo,
             push_branch,
             create_tag,
             delete_tag,
@@ -5102,6 +5208,7 @@ pub fn run() {
             set_push_on_commit,
             set_backup_profile,
             configure_backup_remote,
+            set_backup_on_push,
             set_nvidia_api_key,
             delete_nvidia_api_key,
             test_nvidia_api_key,

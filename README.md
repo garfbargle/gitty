@@ -79,10 +79,12 @@ The working-tree timeline keeps branch context in view: how far ahead and behind
 ### Remotes and push
 - Add, update, or remove remotes from repo settings
 - Keep `origin` as the primary remote for fetching and branch tracking; additional remotes are
-  push-only backups that receive a copy after the primary push succeeds
+  available as separate backup destinations
 - Configure a reusable `{repo}` backup URL template; repositories without that backup offer a
-  one-click setup and initial sync in place of Push
-- Push in one action; force push with `--force-with-lease` when needed
+  one-click setup and initial sync alongside Push
+- Push and Backup are separate actions; enable **Back up after push** per repository to copy a
+  successful primary push to its backup destinations
+- Force push with `--force-with-lease` when needed
 
 ## Requirements
 
