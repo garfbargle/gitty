@@ -550,6 +550,7 @@ function App() {
   const lastFocusRefreshAtRef = useRef(0);
   const focusFingerprintByPathRef = useRef(new Map<string, string>());
   const snapshotGenerationRef = useRef(0);
+  const changesRefreshRequestRef = useRef(0);
   const FOCUS_REFRESH_DEBOUNCE_MS = 400;
   const FOCUS_REFRESH_MIN_INTERVAL_MS = 2000;
   const summaryCacheRef = useRef<SummaryCache>(emptySummaryCache());
@@ -1015,8 +1016,12 @@ function App() {
 
   async function refreshChangesQuiet(path = selectedPath): Promise<FileChange[] | null> {
     if (!path) return null;
+    const requestId = ++changesRefreshRequestRef.current;
     try {
       const result = await invoke<RepoChanges>("repo_changes", { path });
+      // A background/focus refresh can finish after a stage or unstage refresh.
+      // Ignore it rather than replacing the current index state with stale data.
+      if (requestId !== changesRefreshRequestRef.current) return null;
       setSnapshot((prev) =>
         prev && prev.repo.path === path
           ? { ...prev, changes: result.changes, isClean: result.isClean }
@@ -1025,6 +1030,7 @@ function App() {
       updateRepoDirtyState(path, !result.isClean);
       return result.changes;
     } catch (err) {
+      if (requestId !== changesRefreshRequestRef.current) return null;
       setError(String(err));
       return null;
     }
@@ -1032,6 +1038,7 @@ function App() {
 
   function applyChangesOptimistic(files: string[], stage: boolean) {
     snapshotGenerationRef.current += 1;
+    changesRefreshRequestRef.current += 1;
     setSnapshot((prev) => {
       if (!prev) return prev;
       const changes = applyStageToChanges(prev.changes, files, stage);
