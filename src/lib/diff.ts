@@ -161,7 +161,9 @@ export function buildDiffBundles(stagedRaw: string, unstagedRaw: string): DiffFi
     for (const file of parseUnifiedDiff(raw)) {
       const path = displayPath(file);
       const hunks = file.hunks.filter((hunk) => hunk.lines.some((line) => line.kind !== "meta"));
-      if (hunks.length === 0) continue;
+      // Binary diffs (including most raster images) have no text hunks. Keep
+      // them in the bundle so the viewer can render its binary/image preview.
+      if (hunks.length === 0 && !file.isBinary) continue;
 
       const existing = bundles.get(path);
       const scoped = hunks.map((hunk) => ({ hunk, scope, file }));

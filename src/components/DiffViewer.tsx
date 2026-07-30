@@ -288,7 +288,7 @@ function DiffFileSection({
     ? bundle.hunks.filter((scoped) => visibleScopes.has(scoped.scope))
     : bundle.hunks;
   const showImagePreview =
-    !!repoPath && !!filePath && diffFile.isBinary && isImagePath(filePath);
+    !!repoPath && !!filePath && isImagePath(filePath);
 
   useEffect(() => {
     if (!showImagePreview) {
