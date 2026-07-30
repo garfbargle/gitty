@@ -54,7 +54,7 @@ import type {
   UpdateStatus,
   ConflictSides,
 } from "./types";
-import { applyStageToChanges, changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
+import { changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { timestampLogOutput } from "./lib/logs";
 import { getLine, replaceLine } from "./lib/fileEdit";
 import { buildChangeEntries, moveChangeSelection } from "./lib/changeEntries";
@@ -582,6 +582,11 @@ function App() {
     repos.find((repo) => repo.path === selectedPath)?.name ?? "repository";
   const discoveryStarted = useRef(false);
   const selectRepoRequestRef = useRef(0);
+  // Async Git work can finish after the user selects another repository. Keep
+  // the current choice outside render closures so its completion can never
+  // restore the repository it started in.
+  const selectedPathRef = useRef(selectedPath);
+  selectedPathRef.current = selectedPath;
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
   const focusRefreshContextRef = useRef({
     selectedPath,
@@ -1089,8 +1094,9 @@ function App() {
       }),
     );
     if (result) {
-      setSnapshot(result);
-      setSelectedPath(result.repo.path);
+      if (selectedPathRef.current === path) {
+        setSnapshot(result);
+      }
       updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       return result;
     }
@@ -1111,9 +1117,12 @@ function App() {
         generation: options?.generation ?? null,
         lite: options?.lite ?? false,
       });
-      if (updateState && stateGeneration === snapshotGenerationRef.current) {
+      if (
+        updateState &&
+        stateGeneration === snapshotGenerationRef.current &&
+        selectedPathRef.current === path
+      ) {
         setSnapshot(result);
-        setSelectedPath(result.repo.path);
       }
       updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       return result;
@@ -1133,7 +1142,7 @@ function App() {
       // Ignore it rather than replacing the current index state with stale data.
       if (requestId !== changesRefreshRequestRef.current) return null;
       setSnapshot((prev) =>
-        prev && prev.repo.path === path
+        selectedPathRef.current === path && prev && prev.repo.path === path
           ? { ...prev, changes: result.changes, isClean: result.isClean }
           : prev,
       );
@@ -1146,14 +1155,10 @@ function App() {
     }
   }
 
-  function applyChangesOptimistic(files: string[], stage: boolean) {
+  function invalidateWorkingTreeRefresh(path: string) {
+    if (selectedPathRef.current !== path) return;
     snapshotGenerationRef.current += 1;
     changesRefreshRequestRef.current += 1;
-    setSnapshot((prev) => {
-      if (!prev) return prev;
-      const changes = applyStageToChanges(prev.changes, files, stage);
-      return { ...prev, changes, isClean: changes.length === 0 };
-    });
   }
 
   async function refreshOnFocus() {
@@ -1474,9 +1479,12 @@ function App() {
     selectionPreserveRef.current = Math.max(0, selectionPreserveRef.current - 1);
   }
 
-  async function reconcileWorkingSelection(affectedPaths: string[]) {
-    const changes = await refreshChangesQuiet();
+  async function reconcileWorkingSelection(path: string, affectedPaths: string[]) {
+    if (selectedPathRef.current !== path) return;
+    invalidateWorkingTreeRefresh(path);
+    const changes = await refreshChangesQuiet(path);
     if (!changes) return;
+    if (selectedPathRef.current !== path) return;
 
     const pathsToKeep =
       diffSelection.length > 0
@@ -1520,18 +1528,19 @@ function App() {
 
     setFocus({ kind: "file", file: primary.file, section: primary.section });
     setDiffSelection(newSelection);
-    await loadDiffForSelectionQuiet(newSelection);
+    await loadDiffForSelectionQuiet(newSelection, path);
   }
 
   async function stageHunk(filePath: string, patch: string) {
     if (!selectedPath) return;
+    const path = selectedPath;
     beginSelectionPreserve();
     try {
       const result = await run(() =>
-        invoke<ActionResult>("stage_hunk", { path: selectedPath, filePath, patch }),
+        invoke<ActionResult>("stage_hunk", { path, filePath, patch }),
       );
       if (!result) return;
-      await reconcileWorkingSelection([filePath]);
+      await reconcileWorkingSelection(path, [filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1539,13 +1548,14 @@ function App() {
 
   async function unstageHunk(filePath: string, patch: string) {
     if (!selectedPath) return;
+    const path = selectedPath;
     beginSelectionPreserve();
     try {
       const result = await run(() =>
-        invoke<ActionResult>("unstage_hunk", { path: selectedPath, filePath, patch }),
+        invoke<ActionResult>("unstage_hunk", { path, filePath, patch }),
       );
       if (!result) return;
-      await reconcileWorkingSelection([filePath]);
+      await reconcileWorkingSelection(path, [filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1553,13 +1563,14 @@ function App() {
 
   async function discardHunk(filePath: string, patch: string) {
     if (!selectedPath) return;
+    const path = selectedPath;
     beginSelectionPreserve();
     try {
       const result = await run(() =>
-        invoke<ActionResult>("discard_hunk", { path: selectedPath, filePath, patch }),
+        invoke<ActionResult>("discard_hunk", { path, filePath, patch }),
       );
       if (!result) return;
-      await reconcileWorkingSelection([filePath]);
+      await reconcileWorkingSelection(path, [filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1579,15 +1590,17 @@ function App() {
     text: string,
   ) {
     if (!selectedPath || text === expected) return;
+    const path = selectedPath;
     beginSelectionPreserve();
     try {
       const before = await run(() =>
-        invoke<string>("read_working_file", { path: selectedPath, filePath }),
+        invoke<string>("read_working_file", { path, filePath }),
       );
       if (before == null) return;
+      if (selectedPathRef.current !== path) return;
       if (getLine(before, newLine) !== expected) {
         setError("This file changed on disk — refreshed without saving your edit.");
-        await reconcileWorkingSelection([filePath]);
+        await reconcileWorkingSelection(path, [filePath]);
         return;
       }
       let after: string;
@@ -1599,15 +1612,16 @@ function App() {
       }
       const result = await run(() =>
         invoke<ActionResult>("write_working_file", {
-          path: selectedPath,
+          path,
           filePath,
           content: after,
         }),
       );
       if (!result) return;
+      if (selectedPathRef.current !== path) return;
       editHistoryRef.current.past.push({ filePath, before, after });
       editHistoryRef.current.future = [];
-      await reconcileWorkingSelection([filePath]);
+      await reconcileWorkingSelection(path, [filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1615,13 +1629,14 @@ function App() {
 
   async function undoEdit() {
     if (!selectedPath) return;
+    const path = selectedPath;
     const entry = editHistoryRef.current.past.pop();
     if (!entry) return;
     beginSelectionPreserve();
     try {
       const result = await run(() =>
         invoke<ActionResult>("write_working_file", {
-          path: selectedPath,
+          path,
           filePath: entry.filePath,
           content: entry.before,
         }),
@@ -1630,8 +1645,9 @@ function App() {
         editHistoryRef.current.past.push(entry);
         return;
       }
+      if (selectedPathRef.current !== path) return;
       editHistoryRef.current.future.push(entry);
-      await reconcileWorkingSelection([entry.filePath]);
+      await reconcileWorkingSelection(path, [entry.filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -1639,13 +1655,14 @@ function App() {
 
   async function redoEdit() {
     if (!selectedPath) return;
+    const path = selectedPath;
     const entry = editHistoryRef.current.future.pop();
     if (!entry) return;
     beginSelectionPreserve();
     try {
       const result = await run(() =>
         invoke<ActionResult>("write_working_file", {
-          path: selectedPath,
+          path,
           filePath: entry.filePath,
           content: entry.after,
         }),
@@ -1654,8 +1671,9 @@ function App() {
         editHistoryRef.current.future.push(entry);
         return;
       }
+      if (selectedPathRef.current !== path) return;
       editHistoryRef.current.past.push(entry);
-      await reconcileWorkingSelection([entry.filePath]);
+      await reconcileWorkingSelection(path, [entry.filePath]);
     } finally {
       endSelectionPreserve();
     }
@@ -2140,40 +2158,45 @@ function App() {
 
   async function stageAll() {
     if (!selectedPath) return;
+    const path = selectedPath;
     setLoading(true);
     setError("");
     try {
       await invoke<ActionResult>("stage_all", {
-        path: selectedPath,
+        path,
         stage: true,
       });
+      invalidateWorkingTreeRefresh(path);
     } catch (err) {
-      setError(String(err));
+      if (selectedPathRef.current === path) setError(String(err));
     } finally {
       setLoading(false);
-      await refreshChangesQuiet();
+      if (selectedPathRef.current === path) await refreshChangesQuiet(path);
     }
   }
 
   async function unstageAll() {
     if (!selectedPath) return;
+    const path = selectedPath;
     setLoading(true);
     setError("");
     try {
       await invoke<ActionResult>("stage_all", {
-        path: selectedPath,
+        path,
         stage: false,
       });
+      invalidateWorkingTreeRefresh(path);
     } catch (err) {
-      setError(String(err));
+      if (selectedPathRef.current === path) setError(String(err));
     } finally {
       setLoading(false);
-      await refreshChangesQuiet();
+      if (selectedPathRef.current === path) await refreshChangesQuiet(path);
     }
   }
 
   async function stageFiles(files: string[], anchor?: SelectionAnchor) {
     if (!selectedPath || files.length === 0) return;
+    const path = selectedPath;
 
     const toggledPaths = new Set(files);
     const selectionAlreadyUpdated = anchor?.remainingSelection !== undefined;
@@ -2185,19 +2208,21 @@ function App() {
     setError("");
     try {
       await invoke<ActionResult>("stage_files", {
-        path: selectedPath,
+        path,
         files,
         stage: true,
       });
+      invalidateWorkingTreeRefresh(path);
     } catch (err) {
-      setError(String(err));
+      if (selectedPathRef.current === path) setError(String(err));
     } finally {
       setLoading(false);
-      applyChangesOptimistic(files, true);
     }
 
-    const changes = await refreshChangesQuiet();
+    if (selectedPathRef.current !== path) return;
+    const changes = await refreshChangesQuiet(path);
     if (!changes) return;
+    if (selectedPathRef.current !== path) return;
 
     if (anchor) {
       await resolveSelectionAfterToggle(files, changes, anchor, selectionAlreadyUpdated);
@@ -2214,6 +2239,7 @@ function App() {
 
   async function unstageFiles(files: string[], anchor?: SelectionAnchor) {
     if (!selectedPath || files.length === 0) return;
+    const path = selectedPath;
 
     const toggledPaths = new Set(files);
     const selectionAlreadyUpdated = anchor?.remainingSelection !== undefined;
@@ -2225,19 +2251,21 @@ function App() {
     setError("");
     try {
       await invoke<ActionResult>("stage_files", {
-        path: selectedPath,
+        path,
         files,
         stage: false,
       });
+      invalidateWorkingTreeRefresh(path);
     } catch (err) {
-      setError(String(err));
+      if (selectedPathRef.current === path) setError(String(err));
     } finally {
       setLoading(false);
-      applyChangesOptimistic(files, false);
     }
 
-    const changes = await refreshChangesQuiet();
+    if (selectedPathRef.current !== path) return;
+    const changes = await refreshChangesQuiet(path);
     if (!changes) return;
+    if (selectedPathRef.current !== path) return;
 
     if (anchor) {
       await resolveSelectionAfterToggle(files, changes, anchor, selectionAlreadyUpdated);
