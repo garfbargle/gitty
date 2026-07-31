@@ -4243,28 +4243,40 @@ fn stage_files(path: String, files: Vec<String>, stage: bool) -> Result<ActionRe
         return Err("Select at least one file.".to_string());
     }
 
+    let staged_changes = if stage {
+        HashMap::new()
+    } else {
+        changed_files(repo_path)
+            .into_iter()
+            .filter(|change| {
+                let index_status = change.status.as_bytes().first().copied().unwrap_or(b' ');
+                index_status != b' ' && index_status != b'?'
+            })
+            .map(|change| (change.path, change.old_path))
+            .collect::<HashMap<_, _>>()
+    };
+
     let mut valid_files = Vec::new();
     for file in files {
-        let file_trimmed = file.trim().to_string();
-        if file_trimmed.is_empty() {
+        if file.is_empty() {
             continue;
         }
         if stage {
-            let full_path = repo_path.join(&file_trimmed);
+            let full_path = repo_path.join(&file);
             let tracked = git_owned(
                 repo_path,
-                vec!["ls-files".to_string(), "--error-unmatch".to_string(), "--".to_string(), file_trimmed.clone()],
+                vec!["ls-files".to_string(), "--error-unmatch".to_string(), "--".to_string(), file.clone()],
             ).is_ok();
             if full_path.exists() || tracked {
-                valid_files.push(file_trimmed);
+                valid_files.push(file);
             }
-        } else {
-            let is_staged = git_owned(
-                repo_path,
-                vec!["ls-files".to_string(), "--staged".to_string(), "--".to_string(), file_trimmed.clone()],
-            ).map(|out| !out.trim().is_empty()).unwrap_or(false);
-            if is_staged {
-                valid_files.push(file_trimmed);
+        } else if let Some(old_path) = staged_changes.get(&file) {
+            valid_files.push(file);
+            // Git represents a staged rename as an index entry for the new
+            // path. Restoring only that path leaves its old path staged as a
+            // deletion, so restore both sides of the rename together.
+            if let Some(old_path) = old_path {
+                valid_files.push(old_path.clone());
             }
         }
     }
