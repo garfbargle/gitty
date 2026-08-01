@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:demo": "tsc && vite build --mode demo",
-    "deploy:demo": "npm run build:demo && wrangler deploy",
+    "dev:demo": "vite --config web-demo/vite.config.ts",
+    "build:demo": "tsc -p web-demo/tsconfig.json && vite build --config web-demo/vite.config.ts",
+    "deploy:demo": "npm run build:demo && wrangler deploy --config web-demo/wrangler.jsonc",
     "preview": "vite preview",
     "tauri": "tauri",
     "build:macos": "bash scripts/build-macos-release.sh",

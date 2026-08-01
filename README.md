@@ -110,7 +110,21 @@ src-tauri/            Rust backend (Tauri commands)
   src/discovery.rs    Background repo scanning
   src/summarize.rs    NVIDIA API commit message generation
   src/settings.rs     App settings persistence
+web-demo/             Standalone browser-only product demo for gitty.c0di.com
 scripts/              macOS release signing helpers
+```
+
+## Web demo
+
+The desktop app and the hosted demo are intentionally separate products. The
+demo is a simulated Git workflow—it never accesses local repositories or calls
+the system shell. Its source, deployment configuration, and usage notes are
+contained in [web-demo/](web-demo/README.md).
+
+```bash
+npm run dev:demo
+npm run build:demo
+npm run deploy:demo
 ```
 
 ## Checks
