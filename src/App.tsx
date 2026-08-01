@@ -180,6 +180,7 @@ function emptySummaryCache(): SummaryCache {
 const SNAPSHOT_SUPERSEDED = "__superseded__";
 const SIDEBAR_VISIBLE_KEY = "gitty.sidebarVisible";
 const REPO_SORT_KEY = "gitty.repoSort";
+const STATUS_MESSAGE_DISMISS_MS = 4_000;
 
 const repoSortModes = new Set<RepoSortMode>([
   "manual",
@@ -339,10 +340,21 @@ function App() {
   const [pushRejected, setPushRejected] = useState(false);
   const [message, setMessageValue] = useState("");
   const [error, setErrorValue] = useState("");
+  const messageDismissTimerRef = useRef<number | null>(null);
   // The Git tab is also used for one-off Git actions, so timestamp their
   // completed output just like the streamed push and backup activity.
   const setMessage = useCallback((next: string) => {
+    if (messageDismissTimerRef.current !== null) {
+      window.clearTimeout(messageDismissTimerRef.current);
+      messageDismissTimerRef.current = null;
+    }
     setMessageValue(next ? timestampLogOutput(next) : "");
+    if (next) {
+      messageDismissTimerRef.current = window.setTimeout(() => {
+        setMessageValue("");
+        messageDismissTimerRef.current = null;
+      }, STATUS_MESSAGE_DISMISS_MS);
+    }
   }, []);
   const setError = useCallback((next: string) => {
     setErrorValue(next ? timestampLogOutput(next) : "");
@@ -2950,6 +2962,9 @@ function App() {
     return () => {
       pushDoneTimerRef.current.forEach((timer) => window.clearTimeout(timer));
       backupDoneTimerRef.current.forEach((timer) => window.clearTimeout(timer));
+      if (messageDismissTimerRef.current !== null) {
+        window.clearTimeout(messageDismissTimerRef.current);
+      }
     };
   }, []);
 
