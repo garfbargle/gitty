@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:demo": "tsc && vite build --mode demo",
+    "deploy:demo": "npm run build:demo && wrangler deploy",
     "preview": "vite preview",
     "tauri": "tauri",
     "build:macos": "bash scripts/build-macos-release.sh",
@@ -25,6 +27,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "wrangler": "^4.116.0"
   }
 }

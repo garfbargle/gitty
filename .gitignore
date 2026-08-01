@@ -2,6 +2,7 @@ node_modules/
 dist/
 src-tauri/target/
 .venv-icon/
+.wrangler/
 
 .DS_Store
 *.log
