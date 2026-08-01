@@ -229,10 +229,23 @@ function isSupersededSnapshotError(err: unknown): boolean {
   return String(err).includes(SNAPSHOT_SUPERSEDED);
 }
 
+// Yield until the busy state we just set has painted. macOS stops serving
+// animation frames to an occluded window, so the rAF pair alone would stall the
+// work behind it until the user came back — a push started right before an
+// alt-tab would sit on "Pushing…" without ever running. The timeout keeps that
+// case moving; when frames are flowing the rAF pair wins well before it fires.
 function waitForPaint(): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 50);
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
+      requestAnimationFrame(finish);
     });
   });
 }
