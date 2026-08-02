@@ -15,6 +15,7 @@ import {
 import type { LinkedFolder, RemoteEntry } from "../types";
 import { SettingsModal } from "./SettingsModal";
 import { RepoIcon } from "./RepoIcon";
+import { WorktreeSection } from "./WorktreeSection";
 import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
 import {
   addLinkedFolder,
@@ -45,6 +46,8 @@ type RepoSettingsDrawerProps = {
   /// Pull a linked folder from its source. Owns conflict handling (may close this
   /// drawer to show the resolver) and refreshing the repo.
   onUpdateFolder: (prefix: string) => Promise<void>;
+  /// Switch Gitty to another checkout of the same repository.
+  onOpenWorktree?: (path: string) => void;
   backupAvailable: boolean;
   backupOnPush: boolean;
   hasBackupRemote: boolean;
@@ -630,6 +633,7 @@ export function RepoSettingsDrawer({
   onFetch,
   onRemoveRepo,
   onUpdateFolder,
+  onOpenWorktree,
   backupAvailable,
   backupOnPush,
   hasBackupRemote,
@@ -877,6 +881,10 @@ export function RepoSettingsDrawer({
         onUpdateFolder={onUpdateFolder}
         onSourcesChange={(urls) => setSubtreeUrls(new Set(urls.map(canonicalUrl)))}
       />
+
+      {open ? (
+        <WorktreeSection repoPath={repoPath} disabled={disabled} onOpenWorktree={onOpenWorktree} />
+      ) : null}
     </SettingsModal>
   );
 }

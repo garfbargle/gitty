@@ -3567,6 +3567,12 @@ function App() {
             repoName={snapshot.repo.name}
             repoPath={snapshot.repo.path}
             remotes={snapshot.remotes}
+            onOpenWorktree={(worktreePath) => {
+              // Another checkout of the same repository is, to Gitty, just
+              // another repo path: add it if it isn't saved yet, then select it.
+              setRepoSettingsOpen(false);
+              void addRepo(worktreePath);
+            }}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}
             onRemoveRemote={removeRemote}
