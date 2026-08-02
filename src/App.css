@@ -6424,12 +6424,14 @@ button.context-chip.pullable:disabled {
   cursor: pointer;
   display: grid;
   gap: var(--space-3);
-  /* Exactly four cells, always: lanes, branch labels, subject, trailing meta.
-     A fixed column count is what keeps a tagged row aligned with an untagged
-     one. This used to be declared twice -- six columns here, four in a later
-     rule that quietly won -- which made the real layout invisible to anyone
-     reading this block. */
-  grid-template-columns: var(--graph-gutter) auto minmax(0, 1fr) auto;
+  /* Three cells: lanes, message, trailing meta. Branch labels live inside the
+     message cell rather than a column of their own.
+
+     A fixed column *count* is not a fixed column *width*. When refs had their
+     own auto track, each row sized it independently -- 0px on the 32 rows
+     without labels, 276px on one with them -- so the subject started at eight
+     different x positions down a list whose entire job is being scanned. */
+  grid-template-columns: var(--graph-gutter) minmax(0, 1fr) auto;
   padding: 0 var(--space-4) 0 var(--space-3);
   text-align: left;
   width: 100%;
@@ -6731,6 +6733,25 @@ button.context-chip.pullable:disabled {
   overflow: hidden;
 }
 
+/* Labels and message in one cell, so every row's text column starts together. */
+.graph-message {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Capped, because the whole point is that a label cannot shove the message.
+   The widest observed pair of refs measured 276px; without a ceiling a long
+   branch name reintroduces the ragged edge this change removes. Shrinks before
+   it truncates so short labels are never cut. */
+.graph-message .graph-refs {
+  flex: 0 1 auto;
+  max-width: 30%;
+  overflow: hidden;
+}
+
 .graph-meta {
   align-items: center;
   display: inline-flex;
@@ -6738,6 +6759,62 @@ button.context-chip.pullable:disabled {
   gap: var(--space-3);
   overflow: hidden;
   white-space: nowrap;
+}
+
+/* States what the dots encode, once, where they are drawn. Dismissible: it is
+   a lesson, not furniture, and it should not cost space forever. */
+.graph-legend {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+}
+
+.graph-legend-item {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-1-5);
+}
+
+.graph-legend .legend-dot {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.graph-legend .legend-dot.on-head {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+/* Colours come from laneColor() via inline style, not from a copy of the
+   palette here. LANE_COLORS lives in src/lib/graph.ts, and a second copy in
+   CSS is a drift waiting to happen. */
+.graph-legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 4px;
+  width: 8px;
+}
+
+.graph-legend-dismiss {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 5px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+}
+
+.graph-legend-dismiss:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* Every chip states what kind of thing it is. Without this the row is a run of

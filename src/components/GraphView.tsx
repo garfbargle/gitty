@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { CommitEntry, WorktreeEntry } from "../types";
-import { buildGraphRows } from "../lib/graph";
+import { buildGraphRows, laneColor } from "../lib/graph";
 import {
   authorInitials,
   branchRefs,
@@ -20,6 +20,49 @@ import { TagBadge } from "./TagBadge";
 /// past it tears the lanes away from the content they belong to.
 const LANE_W = 20;
 const ROW_H = 44;
+
+/// Shown until dismissed, then never again. A preference this small doesn't
+/// justify a backend command and the three-edit contract that comes with it.
+const LEGEND_DISMISSED_KEY = "gitty.graphLegendDismissed";
+
+/// What the dots mean, stated once where they're drawn.
+///
+/// The grammar was written down in docs/GRAPH_VISUAL_LANGUAGE.md and nowhere a
+/// user would ever encounter it, so a filled dot next to a hollow one read as
+/// decoration. "I can't tell what I'm looking at" was the accurate response to
+/// an interface that never said.
+function GraphLegend({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="graph-legend">
+      <span className="graph-legend-item">
+        <svg width="14" height="14" aria-hidden>
+          <circle cx="7" cy="7" r="5" className="graph-dot on-head legend-dot" />
+        </svg>
+        On the branch you have open
+      </span>
+      <span className="graph-legend-item">
+        <svg width="14" height="14" aria-hidden>
+          <circle cx="7" cy="7" r="4" className="graph-dot legend-dot" />
+        </svg>
+        On another branch
+      </span>
+      <span className="graph-legend-item">
+        {[0, 1, 2].map((lane) => (
+          <span
+            key={lane}
+            className="graph-legend-swatch"
+            style={{ background: laneColor(lane) }}
+            aria-hidden
+          />
+        ))}
+        A colour per branch, kept for its whole run
+      </span>
+      <button type="button" className="graph-legend-dismiss" onClick={onDismiss}>
+        Got it
+      </button>
+    </div>
+  );
+}
 
 type GraphViewProps = {
   /// Multi-branch history (`graphCommits`), newest first.
@@ -49,6 +92,15 @@ export function GraphView({
   onSelect,
 }: GraphViewProps) {
   const rows = useMemo(() => buildGraphRows(commits, headHash), [commits, headHash]);
+  // Read once on mount rather than on every render; a throwing localStorage
+  // (private mode, disabled storage) must not take the whole view down with it.
+  const [legendDismissed, setLegendDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(LEGEND_DISMISSED_KEY) === "1";
+    } catch {
+      return true;
+    }
+  });
   // Several checkouts can sit on one commit, so this maps hash -> entries.
   const openElsewhere = useMemo(() => {
     const map = new Map<string, WorktreeEntry[]>();
@@ -71,6 +123,18 @@ export function GraphView({
 
   return (
     <div className="graph-view">
+      {legendDismissed ? null : (
+        <GraphLegend
+          onDismiss={() => {
+            setLegendDismissed(true);
+            try {
+              localStorage.setItem(LEGEND_DISMISSED_KEY, "1");
+            } catch {
+              // Dismissed for this session either way; storage is a nicety.
+            }
+          }}
+        />
+      )}
       <ol
         className="graph-rows"
         style={{
@@ -118,39 +182,56 @@ export function GraphView({
                     );
                   })}
                   {/* Fill answers "is this on my line": solid when it is, hollow
-                      when it belongs to another branch. */}
+                      when it belongs to another branch.
+
+                      The <title> is the whole grammar lesson, delivered where
+                      the question is actually asked. It was documented only in
+                      docs/GRAPH_VISUAL_LANGUAGE.md, which is to say nowhere a
+                      user goes. */}
                   <circle
                     className={`graph-dot${row.onHead ? " on-head" : ""}`}
                     cx={laneX(row.lane)}
                     cy={ROW_H / 2}
                     r={row.onHead ? 5 : 4}
                     style={{ stroke: row.color, fill: row.onHead ? row.color : undefined }}
-                  />
+                  >
+                    <title>
+                      {row.onHead
+                        ? "On the branch you have open."
+                        : "On another branch, not the one you have open."}
+                    </title>
+                  </circle>
                 </svg>
 
-                {/* The whole point of this view. Without them it's an
-                    unlabelled column of dots and you can't tell which line is
-                    which, or a branch from a checkout. */}
-                <span className="graph-refs">
-                {branchRefs(row.commit.refs).map((ref) => {
-                  const local = ref.replace(/^HEAD -> /, "");
-                  const remote = local.includes("/");
-                  return (
-                    <span
-                      key={ref}
-                      className={`graph-ref${remote ? " remote" : ""}${
-                        local === headBranch ? " head" : ""
-                      }`}
-                      style={remote ? undefined : { borderColor: row.color }}
-                      title={remote ? `${local} (on the remote)` : `${local} (branch)`}
-                    >
-                      <GitBranch size={10} aria-hidden />
-                      {local}
-                    </span>
-                  );
-                })}
+                {/* Labels and message share one cell so the text column starts
+                    at the same place on every row. As separate grid tracks the
+                    refs column resolved per row -- 0px on most, 276px on a
+                    labelled one -- so the subject began at eight different x
+                    positions down a list whose whole job is being scanned. The
+                    badge stays immediately before the message it belongs to,
+                    which is where every other client puts it. */}
+                <span className="graph-message">
+                  <span className="graph-refs">
+                  {branchRefs(row.commit.refs).map((ref) => {
+                    const local = ref.replace(/^HEAD -> /, "");
+                    const remote = local.includes("/");
+                    return (
+                      <span
+                        key={ref}
+                        className={`graph-ref${remote ? " remote" : ""}${
+                          local === headBranch ? " head" : ""
+                        }`}
+                        style={remote ? undefined : { borderColor: row.color }}
+                        title={remote ? `${local} (on the remote)` : `${local} (branch)`}
+                      >
+                        <GitBranch size={10} aria-hidden />
+                        {local}
+                      </span>
+                    );
+                  })}
+                  </span>
+                  <span className="graph-subject">{row.commit.subject}</span>
                 </span>
-                <span className="graph-subject">{row.commit.subject}</span>
                 {/* Every trailing item shares one cell. They used to be direct
                     children of the grid, so a row with a tag or a second
                     checkout had more items than the grid had columns and every
