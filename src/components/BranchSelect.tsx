@@ -8,6 +8,7 @@ import {
 import { ChevronDown, FolderOpen, GitBranch, SquareArrowOutUpRight } from "lucide-react";
 import type { WorktreeEntry } from "../types";
 import { folderName } from "../lib/git";
+import "./BranchSelect.css";
 
 type BranchSelectProps = {
   branch: string;
@@ -100,10 +101,10 @@ export function BranchSelect({
   const here = elsewhere.get(branch);
 
   return (
-    <div className="branch-select" ref={wrapRef}>
+    <div className="branch-picker" ref={wrapRef}>
       <button
         type="button"
-        className="branch-select-trigger"
+        className="branch-picker-trigger"
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -112,13 +113,13 @@ export function BranchSelect({
         title={here ? `${branch}, checked out in ${here.path}` : branch}
       >
         <GitBranch size={14} className="branch-icon" aria-hidden />
-        <span className="branch-select-name">{branch}</span>
+        <span className="branch-picker-name">{branch}</span>
         <ChevronDown size={14} className="select-chevron" aria-hidden />
       </button>
 
       {open ? (
         <div
-          className="branch-select-list"
+          className="branch-picker-list"
           id={listId}
           role="listbox"
           ref={listRef}

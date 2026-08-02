@@ -6431,130 +6431,6 @@ button.context-chip.pullable:disabled {
   cursor: pointer;
   display: grid;
   gap: var(--space-3);
-  /* ── Branch picker ──
-   A worktree is a branch and a place. The list draws both halves, and the
-   place is always its own control with its own icon so the two can never be
-   read as one long name. */
-.branch-select {
-  position: relative;
-}
-
-.branch-select-trigger {
-  align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  display: inline-flex;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  gap: var(--space-1-5);
-  padding: var(--space-1) var(--space-2);
-}
-
-.branch-select-trigger:hover:not(:disabled) {
-  border-color: var(--border-strong);
-}
-
-.branch-select-trigger:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-.branch-select-name {
-  max-width: 22ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.branch-select-list {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
-  left: 0;
-  max-height: 340px;
-  min-width: 260px;
-  overflow-y: auto;
-  padding: var(--space-1);
-  position: absolute;
-  top: calc(100% + 4px);
-  z-index: 40;
-}
-
-.branch-option-row {
-  align-items: center;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: var(--space-2);
-  padding-right: var(--space-1);
-}
-
-.branch-option-row:hover {
-  background: var(--bg-hover);
-}
-
-.branch-option-row.current .branch-option-name {
-  color: var(--accent);
-}
-
-.branch-option {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex: 1 1 auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  gap: var(--space-1-5);
-  min-width: 0;
-  padding: var(--space-1-5) var(--space-2);
-  text-align: left;
-}
-
-/* Held by a worktree: git refuses to check the same branch out twice, so the
-   branch half is inert and the place half is the live control. */
-.branch-option:disabled {
-  color: var(--text-muted);
-  cursor: default;
-}
-
-.branch-option-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.branch-option-worktree {
-  align-items: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  flex-shrink: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-2xs);
-  gap: var(--space-1);
-  padding: 2px var(--space-1-5);
-}
-
-.branch-option-worktree:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.branch-option-worktree:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
 /* Three cells: lanes, message, trailing meta. Branch labels live inside the
      message cell rather than a column of their own.
 
@@ -6567,6 +6443,7 @@ button.context-chip.pullable:disabled {
   text-align: left;
   width: 100%;
 }
+
 
 /* The global button focus ring is 2px of --accent-soft, which is the accent at
    14% alpha: legible on a small control, not legible as "which of these forty
