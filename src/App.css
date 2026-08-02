@@ -3012,6 +3012,14 @@ button:focus-visible {
    spends the cheaper things first. */
 .context-chip .chip-ref {
   min-width: 7ch;
+  /* And a ceiling, which is what was missing. Chips size to min-content so
+     they can never be allocated less than they draw -- but min-content of a
+     name is the whole name, so a single 28-character branch took as much of
+     the row as it liked and the group clipped some other chip in half to pay
+     for it. Names are the one thing here with no bound on their length, so
+     they are the one thing that needs one. Past ~18 characters a branch is
+     recognised by its start, not read in full. */
+  max-width: 18ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
