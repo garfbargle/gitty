@@ -2657,6 +2657,53 @@ button:focus-visible {
   z-index: 3;
 }
 
+/* Not pushed yet.
+
+   The push button reported a count and nothing on the timeline said which
+   commits it meant, so "16 to push" was a number you had to trust. Colour is
+   free to carry state in a strip that only ever draws one branch, which is
+   exactly what the plan reserves it for here. */
+/* The dot's colour is set inline, walking the lane palette in the order the
+   commits were made, so the unpushed run has a visible shape. Nothing here
+   sets background or box-shadow: that would be a second source for the same
+   thing, and the inline value would win anyway. */
+
+/* The line itself, drawn once on the oldest unpushed commit rather than
+   between every pair.
+
+   A real element, not a pseudo: ::after is the rail between nodes and ::before
+   is the selection cursor, so both are already spoken for on this element.
+   Sits in the row's padding so it spans the full band without the node having
+   to grow to hold it. */
+.push-boundary-line {
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 70%, transparent) 0 3px,
+    transparent 3px 6px
+  );
+  bottom: calc(var(--space-2) * -1);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  width: 1px;
+  z-index: 2;
+}
+
+.push-boundary-label {
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  left: var(--space-1);
+  letter-spacing: var(--tracking-caps);
+  pointer-events: none;
+  position: absolute;
+  text-transform: uppercase;
+  top: calc(var(--space-2) * -1 - 1px);
+  white-space: nowrap;
+  z-index: 2;
+}
+
 /* Uncommitted work waiting — a brighter label makes the node read as a live
    call-to-action rather than just an anchor. */
 .timeline-node.working-tree.has-changes .node-subject {

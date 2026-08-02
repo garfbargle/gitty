@@ -3273,6 +3273,7 @@ function App() {
                   lastFetchedAt={displaySnapshot.lastFetchedAt}
                   currentBranch={displaySnapshot.branch}
                   worktrees={worktrees}
+                  unpushedCommits={displaySnapshot.unpushedCommits}
                   onOpenCheckout={(path) => void addRepo(path)}
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}

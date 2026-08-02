@@ -147,6 +147,10 @@ export type RepoSnapshot = {
   siblingTip?: SiblingTip | null;
   tags: TagEntry[];
   unpushedTags: string[];
+  /// Which commits on HEAD the remote does not have, newest first, so the
+  /// timeline can draw the push boundary rather than leaving the push button's
+  /// count as the only word on the subject.
+  unpushedCommits?: string[];
   /// The current branch exists locally but not on any remote, so pushing it
   /// would publish it — lights the push button even with no commits ahead.
   branchUnpublished?: boolean;

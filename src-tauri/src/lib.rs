@@ -153,6 +153,10 @@ struct RepoSnapshot {
     sibling_tip: Option<SiblingTip>,
     tags: Vec<TagEntry>,
     unpushed_tags: Vec<String>,
+    /// Which commits on HEAD the remote does not have, newest first, so the
+    /// timeline can draw the push boundary instead of leaving the count in the
+    /// push button as the only word on the subject.
+    unpushed_commits: Vec<String>,
     /// The current branch exists locally but not on any remote, so pushing it
     /// would publish it. Lights the push button even with no commits ahead.
     branch_unpublished: bool,
@@ -718,7 +722,16 @@ fn writable_ancestor(directory: &Path) -> Result<(), String> {
 
     // Permission bits alone don't answer this: ownership, ACLs and read-only
     // mounts all decide it too. Creating something is the only honest test.
-    let probe = ancestor.join(format!(".gitty-write-test-{}", std::process::id()));
+    //
+    // The name has to be unique per call, not per process. Keyed on the pid
+    // alone, two probes of the same directory at once collided: the second
+    // create failed with "already exists" and was reported as "you cannot write
+    // here". It surfaced as a test that failed roughly one run in three,
+    // because the suite runs in parallel threads inside one process, and it
+    // would have done the same to two concurrent adds in the app.
+    static PROBE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let unique = PROBE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = ancestor.join(format!(".gitty-write-test-{}-{unique}", std::process::id()));
     let _ = fs::remove_dir_all(&probe);
     match fs::create_dir(&probe) {
         Ok(()) => {
@@ -956,6 +969,65 @@ fn unpushed_tags_to_remote(repo_path: &Path, remote: &str) -> Vec<String> {
         .filter(|(name, hash)| remote.get(name).map_or(true, |remote_hash| remote_hash != hash))
         .map(|(name, _)| name)
         .collect()
+}
+
+/// The commits on HEAD that no remote has yet, newest first.
+///
+/// The push button reported a count and nothing said which commits it meant, so
+/// "16 to push" was a number you had to take on trust. The timeline can only
+/// draw the boundary if it is told where the boundary is, and it cannot work
+/// that out itself: an unpublished branch has no ref on it to anchor to.
+///
+/// The anchor is the branch's own upstream when it has one. When it does not,
+/// the remote's copy of the trunk is the honest answer — nothing on this branch
+/// has been pushed anywhere, so everything since it left the trunk is new to
+/// the remote. With no remotes at all there is nothing to be ahead of.
+fn unpushed_commit_hashes(
+    repo_path: &Path,
+    upstream: &Option<String>,
+    trunk: Option<&str>,
+    has_remotes: bool,
+) -> Vec<String> {
+    if !has_remotes {
+        return Vec::new();
+    }
+
+    let base = match upstream {
+        Some(name) if !name.is_empty() => name.clone(),
+        _ => match (default_remote_name(repo_path), trunk) {
+            (Some(remote), Some(trunk)) => format!("{remote}/{trunk}"),
+            _ => return Vec::new(),
+        },
+    };
+
+    // The base can be absent — a brand-new repository, or a trunk that exists
+    // locally but was never pushed. Saying "everything is unpushed" from a
+    // missing ref would be a guess, so say nothing.
+    let found = git_raw(repo_path, &["rev-parse", "--verify", "--quiet", &base])
+        .map(|(ok, _, _)| ok)
+        .unwrap_or(false);
+    if !found {
+        return Vec::new();
+    }
+
+    // Capped: this feeds a strip that draws a few dozen nodes, and a branch
+    // thousands of commits from its base does not need every hash to mark one
+    // boundary.
+    git_owned(
+        repo_path,
+        vec![
+            "rev-list".to_string(),
+            "--max-count=400".to_string(),
+            format!("{base}..HEAD"),
+        ],
+    )
+    .map(|out| {
+        out.lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 fn unpushed_tags(repo_path: &Path) -> Vec<String> {
@@ -1810,6 +1882,8 @@ fn repo_snapshot_blocking(
     };
 
     let trunk = integration_branch(&branches);
+    let unpushed_commits =
+        unpushed_commit_hashes(&repo_path, &upstream, trunk.as_deref(), !remotes.is_empty());
     let sibling = sibling_tip(&repo_path, &branch, &branches, &trunk);
 
     let is_clean = changes.is_empty();
@@ -1833,6 +1907,7 @@ fn repo_snapshot_blocking(
         sibling_tip: sibling,
         tags,
         unpushed_tags: unpushed_tag_names,
+        unpushed_commits,
         branch_unpublished,
         backup_push_pending: backup_push_pending(&repo_path),
         backup_on_push: backup_on_push(&repo_path),
@@ -5845,6 +5920,44 @@ locked under review
 
         let _ = fs::remove_dir_all(&target);
         let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// The writability probe creates a directory to prove it can. Named on the
+    /// process id alone, two probes of the same parent at once collided: the
+    /// loser's create failed with "already exists" and was reported to the user
+    /// as "you cannot write here". It showed up as add_worktree failing about
+    /// one suite run in three, since tests share a process, and would have done
+    /// the same to two adds running together in the app.
+    #[test]
+    fn concurrent_writability_probes_do_not_collide() {
+        let dir = std::env::temp_dir().join(format!("gitty-probe-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+
+        let target = dir.join("not-created-yet");
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| writable_ancestor(&target)))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| h.join().expect("probe thread").err())
+                .collect()
+        });
+
+        assert!(
+            failures.is_empty(),
+            "probing one directory from several threads reported it unwritable: {failures:?}"
+        );
+        // And nothing is left behind afterwards.
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .expect("read temp dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(leftovers.is_empty(), "probe files left behind: {leftovers:?}");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// An annotated tag's own object hash is not the commit it points at, and

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
 import type { BranchDivergence, CommitEntry, SiblingTip, WorktreeEntry } from "../types";
-import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
+import {
+  aheadTimelineCommits,
+  ancestryTimelineCommits,
+  unpushedTimeline,
+} from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
+import { laneColor } from "../lib/graph";
 import {
   formatDate,
   formatRelativeTime,
@@ -71,6 +76,10 @@ type HistoryTimelineProps = {
   /// them, so without these the row cannot answer "is this the only folder".
   worktrees?: WorktreeEntry[];
   onOpenCheckout?: (path: string) => void;
+  /// Commits the remote does not have. The push button reported a count and
+  /// nothing said which commits it meant, so the number had to be taken on
+  /// trust; these let the strip mark them and draw the line.
+  unpushedCommits?: string[];
   historyView?: "strip" | "graph";
   onHistoryViewChange?: (view: "strip" | "graph") => void;
   /// Viewing a past commit rather than the working tree. The actions for
@@ -119,6 +128,7 @@ export function HistoryTimeline({
   currentBranch,
   worktrees = [],
   onOpenCheckout,
+  unpushedCommits,
   historyView = "strip",
   onHistoryViewChange,
   inPreview,
@@ -140,6 +150,14 @@ export function HistoryTimeline({
     [ancestry, ahead],
   );
   const [now, setNow] = useState(() => Date.now());
+
+  // Which commits the remote does not have, where the line between pushed and
+  // unpushed falls, and how far along the run each one sits.
+  const unpushedSet = useMemo(() => new Set(unpushedCommits ?? []), [unpushedCommits]);
+  const { oldestUnpushed: oldestUnpushedInView, order: unpushedOrder } = useMemo(
+    () => unpushedTimeline(ancestry, unpushedSet),
+    [ancestry, unpushedSet],
+  );
 
   useEffect(() => {
     let timeoutId: number | null = null;
@@ -368,9 +386,21 @@ export function HistoryTimeline({
     const active = commit.hash === selectedHash && !workingTreeActive;
     const tags = tagRefs(commit.refs).map(tagName);
     const tagSummary = tags.length > 0 ? ` · ${tags.join(", ")}` : "";
+    // "Not pushed" is state, which is what colour is free to carry in a strip
+    // that only ever draws one branch. The boundary sits on the oldest one, so
+    // the line is drawn once rather than between every pair.
+    const unpushed = unpushedSet.has(commit.hash);
+    const startsUnpushed = commit.hash === oldestUnpushedInView;
+    // Position in the unpushed run, oldest = 0, so the colour walks the palette
+    // in the order the commits were made. In the graph the palette answered
+    // "which branch" and repeating it per merge was a lie; here every dot is
+    // one branch and colour is free, so it can answer "where in the run".
+    const unpushedIndex = unpushed ? unpushedOrder.get(commit.hash) ?? 0 : 0;
     return (
       <button
-        className={`timeline-node ${active ? "active" : ""} ${isAhead ? "ahead" : ""}`}
+        className={`timeline-node ${active ? "active" : ""} ${isAhead ? "ahead" : ""}${
+          unpushed ? " unpushed" : ""
+        }${startsUnpushed ? " push-boundary" : ""}`}
         key={`${isAhead ? "ahead" : "ancestry"}-${commit.hash}`}
         type="button"
         ref={(node) => {
@@ -379,17 +409,32 @@ export function HistoryTimeline({
         }}
         onClick={() => selectCommit(commit)}
         onContextMenu={(event) => openTagContextMenu(event, commit)}
-        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}`}
+        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}${unpushed ? " · not pushed yet" : ""}`}
       >
+        {/* The push line, drawn on the oldest commit the remote does not have.
+            A real element rather than a pseudo: ::after is the rail and
+            ::before is the selection cursor. */}
+        {startsUnpushed ? (
+          <>
+            <span className="push-boundary-line" aria-hidden />
+            <span className="push-boundary-label">not pushed</span>
+          </>
+        ) : null}
         {/* Hash above the dot, time below it, so the rail runs through the
             middle of the row instead of along its top edge and each commit
             reads as an identity sitting on the line with its age underneath. */}
         <span className="node-hash">{commit.shortHash}</span>
+        {/* Unpushed commits walk the lane palette, oldest first. Colour is
+            unspent in this strip -- it only ever draws one branch, so there is
+            no branch identity for it to carry -- and this gives the run of
+            work you have not sent anywhere a shape you can see at a glance. */}
         <span
           className="node-dot"
           style={{
-            background: isAhead ? "transparent" : color,
-            boxShadow: isAhead ? undefined : `0 0 12px ${color}55`,
+            background: isAhead ? "transparent" : unpushed ? laneColor(unpushedIndex) : color,
+            boxShadow: isAhead
+              ? undefined
+              : `0 0 12px ${unpushed ? laneColor(unpushedIndex) : color}55`,
             outline: isAhead ? `2px dashed ${color}` : undefined,
             outlineOffset: isAhead ? 1 : undefined,
           }}
