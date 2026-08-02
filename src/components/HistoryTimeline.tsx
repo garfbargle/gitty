@@ -135,13 +135,6 @@ export function HistoryTimeline({
   const tagActionsEnabled = !!(onCreateTag && onDeleteTag);
   const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
   const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
-  // Every node reserves the tag band or none does, so the row keeps one height
-  // and the rail stays straight. Reserving it unconditionally left every
-  // untagged commit sitting above 23px of nothing.
-  const anyTags = useMemo(
-    () => [...ancestry, ...ahead].some((commit) => tagRefs(commit.refs).length > 0),
-    [ancestry, ahead],
-  );
   const commitDates = useMemo(
     () => [...ancestry, ...ahead].map((commit) => commit.date),
     [ancestry, ahead],
@@ -172,7 +165,6 @@ export function HistoryTimeline({
   const wrapRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const pinnedToEndRef = useRef(true);
-  const programmaticScrollDepthRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const headHash = commits[0]?.hash ?? "";
 
@@ -214,16 +206,6 @@ export function HistoryTimeline({
     });
   }, [lanes]);
 
-  const withProgrammaticScroll = useCallback((update: () => void) => {
-    programmaticScrollDepthRef.current += 1;
-    update();
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        programmaticScrollDepthRef.current -= 1;
-      });
-    });
-  }, []);
-
   const isScrolledToEnd = useCallback((): boolean => {
     const container = scrollRef.current;
     if (!container) return true;
@@ -231,6 +213,17 @@ export function HistoryTimeline({
     return remaining <= SCROLL_END_THRESHOLD;
   }, []);
 
+  /// Bring the selected commit into view, centred, when it is not already
+  /// visible.
+  ///
+  /// It used to nudge the node just far enough to clear the edge, which put the
+  /// commit you had just moved to against the boundary with no history visible
+  /// on the side you were travelling toward — so arrowing through history
+  /// scrolled one node at a time and you never saw what was coming. Centring
+  /// gives context in both directions.
+  ///
+  /// A node already fully in view is left alone: re-centring on every selection
+  /// would drag the strip under the pointer while clicking along it.
   const scrollNodeIntoView = useCallback((node: HTMLButtonElement | undefined) => {
     const container = scrollRef.current;
     if (!container || !node) return;
@@ -239,30 +232,39 @@ export function HistoryTimeline({
     const containerRect = container.getBoundingClientRect();
     const nodeRect = node.getBoundingClientRect();
 
-    if (nodeRect.left < containerRect.left + padding) {
-      container.scrollLeft -= containerRect.left + padding - nodeRect.left;
-    } else if (nodeRect.right > containerRect.right - padding) {
-      container.scrollLeft += nodeRect.right - (containerRect.right - padding);
-    }
+    const fullyVisible =
+      nodeRect.left >= containerRect.left + padding &&
+      nodeRect.right <= containerRect.right - padding;
+    if (fullyVisible) return;
+
+    // Node centre in scroll coordinates, then the offset that puts it mid-band.
+    const nodeCentre =
+      nodeRect.left - containerRect.left + container.scrollLeft + nodeRect.width / 2;
+    const furthest = container.scrollWidth - container.clientWidth;
+    const left = Math.max(0, Math.min(furthest, nodeCentre - container.clientWidth / 2));
+
+    // Native smoothing rather than an animation loop: one call, interruptible
+    // by the user's own scroll, and nothing to clean up. Honoured against the
+    // motion preference, which the browser does not do for us here.
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    container.scrollTo({ left, behavior: reduceMotion ? "auto" : "smooth" });
   }, []);
 
   const applyScrollPosition = useCallback(() => {
     const container = scrollRef.current;
     if (!container) return;
 
-    withProgrammaticScroll(() => {
-      if (workingTreeActive || pinnedToEndRef.current) {
-        pinnedToEndRef.current = true;
-        container.scrollLeft = container.scrollWidth - container.clientWidth;
-        return;
-      }
+    if (workingTreeActive || pinnedToEndRef.current) {
+      pinnedToEndRef.current = true;
+      container.scrollLeft = container.scrollWidth - container.clientWidth;
+      return;
+    }
 
-      if (!selectedHash) return;
+    if (!selectedHash) return;
 
-      pinnedToEndRef.current = false;
-      scrollNodeIntoView(nodeRefs.current.get(selectedHash));
-    });
-  }, [selectedHash, scrollNodeIntoView, withProgrammaticScroll, workingTreeActive]);
+    pinnedToEndRef.current = false;
+    scrollNodeIntoView(nodeRefs.current.get(selectedHash));
+  }, [selectedHash, scrollNodeIntoView, workingTreeActive]);
 
   const scheduleApplyScrollPosition = useCallback(() => {
     if (scrollFrameRef.current !== null) {
@@ -388,7 +390,21 @@ export function HistoryTimeline({
             outlineOffset: isAhead ? 1 : undefined,
           }}
         />
-        <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
+        {/* Time and tags share the bottom line. A tag row of its own forced
+            every node in the strip to be tall enough for it, tagged or not, so
+            one tagged commit anywhere in history left every other commit
+            sitting above a band of empty space. Inline, a tag costs the row
+            nothing. */}
+        <span className="node-meta-line">
+          <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
+          {tags.length > 0 ? (
+            <span className="node-tags">
+              {tags.map((name) => (
+                <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
+              ))}
+            </span>
+          ) : null}
+        </span>
         {/* No subject here on purpose. At this node width the message clipped
             to a few characters, often mid-word and sometimes from both ends,
             which is not enough to recognise a commit by and cost a whole row
@@ -396,13 +412,6 @@ export function HistoryTimeline({
             a commit is selected, and arrow keys move that selection, so the
             message is one keypress away rather than permanently illegible.
             The strip's job is position and state; the message has a home. */}
-        {tags.length > 0 ? (
-          <span className="node-tags">
-            {tags.map((name) => (
-              <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
-            ))}
-          </span>
-        ) : null}
         {isAhead ? <span className="node-ahead-label">ahead</span> : null}
       </button>
     );
@@ -724,7 +733,7 @@ export function HistoryTimeline({
               {lanes.map((lane, index) => renderLane(lane, index))}
             </div>
           ) : null}
-          <div className={`timeline-track${anyTags ? " has-tags" : ""}`}>
+          <div className="timeline-track">
           {ancestry.map((commit) => renderCommitNode(commit, false))}
 
           <button

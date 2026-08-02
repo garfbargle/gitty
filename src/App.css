@@ -124,9 +124,6 @@
      uses .node-subject for its state word ("no changes"), which is short and
      always fits — it has no time line, so it sits inside this height. */
   --timeline-node-height: 47px;
-  /* Reserved only when something in view is actually tagged. See
-     .timeline-track.has-tags below. */
-  --timeline-tag-band: 22px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -2491,11 +2488,6 @@ button:focus-visible {
   padding-block: var(--space-2);
 }
 
-/* Room for the tags hanging below the nodes, reserved once on the row instead
-   of on every node, and only when something in view carries one. */
-.timeline-track.has-tags {
-  padding-bottom: calc(var(--space-2) + var(--timeline-tag-band));
-}
 
 /* Every node is the same width so the dots fall on an even rhythm. Previously
    `min-width: 100px` combined with a 120px subject cap meant nodes were 100px
@@ -2570,7 +2562,11 @@ button:focus-visible {
 .timeline-node.active::before {
   background: var(--accent);
   border-radius: 999px;
-  bottom: 2px;
+  /* Below the node, in the row's bottom padding. The node is now exactly its
+     content, so a cursor inset from the bottom edge sat on top of the
+     timestamp instead of under it. */
+  bottom: auto;
+  top: calc(100% + 3px);
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
   content: "";
   height: 3px;
@@ -4300,26 +4296,33 @@ button.context-chip.pullable:disabled {
    strip with a ragged bottom edge and made that node's selection frame taller
    than every other node's. Taking them out of flow keeps all nodes, and so all
    selection frames, identical. */
-/* Hangs below the node rather than inside it. Anchored to the node's bottom
-   edge, the node had to be tall enough to hold it, so every untagged commit
-   carried that height as empty space under its timestamp and the row read as
-   pinned to the top of the band. The track reserves the room instead, once,
-   and only when something is actually tagged. */
-.node-tags {
+/* Shares the bottom line with the timestamp rather than owning a row.
+   A row of its own had to be reserved on every node, tagged or not, because
+   the nodes must stay the same height for the rail to run straight — so one
+   tagged commit anywhere in history left every other commit sitting above a
+   band of empty space. Inline, a tag costs the row nothing. */
+.node-meta-line {
   align-items: center;
-  bottom: auto;
-  top: calc(100% + var(--space-0-5));
   display: flex;
   gap: var(--space-1);
   justify-content: center;
-  left: 0;
-  position: absolute;
-  right: 0;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.node-tags {
+  align-items: center;
+  display: flex;
+  gap: var(--space-1);
+  /* In flow on the meta line now, not absolutely placed against the node. */
+  position: static;
   /* A commit with several tags must not reflow the node; the row scrolls
      nowhere and simply clips past the node's width. */
   flex-wrap: nowrap;
+  min-width: 0;
   overflow: hidden;
-  padding: 0 var(--space-1);
 }
 
 .author-avatar {
