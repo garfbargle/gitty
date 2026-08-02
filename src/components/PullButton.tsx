@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeyboard } from "../lib/useMenuKeyboard";
 import { Check, ChevronDown, Download, GitMerge, Loader2 } from "lucide-react";
 
 export type PullPhase = "idle" | "pulling" | "done";
@@ -69,6 +70,8 @@ export function PullButton({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  useMenuKeyboard({ open, setOpen, rootRef, triggerSelector: ".pull-btn-main" });
 
   useEffect(() => {
     if (isBusy) setOpen(false);

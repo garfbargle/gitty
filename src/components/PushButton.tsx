@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeyboard } from "../lib/useMenuKeyboard";
 import { AlertTriangle, Check, ChevronDown, Loader2, Tag, Upload } from "lucide-react";
 import { SHORTCUT } from "../lib/shortcuts";
 
@@ -96,6 +97,8 @@ export function PushButton({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  useMenuKeyboard({ open, setOpen, rootRef, triggerSelector: ".push-btn-main" });
 
   useEffect(() => {
     if (isBusy) setOpen(false);
