@@ -52,6 +52,15 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
   // a branch keeps one colour down its whole length.
   const lanes: Array<string | null> = [];
   const laneColorIdx: number[] = [];
+  /// For a lane opened by a merge, the lane the merge itself sat in.
+  ///
+  /// A strand is drawn from its lane index, which is right for a line that is
+  /// simply continuing. It is wrong for the row where a merge opens a lane: the
+  /// second parent's strand began at its own new column, so nothing joined the
+  /// merge to the line it was pulling in and no branch ever appeared to meet
+  /// another. Consumed once, by the band immediately below the merge, then
+  /// cleared — after that the lane really does continue from itself.
+  const laneOrigin: Array<number | null> = [];
   let nextColor = 0;
 
   const rows: GraphRow[] = [];
@@ -88,6 +97,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         myLane = lanes.length;
         lanes.push(null);
         laneColorIdx.push(-1);
+        laneOrigin.push(null);
       }
       // A tip with no child in view starts a fresh colour.
       if (laneColorIdx[myLane] === -1) laneColorIdx[myLane] = nextColor++;
@@ -104,7 +114,8 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         if (lanes[k] === null) continue;
         const toLane = lanes[k] === commit.hash ? myLane : k;
         edges.push({
-          fromLane: k,
+          // A lane a merge just opened starts at the merge, not at itself.
+          fromLane: laneOrigin[k] ?? k,
           toLane,
           color: laneColor(laneColorIdx[k]),
           colorIdx: laneColorIdx[k],
@@ -114,6 +125,8 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         });
       }
       rows[i - 1].edges = edges;
+      // Spent. Below this band each lane continues from its own column.
+      laneOrigin.fill(null);
     }
 
     rows.push({
@@ -132,6 +145,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       if (k !== myLane && lanes[k] === commit.hash) {
         lanes[k] = null;
         laneColorIdx[k] = -1;
+        laneOrigin[k] = null;
       }
     }
 
@@ -160,15 +174,19 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         nl = lanes.length;
         lanes.push(null);
         laneColorIdx.push(-1);
+        laneOrigin.push(null);
       }
       lanes[nl] = parent;
       laneColorIdx[nl] = alreadyRouted === -1 ? nextColor++ : laneColorIdx[alreadyRouted];
+      // This lane leaves the merge, so its first strand is drawn from there.
+      laneOrigin[nl] = myLane;
     }
 
     // Trim trailing free lanes so the width reflects what's actually in use.
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
       lanes.pop();
       laneColorIdx.pop();
+      laneOrigin.pop();
     }
     rows[i].laneCount = Math.max(lanes.length, myLane + 1, 1);
   }
