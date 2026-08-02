@@ -1367,6 +1367,19 @@ button:focus-visible {
   min-width: 0;
 }
 
+/* The right side holds refresh and Push and never gives ground: it is the
+   primary action of the screen, and it was being squeezed below its own
+   content — 142px of room for 169px of buttons — so Push ran past the window
+   edge with its badge left behind. Everything to its left truncates instead,
+   which is what breadcrumbs and a preview banner are for. */
+.top-bar-right {
+  flex: 0 0 auto;
+}
+
+.top-bar-left {
+  flex: 0 1 auto;
+}
+
 .select-wrap {
   align-items: center;
   display: inline-flex;
