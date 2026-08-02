@@ -284,3 +284,19 @@ export type ConflictSides = {
   oursExists: boolean;
   theirsExists: boolean;
 };
+
+/// One checkout of a repository: the main clone plus every linked worktree.
+/// Lets a repository have several branches open at once in different folders.
+export type WorktreeEntry = {
+  path: string;
+  /// Short branch name, or null when the checkout is detached.
+  branch: string | null;
+  head: string;
+  isMain: boolean;
+  isCurrent: boolean;
+  detached: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /// Gitty's own scratch checkout (merge or commit preview), not the user's.
+  internal: boolean;
+};

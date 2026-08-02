@@ -7,7 +7,15 @@ import {
   RefreshCw,
   Settings,
 } from "lucide-react";
-import type { ActionExecutionState, CommitEntry, LinkedFolder, RepoAction, RepoEntry } from "../types";
+import type {
+  ActionExecutionState,
+  CommitEntry,
+  LinkedFolder,
+  RepoAction,
+  RepoEntry,
+  WorktreeEntry,
+} from "../types";
+import { shortenPath } from "../lib/git";
 import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
@@ -22,6 +30,9 @@ type TopBarProps = {
   selectedPath: string;
   branch: string;
   branches: string[];
+  /// Other checkouts of this repository, so the branch list can show which
+  /// branches are already open in another folder.
+  worktrees?: WorktreeEntry[];
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
   pushPhase?: PushPhase;
@@ -75,6 +86,7 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
+  worktrees = [],
   viewingCommit,
   loading,
   pushPhase = "idle",
@@ -121,6 +133,13 @@ export function TopBar({
   const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
 
+  // branch name -> folder it's already checked out in, excluding this one.
+  const openElsewhere = new Map(
+    worktrees
+      .filter((entry) => !entry.isCurrent && entry.branch)
+      .map((entry) => [entry.branch as string, entry.path]),
+  );
+
   return (
     <header className={`top-bar${inPreview ? " preview-mode" : ""}`}>
       <div className="top-bar-left">
@@ -163,11 +182,17 @@ export function TopBar({
             disabled={repoSwitching || loading}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
-            {branches.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
+            {branches.map((name) => {
+              // A branch checked out in another folder can't be checked out
+              // here — git refuses. Saying so in the list turns a failure into
+              // a choice: picking it opens that folder instead.
+              const elsewhere = openElsewhere.get(name);
+              return (
+                <option key={name} value={name}>
+                  {elsewhere ? `${name}  ⧉ open in ${shortenPath(elsewhere)}` : name}
+                </option>
+              );
+            })}
           </select>
           <ChevronDown size={14} className="select-chevron" />
         </div>

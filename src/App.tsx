@@ -53,6 +53,7 @@ import type {
   UpdateOutcome,
   UpdateStatus,
   ConflictSides,
+  WorktreeEntry,
 } from "./types";
 import { changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { timestampLogOutput } from "./lib/logs";
@@ -72,6 +73,7 @@ import {
 } from "./lib/timelineNavigation";
 import { SHORTCUT } from "./lib/platform";
 import { sortRepos } from "./lib/repoSort";
+import { GraphView } from "./components/GraphView";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -347,7 +349,14 @@ function App() {
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
+  /// Preview of the two densities in docs/GRAPH_VISUAL_LANGUAGE.md: the
+  /// working-tree strip, or the full branch graph over `graphCommits`.
+  const [historyView, setHistoryView] = useState<"strip" | "graph">("strip");
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
+  /// Other checkouts of this repository. Drives the branch switcher (a branch
+  /// open in another folder can't be checked out here, so we offer to open that
+  /// folder instead) and the graph's "open elsewhere" marker.
+  const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
   const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
@@ -371,6 +380,26 @@ function App() {
       cancelled = true;
     };
   }, [selectedPath]);
+
+  // Refreshed alongside the snapshot, since checking a branch out or removing a
+  // checkout changes this list.
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedPath) {
+      setWorktrees([]);
+      return;
+    }
+    invoke<WorktreeEntry[]>("list_worktrees", { path: selectedPath })
+      .then((result) => {
+        if (!cancelled) setWorktrees(result.filter((entry) => !entry.internal));
+      })
+      .catch(() => {
+        if (!cancelled) setWorktrees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPath, snapshot?.branch]);
 
   useEffect(() => {
     if (!selectedPath || repoActions.length === 0) {
@@ -3118,6 +3147,7 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
+              worktrees={worktrees}
               loading={loading}
               pushPhase={pushPhase}
               pullPhase={pullPhase}
@@ -3137,7 +3167,19 @@ function App() {
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
-              onBranchChange={(branch) => void checkoutBranch(branch)}
+              onBranchChange={(branch) => {
+                // Git can't check out a branch that's open in another folder.
+                // Rather than let it fail, go to that folder — which is what
+                // the user meant by selecting the branch.
+                const elsewhere = worktrees.find(
+                  (entry) => !entry.isCurrent && entry.branch === branch,
+                );
+                if (elsewhere) {
+                  void addRepo(elsewhere.path);
+                  return;
+                }
+                void checkoutBranch(branch);
+              }}
               viewingCommit={viewingCommit}
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
@@ -3162,6 +3204,8 @@ function App() {
 
             <div className="working-view">
                 <HistoryTimeline
+                  historyView={historyView}
+                  onHistoryViewChange={setHistoryView}
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
                   aheadCommits={displaySnapshot.aheadCommits ?? []}
@@ -3312,6 +3356,15 @@ function App() {
                       </button>
                     </aside>
                   </div>
+                ) : historyView === "graph" ? (
+                  <GraphView
+                    commits={displaySnapshot.graphCommits ?? []}
+                    headHash={displaySnapshot.commits[0]?.hash}
+                    selectedHash={selectedCommit?.hash}
+                    unpushedTags={unpushedTagSet}
+                    worktrees={worktrees}
+                    onSelect={(commit) => void inspectCommit(commit)}
+                  />
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
@@ -3567,6 +3620,12 @@ function App() {
             repoName={snapshot.repo.name}
             repoPath={snapshot.repo.path}
             remotes={snapshot.remotes}
+            onOpenWorktree={(worktreePath) => {
+              // Another checkout of the same repository is, to Gitty, just
+              // another repo path: add it if it isn't saved yet, then select it.
+              setRepoSettingsOpen(false);
+              void addRepo(worktreePath);
+            }}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}
             onRemoveRemote={removeRemote}

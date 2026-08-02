@@ -3,7 +3,6 @@ import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
 import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
-import { laneColor } from "../lib/graph";
 import { formatDate, formatRelativeTime, relativeTimeRefreshMs, tagName, tagRefs } from "../lib/git";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
@@ -54,6 +53,10 @@ type HistoryTimelineProps = {
   /// the toolbar Pull button, offered where the user is looking at the gap.
   onPullUpstream?: () => void;
   pullBusy?: boolean;
+  /// Which density of history is showing. The switch lives in this component
+  /// because it heads the context row that both densities sit under.
+  historyView?: "strip" | "graph";
+  onHistoryViewChange?: (view: "strip" | "graph") => void;
   /// Viewing a past commit rather than the working tree. The actions for
   /// leaving that state live here rather than in the top bar: they only exist
   /// while a commit is selected, and the top bar has no spare room to gain and
@@ -96,6 +99,8 @@ export function HistoryTimeline({
   onMergeIntoMain,
   onPullUpstream,
   pullBusy,
+  historyView = "strip",
+  onHistoryViewChange,
   inPreview,
   onOpenVersion,
   onReturnToWorkingTree,
@@ -340,10 +345,14 @@ export function HistoryTimeline({
 
   function renderCommitNode(
     commit: CommitEntry,
-    index: number,
     isAhead: boolean,
   ) {
-    const color = laneColor(index % 6);
+    // The strip draws exactly one branch, so there is no branch identity for
+    // colour to carry here and it stays free for state. (`laneColor` still does
+    // identity work in GraphView, where several branches share the screen.)
+    // Previously this was `laneColor(index % 6)` — the commit's position in the
+    // array, so colour varied per commit while encoding nothing.
+    const color = isAhead ? "var(--accent)" : "var(--border-strong)";
     const active = commit.hash === selectedHash && !workingTreeActive;
     const tags = tagRefs(commit.refs).map(tagName);
     const tagSummary = tags.length > 0 ? ` · ${tags.join(", ")}` : "";
@@ -481,6 +490,29 @@ export function HistoryTimeline({
     if (contextLanes.length === 0 && !siblingTip && !showActions) return null;
     return (
       <div className="timeline-context-bar">
+        {/* Owns the history region below it, so it heads the row that region
+            already has rather than adding one. A segmented control because this
+            is a view switch over one thing, not two separate actions. */}
+        {onHistoryViewChange ? (
+          <div className="view-switch" role="group" aria-label="History view">
+            <button
+              type="button"
+              className={historyView === "strip" ? "active" : ""}
+              aria-pressed={historyView === "strip"}
+              onClick={() => onHistoryViewChange("strip")}
+            >
+              Timeline
+            </button>
+            <button
+              type="button"
+              className={historyView === "graph" ? "active" : ""}
+              aria-pressed={historyView === "graph"}
+              onClick={() => onHistoryViewChange("graph")}
+            >
+              Branches
+            </button>
+          </div>
+        ) : null}
         {renderSiblingChip()}
         {contextLanes.map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
@@ -587,6 +619,9 @@ export function HistoryTimeline({
   return (
     <div className="history-timeline">
       {renderContextChips()}
+      {/* The graph shows the same history at higher density, so showing both
+          would say everything twice. The context row above stays in place. */}
+      {historyView === "graph" ? null : (
       <div className="timeline-scroller" onScroll={handleScroll} ref={scrollRef}>
         <div className="timeline-track-wrap" ref={wrapRef}>
           {lanes.length > 0 ? (
@@ -599,7 +634,7 @@ export function HistoryTimeline({
             </div>
           ) : null}
           <div className="timeline-track">
-          {ancestry.map((commit, index) => renderCommitNode(commit, index, false))}
+          {ancestry.map((commit) => renderCommitNode(commit, false))}
 
           <button
             className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""} ${ahead.length > 0 ? "ahead-bridge" : ""}`}
@@ -619,9 +654,7 @@ export function HistoryTimeline({
             </span>
           </button>
 
-          {ahead.map((commit, index) =>
-            renderCommitNode(commit, ancestry.length + index, true),
-          )}
+          {ahead.map((commit) => renderCommitNode(commit, true))}
 
           {integrationPreview ? (
             <div
@@ -656,6 +689,7 @@ export function HistoryTimeline({
           </div>
         </div>
       </div>
+      )}
 
       {contextMenu ? (
         <ContextMenu

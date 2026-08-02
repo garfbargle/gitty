@@ -2356,6 +2356,20 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
         {
             Ok(out) => out,
             Err(err) => {
+                // The wall you hit the day you start using worktrees: git
+                // refuses to check out a branch that is already open in another
+                // folder, and says so as `fatal: '<branch>' is already checked
+                // out at '<path>'`. We already know that path, so name the
+                // folder and let the caller offer to open it instead of showing
+                // a dead end.
+                if let Some(other) = existing_worktree_for(repo_path, &branch) {
+                    if !same_path(&other, repo_path) {
+                        return Err(format!(
+                            "{branch} is already open in {}. Open that folder instead of switching here.",
+                            other.display()
+                        ));
+                    }
+                }
                 if !changed_files(repo_path).is_empty() {
                     return Err(format!(
                         "Switching to {branch} would overwrite unsaved changes. Commit or set them aside first."
@@ -4172,6 +4186,192 @@ fn merge_into_trunk(path: String, source: Option<String>) -> Result<MergeOutcome
     })
 }
 
+/// One checkout of a repository. The main checkout plus every linked worktree,
+/// which is what lets a repository have several branches open at once in
+/// different folders.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeEntry {
+    path: String,
+    /// Short branch name, or `None` when the checkout is detached.
+    branch: Option<String>,
+    head: String,
+    /// The original clone. It cannot be removed while linked worktrees exist.
+    is_main: bool,
+    /// The checkout the user currently has open in Gitty.
+    is_current: bool,
+    detached: bool,
+    locked: bool,
+    /// Git considers the folder gone; `git worktree prune` would drop it.
+    prunable: bool,
+    /// Lives under Gitty's own scratch namespace (a merge or commit preview),
+    /// not something the user created. Hidden from the user's list.
+    internal: bool,
+}
+
+/// Parses `git worktree list --porcelain`. Blocks are separated by blank lines
+/// and the first block is always the main checkout.
+fn parse_worktree_list(output: &str, repo_path: &Path) -> Vec<WorktreeEntry> {
+    let mut entries: Vec<WorktreeEntry> = Vec::new();
+    let mut current: Option<WorktreeEntry> = None;
+
+    let finish = |entries: &mut Vec<WorktreeEntry>, entry: Option<WorktreeEntry>| {
+        if let Some(mut entry) = entry {
+            entry.is_main = entries.is_empty();
+            entries.push(entry);
+        }
+    };
+
+    for line in output.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            finish(&mut entries, current.take());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            finish(&mut entries, current.take());
+            let wt_path = rest.trim().to_string();
+            let as_path = PathBuf::from(&wt_path);
+            current = Some(WorktreeEntry {
+                is_current: same_path(&as_path, repo_path),
+                internal: is_gitty_worktree(&as_path),
+                path: wt_path,
+                branch: None,
+                head: String::new(),
+                is_main: false,
+                detached: false,
+                locked: false,
+                prunable: false,
+            });
+        } else if let Some(entry) = current.as_mut() {
+            if let Some(rest) = line.strip_prefix("HEAD ") {
+                entry.head = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("branch ") {
+                entry.branch = Some(
+                    rest.trim()
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(rest.trim())
+                        .to_string(),
+                );
+            } else if line == "detached" {
+                entry.detached = true;
+            } else if line == "locked" || line.starts_with("locked ") {
+                entry.locked = true;
+            } else if line == "prunable" || line.starts_with("prunable ") {
+                entry.prunable = true;
+            }
+        }
+    }
+    finish(&mut entries, current.take());
+    entries
+}
+
+/// Compares two paths after canonicalising, so `/tmp` and `/private/tmp` (and
+/// trailing separators) don't read as different checkouts.
+fn same_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => left == right,
+    }
+}
+
+/// Every checkout of this repository. Gitty's own scratch worktrees are marked
+/// `internal` so the UI can leave them out.
+#[tauri::command]
+fn list_worktrees(path: String) -> Result<Vec<WorktreeEntry>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let output = git(&repo_path, &["worktree", "list", "--porcelain"])?;
+    Ok(parse_worktree_list(&output, &repo_path))
+}
+
+/// Open a branch in its own folder. `create_branch` starts a new branch at the
+/// current HEAD instead of checking out an existing one.
+#[tauri::command]
+fn add_worktree(
+    path: String,
+    directory: String,
+    branch: String,
+    create_branch: Option<bool>,
+) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let branch = branch.trim().to_string();
+    let directory = directory.trim().to_string();
+    if branch.is_empty() {
+        return Err("Branch name is required.".to_string());
+    }
+    if directory.is_empty() {
+        return Err("Folder is required.".to_string());
+    }
+    if PathBuf::from(&directory).exists() {
+        return Err(format!("{directory} already exists. Choose a folder that doesn't exist yet."));
+    }
+
+    // Clear git's memory of folders deleted from underneath it, so a reused name
+    // doesn't fail with a stale registration.
+    let _ = git(&repo_path, &["worktree", "prune"]);
+
+    let args: Vec<String> = if create_branch.unwrap_or(false) {
+        vec![
+            "worktree".into(),
+            "add".into(),
+            "-b".into(),
+            branch.clone(),
+            directory.clone(),
+        ]
+    } else {
+        vec![
+            "worktree".into(),
+            "add".into(),
+            directory.clone(),
+            branch.clone(),
+        ]
+    };
+    git_owned(&repo_path, args)?;
+    Ok(directory)
+}
+
+/// Stop tracking a checkout and delete its folder. The main checkout can never
+/// be removed this way.
+#[tauri::command]
+fn remove_worktree(path: String, worktree: String, force: Option<bool>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let target = PathBuf::from(worktree.trim());
+
+    if let Some(main) = main_worktree(&repo_path) {
+        if same_path(&target, &main) {
+            return Err("That's the repository's main folder, so it can't be removed here.".to_string());
+        }
+    }
+
+    let target_str = target.to_string_lossy().to_string();
+    let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
+    if force.unwrap_or(false) {
+        args.push("--force".into());
+    }
+    args.push(target_str.clone());
+
+    let output = git_owned(&repo_path, args)?;
+    Ok(ActionResult {
+        message: format!("Removed {target_str}"),
+        output,
+    })
+}
+
+/// Drop registrations for folders that no longer exist on disk.
+#[tauri::command]
+fn prune_worktrees(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let output = git(&repo_path, &["worktree", "prune", "-v"])?;
+    Ok(ActionResult {
+        message: "Cleaned up folders git could no longer find.".to_string(),
+        output,
+    })
+}
+
 /// Check `commit` out into a throwaway worktree and return its path, so the user
 /// can browse an old version on disk without detaching HEAD or touching their
 /// working tree. Replaces the old "time travel" checkout.
@@ -5203,6 +5403,10 @@ pub fn run() {
             remove_linked_folder,
             open_commit_worktree,
             cleanup_commit_worktrees,
+            list_worktrees,
+            add_worktree,
+            remove_worktree,
+            prune_worktrees,
             merge_status,
             abort_merge,
             resolve_conflict,
@@ -5245,6 +5449,97 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+
+    const SAMPLE: &str = "\
+worktree /repo/main
+HEAD aaaa1111
+branch refs/heads/main
+
+worktree /repo/feature
+HEAD bbbb2222
+branch refs/heads/feature
+
+worktree /repo/detached
+HEAD cccc3333
+detached
+
+worktree /repo/gone
+HEAD dddd4444
+branch refs/heads/old
+prunable gitdir file points to non-existent location
+
+worktree /repo/held
+HEAD eeee5555
+branch refs/heads/held
+locked under review
+";
+
+    #[test]
+    fn parses_every_block_shape() {
+        let entries = parse_worktree_list(SAMPLE, Path::new("/repo/feature"));
+        assert_eq!(entries.len(), 5);
+
+        // First block is always the main checkout.
+        assert!(entries[0].is_main);
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        assert!(!entries[1].is_main);
+
+        // refs/heads/ is stripped so the UI can show a plain branch name.
+        assert_eq!(entries[1].branch.as_deref(), Some("feature"));
+
+        // Detached checkouts have no branch.
+        assert!(entries[2].detached);
+        assert_eq!(entries[2].branch, None);
+
+        // Flags carry their trailing reason text without breaking parsing.
+        assert!(entries[3].prunable);
+        assert!(entries[4].locked);
+        assert_eq!(entries[4].branch.as_deref(), Some("held"));
+
+        // HEAD is captured per block.
+        assert_eq!(entries[0].head, "aaaa1111");
+        assert_eq!(entries[4].head, "eeee5555");
+    }
+
+    #[test]
+    fn marks_only_the_open_checkout_as_current() {
+        let entries = parse_worktree_list(SAMPLE, Path::new("/repo/feature"));
+        let current: Vec<&str> = entries
+            .iter()
+            .filter(|entry| entry.is_current)
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(current, vec!["/repo/feature"]);
+    }
+
+    #[test]
+    fn tolerates_trailing_block_without_blank_line() {
+        // git omits the trailing newline in some versions; the last block must
+        // still be emitted rather than dropped.
+        let out = "worktree /only\nHEAD ffff6666\nbranch refs/heads/solo";
+        let entries = parse_worktree_list(out, Path::new("/elsewhere"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].branch.as_deref(), Some("solo"));
+        assert!(entries[0].is_main);
+        assert!(!entries[0].is_current);
+    }
+
+    #[test]
+    fn flags_gitty_scratch_worktrees_as_internal() {
+        let out = "worktree /tmp/gitty-worktrees/abc/feature\nHEAD 1111\nbranch refs/heads/feature\n";
+        let entries = parse_worktree_list(out, Path::new("/repo"));
+        assert!(entries[0].internal);
+    }
+
+    #[test]
+    fn empty_output_yields_no_entries() {
+        assert!(parse_worktree_list("", Path::new("/repo")).is_empty());
+    }
 }
 
 #[cfg(test)]
