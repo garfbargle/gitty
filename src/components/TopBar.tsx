@@ -44,11 +44,12 @@ type TopBarProps = {
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
-  backupSetupAvailable?: boolean;
+  backupAvailable?: boolean;
+  backupOnPush?: boolean;
+  hasBackupRemote?: boolean;
   backupRemoteName?: string | null;
-  onSetupBackup?: () => Promise<boolean>;
   backupPhase?: PushPhase;
-  onBackup?: () => Promise<boolean>;
+  onBackupOnPushChange?: (enabled: boolean) => Promise<boolean>;
   onPull?: () => Promise<boolean>;
   onPullMerge?: () => Promise<boolean>;
   onSetupRemote?: () => void;
@@ -101,11 +102,12 @@ export function TopBar({
   onPush,
   onForcePush,
   onOverwrite,
-  backupSetupAvailable = false,
+  backupAvailable = false,
+  backupOnPush = false,
+  hasBackupRemote = false,
   backupRemoteName,
-  onSetupBackup,
   backupPhase = "idle",
-  onBackup,
+  onBackupOnPushChange,
   onPull,
   onPullMerge,
   onSetupRemote,
@@ -246,14 +248,14 @@ export function TopBar({
             onOverwrite={onOverwrite}
           />
         ) : null}
-        {(backupSetupAvailable || onBackup) && !repoSwitching ? (
+        {backupAvailable && onBackupOnPushChange && !repoSwitching ? (
           <BackupButton
-            configured={!backupSetupAvailable}
+            enabled={backupOnPush}
+            configured={hasBackupRemote}
             remoteName={backupRemoteName}
             phase={backupPhase}
             loading={loading}
-            onSetup={backupSetupAvailable ? onSetupBackup : undefined}
-            onBackup={onBackup}
+            onChange={onBackupOnPushChange}
           />
         ) : null}
         {onUpdateLinkedFolder && !repoSwitching ? (

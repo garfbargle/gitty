@@ -45,9 +45,6 @@ type RepoSettingsDrawerProps = {
   /// Pull a linked folder from its source. Owns conflict handling (may close this
   /// drawer to show the resolver) and refreshing the repo.
   onUpdateFolder: (prefix: string) => Promise<void>;
-  backupOnPush: boolean;
-  hasBackupRemote: boolean;
-  onBackupOnPushChange: (enabled: boolean) => Promise<boolean>;
   disabled?: boolean;
 };
 
@@ -629,16 +626,12 @@ export function RepoSettingsDrawer({
   onFetch,
   onRemoveRepo,
   onUpdateFolder,
-  backupOnPush,
-  hasBackupRemote,
-  onBackupOnPushChange,
   disabled,
 }: RepoSettingsDrawerProps) {
   const [drafts, setDrafts] = useState<RemoteDraft[]>(() => remotesToDrafts(remotes));
   const [baseline, setBaseline] = useState<RemoteDraft[]>(() => remotesToDrafts(remotes));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [savingBackupPreference, setSavingBackupPreference] = useState(false);
   // Canonical URLs of linked-folder sources, reported by the section below. A
   // saved remote whose URL matches one is hidden here — it lives under Linked
   // folders instead of masquerading as a repo remote.
@@ -736,16 +729,6 @@ export function RepoSettingsDrawer({
     }
 
     removeDraft(id);
-  }
-
-  async function changeBackupOnPush(enabled: boolean) {
-    setSavingBackupPreference(true);
-    try {
-      const saved = await onBackupOnPushChange(enabled);
-      if (!saved) setSaveError("Could not update the backup preference.");
-    } finally {
-      setSavingBackupPreference(false);
-    }
   }
 
   return (
@@ -850,21 +833,6 @@ export function RepoSettingsDrawer({
             <code>origin</code> (or the first remote) is the primary for fetches and branch tracking.
             Every other remote is available as a separate backup destination.
           </p>
-        ) : null}
-        {hasBackupRemote ? (
-          <label className="settings-row backup-on-push-row">
-            <span className="settings-row-copy">
-              <strong>Back up after push</strong>
-              <span>Copy successful pushes to this repository’s backup remote(s)</span>
-            </span>
-            <input
-              type="checkbox"
-              className="settings-switch"
-              checked={backupOnPush}
-              onChange={(event) => void changeBackupOnPush(event.currentTarget.checked)}
-              disabled={disabled || saving || savingBackupPreference}
-            />
-          </label>
         ) : null}
       </div>
 

@@ -1,41 +1,43 @@
-import { Archive, Check, Loader2, Settings2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { PushPhase } from "./PushButton";
 
 type BackupButtonProps = {
+  enabled: boolean;
   configured: boolean;
   remoteName?: string | null;
   phase?: PushPhase;
   loading?: boolean;
-  onBackup?: () => Promise<boolean>;
-  onSetup?: () => Promise<boolean>;
+  onChange: (enabled: boolean) => Promise<boolean>;
 };
 
-/** Backup remains a deliberate action. Push reaches a backup only when the
- * repository's "Back up after push" setting is enabled. */
+/**
+ * Backup is deliberately a push preference rather than a second action to
+ * remember. When it is first enabled, the parent sets up and synchronizes the
+ * configured backup remote before saving the preference.
+ */
 export function BackupButton({
+  enabled,
   configured,
   remoteName,
   phase = "idle",
   loading,
-  onBackup,
-  onSetup,
+  onChange,
 }: BackupButtonProps) {
   const busy = phase !== "idle" || !!loading;
-  const settingUp = !configured;
-  if (settingUp && !onSetup) return null;
+  const setupHint = configured
+    ? `Copy successful pushes to ${remoteName || "the backup remote"}`
+    : `Set up and sync ${remoteName || "the"} backup remote, then copy successful pushes to it`;
 
   return (
-    <div className={`backup-btn-group ${phase !== "idle" ? phase : ""}`} aria-live="polite">
-      <button
-        type="button"
-        className="backup-btn-main"
+    <label className={`backup-push-toggle${busy ? " busy" : ""}`} title={setupHint}>
+      {phase === "pushing" ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null}
+      <input
+        type="checkbox"
+        checked={enabled}
         disabled={busy}
-        title={settingUp ? `Set up ${remoteName || "a"} backup for this repository` : `Back up this repository to ${remoteName || "its backup remote"}`}
-        onClick={() => void (settingUp ? onSetup?.() : onBackup?.())}
-      >
-        {phase === "pushing" ? <Loader2 size={15} className="spin" /> : phase === "done" ? <Check size={15} /> : settingUp ? <Settings2 size={15} /> : <Archive size={15} />}
-        {phase === "pushing" ? (settingUp ? "Setting up…" : "Backing up…") : phase === "done" ? (settingUp ? "Backup ready" : "Backed up") : settingUp ? "Set up backup" : "Backup"}
-      </button>
-    </div>
+        onChange={(event) => void onChange(event.currentTarget.checked)}
+      />
+      <span>{phase === "pushing" ? "Setting up backup…" : "Back up after push"}</span>
+    </label>
   );
 }

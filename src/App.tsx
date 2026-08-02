@@ -900,6 +900,15 @@ function App() {
     }
   }
 
+  async function handleBackupAfterPushChange(enabled: boolean): Promise<boolean> {
+    if (!enabled) return setBackupAfterPush(false);
+    if (!hasBackupRemote) {
+      const configured = await setupBackupForSelectedRepo();
+      if (!configured) return false;
+    }
+    return setBackupAfterPush(true);
+  }
+
   function openRepoSettings() {
     setRepoSettingsOpen(true);
   }
@@ -2568,44 +2577,6 @@ function App() {
     }
   }
 
-  async function backup(): Promise<boolean> {
-    const path = selectedPath;
-    if (
-      !path ||
-      backupLockRef.current.has(path) ||
-      pushLockRef.current.has(path) ||
-      (backupPhases[path] ?? "idle") !== "idle"
-    ) return false;
-    backupLockRef.current.add(path);
-    setBackupPhases((current) => ({ ...current, [path]: "pushing" }));
-    setGitActivityByPath((current) => ({ ...current, [path]: { message: timestampLogOutput("Backing up…"), error: "" } }));
-    await waitForPaint();
-    try {
-      const result = await invoke<ActionResult>("backup_repo", { path });
-      setGitActivityByPath((current) => {
-        const activity = current[path] ?? { message: "", error: "" };
-        return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
-      });
-      await refreshRepoQuiet(path);
-      setBackupPhases((current) => ({ ...current, [path]: "done" }));
-      const previousTimer = backupDoneTimerRef.current.get(path);
-      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
-      const timer = window.setTimeout(() => {
-        setBackupPhases((current) => ({ ...current, [path]: "idle" }));
-        backupDoneTimerRef.current.delete(path);
-      }, 1600);
-      backupDoneTimerRef.current.set(path, timer);
-      return true;
-    } catch (err) {
-      setGitActivityByPath((current) => ({ ...current, [path]: { ...(current[path] ?? { message: "", error: "" }), error: timestampLogOutput(String(err)) } }));
-      setBackupPhases((current) => ({ ...current, [path]: "idle" }));
-      await refreshRepoQuiet(path);
-      return false;
-    } finally {
-      backupLockRef.current.delete(path);
-    }
-  }
-
   const pushRef = useRef(push);
   pushRef.current = push;
 
@@ -2879,14 +2850,13 @@ function App() {
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
-  // Only replace Push with backup setup once Settings contains a usable default
-  // and this repo has a primary remote but lacks the named backup. Existing
-  // remotes are never silently repurposed.
-  const backupSetupAvailable =
+  // A backup toggle is useful only once the main Settings screen has a usable
+  // destination profile. Enabling it on a repo without a backup sets up and
+  // syncs the remote before turning on automatic copies after pushes.
+  const backupAvailable =
     hasRemotes &&
     savedBackupRemoteName.trim().length > 0 &&
-    savedBackupUrlTemplate.trim().includes("{repo}") &&
-    !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
+    savedBackupUrlTemplate.trim().includes("{repo}");
   const hasBackupRemote = hasRemotes && (snapshot?.remotes.length ?? 0) > 1;
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
@@ -3191,11 +3161,12 @@ function App() {
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
               disabled={backupPhase !== "idle"}
-              backupSetupAvailable={backupSetupAvailable}
+              backupAvailable={backupAvailable}
+              backupOnPush={displaySnapshot.backupOnPush ?? false}
+              hasBackupRemote={hasBackupRemote}
               backupRemoteName={savedBackupRemoteName.trim() || null}
-              onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
               backupPhase={backupPhase}
-              onBackup={hasBackupRemote ? backup : undefined}
+              onBackupOnPushChange={handleBackupAfterPushChange}
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
@@ -3618,9 +3589,6 @@ function App() {
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             onUpdateFolder={runLinkedFolderUpdate}
-            backupOnPush={snapshot.backupOnPush ?? false}
-            hasBackupRemote={hasBackupRemote}
-            onBackupOnPushChange={setBackupAfterPush}
             disabled={loading}
           />
         </>

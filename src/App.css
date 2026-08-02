@@ -1824,48 +1824,33 @@ button:focus-visible {
   position: relative;
 }
 
-.backup-btn-group {
-  display: inline-flex;
-  position: relative;
-}
-
-.backup-btn-main {
+.backup-push-toggle {
   align-items: center;
-  background: color-mix(in srgb, var(--accent) 16%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
-  border-radius: var(--radius-sm);
-  color: var(--text);
+  color: var(--text-secondary);
+  cursor: pointer;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 650;
   gap: 6px;
   min-height: 32px;
-  padding: 0 12px;
-  transition: filter 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
 }
 
-.backup-btn-main:hover:not(:disabled) {
-  filter: brightness(1.08);
+.backup-push-toggle input {
+  accent-color: var(--success);
+  cursor: inherit;
+  height: 15px;
+  margin: 0;
+  width: 15px;
 }
 
-.backup-btn-main:active:not(:disabled) {
-  transform: scale(0.98);
+.backup-push-toggle:hover:not(.busy) {
+  color: var(--text);
 }
 
-.backup-btn-main:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.backup-btn-group.pushing .backup-btn-main {
-  animation: push-active-pulse 1.2s ease-in-out infinite;
+.backup-push-toggle.busy {
   cursor: wait;
-}
-
-.backup-btn-group.done .backup-btn-main {
-  animation: push-done-pop 0.35s ease-out;
-  background: color-mix(in srgb, var(--success) 22%, var(--bg-panel));
-  border-color: color-mix(in srgb, var(--success) 60%, transparent);
+  opacity: 0.75;
 }
 
 .push-btn-badge {
