@@ -27,6 +27,7 @@ type TopBarProps = {
   pushPhase?: PushPhase;
   pullPhase?: PullPhase;
   repoSwitching?: boolean;
+  fetching?: boolean;
   ahead?: number;
   behind?: number;
   unpushedTags?: number;
@@ -80,6 +81,7 @@ export function TopBar({
   pushPhase = "idle",
   pullPhase = "idle",
   repoSwitching = false,
+  fetching = false,
   ahead = 0,
   behind = 0,
   unpushedTags = 0,
@@ -160,7 +162,7 @@ export function TopBar({
           <select
             className="top-select branch-select-top"
             value={branch}
-            disabled={repoSwitching || loading}
+            disabled={repoSwitching || loading || fetching}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
             {branches.map((name) => (
@@ -191,8 +193,14 @@ export function TopBar({
             whole top bar reflow on every selection change — and at common
             widths they collided with the Viewing banner and wrapped to two
             lines. The timeline row is where the commit context already lives. */}
-        <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
-          <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
+        <button
+          type="button"
+          className="ghost-btn"
+          title={fetching ? "Fetching latest remote changes…" : "Refresh local repository status"}
+          disabled={loading || fetching || repoSwitching}
+          onClick={onRefresh}
+        >
+          <RefreshCw size={15} className={loading || fetching || repoSwitching ? "spin" : ""} />
         </button>
         {onPull && onPullMerge && !repoSwitching ? (
           <PullButton
@@ -200,7 +208,7 @@ export function TopBar({
             ahead={ahead}
             hasUpstream={hasUpstream}
             pullPhase={pullPhase}
-            loading={loading}
+            loading={loading || fetching}
             onPull={onPull}
             onPullMerge={onPullMerge}
           />
@@ -214,7 +222,7 @@ export function TopBar({
             unpublished={branchUnpublished}
             forceSuggested={forceSuggested}
             pushPhase={pushPhase}
-            loading={loading}
+            loading={loading || fetching}
             disabled={disabled}
             onPush={onPush}
             onForcePush={onForcePush}
@@ -225,7 +233,7 @@ export function TopBar({
           <BackupButton
             remoteName={backupRemoteName}
             phase={backupPhase}
-            loading={loading}
+            loading={loading || fetching}
             onSetup={onSetupBackup}
           />
         ) : null}
@@ -233,7 +241,7 @@ export function TopBar({
           <LinkedFolderUpdatesButton
             folders={linkedUpdates}
             busyPrefix={linkedBusyPrefix}
-            loading={loading}
+            loading={loading || fetching}
             onUpdate={onUpdateLinkedFolder}
             onOpenSettings={onManageLinkedFolders}
           />
@@ -242,7 +250,7 @@ export function TopBar({
           <LinkedFolderPublishButton
             folders={linkedPublishable}
             busyPrefix={linkedPushBusyPrefix}
-            loading={loading}
+            loading={loading || fetching}
             onPublish={onPublishLinkedFolder}
             onOpenSettings={onManageLinkedFolders}
           />
@@ -252,7 +260,7 @@ export function TopBar({
             type="button"
             className="setup-remote-btn"
             title="Add a remote to push commits"
-            disabled={loading}
+            disabled={loading || fetching}
             onClick={onSetupRemote}
           >
             <Link2 size={14} />
@@ -264,7 +272,7 @@ export function TopBar({
             type="button"
             className="ghost-btn"
             title="Repository settings"
-            disabled={loading}
+            disabled={loading || fetching}
             onClick={onOpenRepoSettings}
           >
             <Settings size={15} />
