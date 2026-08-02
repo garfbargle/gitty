@@ -601,6 +601,17 @@ export function HistoryTimeline({
             </button>
           </div>
         ) : null}
+        {/* The chips are one group, not loose items in the row.
+
+            As siblings of the actions they competed with them for width, and
+            whichever rule won, someone lost: let a chip shrink freely and its
+            own caption and count spilled over the chip beside it; give it an
+            honest min-content floor and the group instead shoved the actions
+            off the right edge. A group that clips its own overflow settles it
+            -- the actions keep their width, and the chips give ground inside
+            their own box, worst case losing the tail of the least important
+            chip rather than a button. */}
+        <div className="context-chips">
         {/* Where you are. The row used to open with whichever other branch
             happened to be interesting, so nothing said which line was yours. */}
         {currentBranch ? (
@@ -713,6 +724,7 @@ export function HistoryTimeline({
             </button>
           )
         ) : null}
+        </div>
         {showActions ? (
           <div className="timeline-actions">
             {canUpdateFromMain && onUpdateFromMain ? (

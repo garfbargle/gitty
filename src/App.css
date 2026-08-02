@@ -2881,6 +2881,19 @@ button:focus-visible {
    line moves the whole timeline down every time you select a commit. The chips
    beside them truncate instead — a branch name is the thing that can afford to
    lose characters. */
+/* The chips as one shrinkable, self-clipping group. This is what lets the
+   chips have an honest min-content floor without the row's buttons paying for
+   it: the group takes the pressure, and anything that will not fit is clipped
+   inside it rather than painted over a neighbour or pushed off the edge. */
+.context-chips {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .timeline-actions {
   display: inline-flex;
   flex: 0 0 auto;
