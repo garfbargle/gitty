@@ -203,6 +203,7 @@ export function TopBar({
           type="button"
           className="ghost-btn"
           title={fetching ? "Fetching latest remote changes…" : "Refresh local repository status"}
+          aria-label="Refresh"
           disabled={loading || fetching || repoSwitching}
           onClick={onRefresh}
         >
@@ -278,7 +279,7 @@ export function TopBar({
           <button
             type="button"
             className="ghost-btn"
-            title="Repository settings"
+            title="Repository settings" aria-label="Repository settings"
             disabled={loading || fetching}
             onClick={onOpenRepoSettings}
           >

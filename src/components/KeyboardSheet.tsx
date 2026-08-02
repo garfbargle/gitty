@@ -38,7 +38,7 @@ export function KeyboardSheet({ open, onClose }: KeyboardSheetProps) {
       >
         <header className="keyboard-sheet-head">
           <h2>Keyboard</h2>
-          <button type="button" className="keyboard-sheet-close" onClick={onClose}>
+          <button type="button" className="keyboard-sheet-close" onClick={onClose} aria-label="Close">
             Esc
           </button>
         </header>

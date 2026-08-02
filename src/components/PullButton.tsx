@@ -133,6 +133,7 @@ export function PullButton({
           type="button"
           className="pull-btn-chevron"
           title="Pull options"
+          aria-label="Pull options"
           disabled={isLocked}
           aria-expanded={open}
           aria-haspopup="menu"

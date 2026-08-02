@@ -161,6 +161,8 @@ export function PushButton({
         title={pushTitle()}
         disabled={isLocked}
         aria-busy={pushPhase === "pushing"}
+        aria-haspopup={tagsOnly ? "menu" : undefined}
+        aria-expanded={tagsOnly ? open : undefined}
         onClick={() => (tagsOnly ? setOpen((current) => !current) : void onPush())}
       >
         {pushPhase === "pushing" ? (
@@ -187,6 +189,7 @@ export function PushButton({
           type="button"
           className="push-btn-chevron"
           title="Push options"
+          aria-label="Push options"
           disabled={isLocked}
           aria-expanded={open}
           aria-haspopup="menu"

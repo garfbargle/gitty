@@ -13,6 +13,7 @@ import {
   formatRelativeTime,
   folderName,
   relativeTimeRefreshMs,
+  remoteFreshness,
   tagName,
   tagRefs,
 } from "../lib/git";
@@ -60,12 +61,9 @@ type HistoryTimelineProps = {
   integrationBusy?: boolean;
   onUpdateFromMain?: () => void;
   onMergeIntoMain?: () => void;
-  /// Pull the branch's upstream (the "origin/… ↓N" lane) — the same action as
-  /// the toolbar Pull button, offered where the user is looking at the gap.
-  /// Which density of history is showing. The switch lives in this component
-  /// because it heads the context row that both densities sit under.
-  /// When the remote was last actually reached. Only the remote chip is
-  /// affected: a trunk branch is local, so it is never stale.
+  /// When the remote was last actually reached. Only the remote chip uses it:
+  /// a trunk branch is local, so it is never stale.
+  lastFetchedAt?: number | null;
   /// The branch checked out in this folder, so the row can say where you are.
   currentBranch?: string;
   /// Other checkouts of this repository. Nothing else on this screen mentions
@@ -118,6 +116,7 @@ export function HistoryTimeline({
   integrationBusy,
   onUpdateFromMain,
   onMergeIntoMain,
+  lastFetchedAt,
   currentBranch,
   worktrees = [],
   onOpenCheckout,
@@ -625,28 +624,31 @@ export function HistoryTimeline({
           </div>
         ) : null}
         {renderSiblingChip()}
-        {/* The upstream lane is deliberately absent.
+        {/* The upstream lane is inert, not absent.
 
-            It stated the same fact as the strip's "Incoming" tag twenty pixels
-            below it -- same ref, same count, two encodings -- and the strip's
-            version is anchored to the commits it is describing, so it is the
-            one that earns the space. Removing the chip also removes the row's
-            widest item, which is most of the room the narrow-window ladder
-            below needs.
-
-            Its click-to-pull behaviour is gone with it. The chip was pixel
-            identical to the inert chips beside it, differing only in `cursor`,
-            so a status label ran a network operation that rewrites the working
-            tree, while a button labelled Pull sat forty pixels above doing the
-            same thing. One verb, one owner: the Pull button. */}
-        {contextLanes.filter((lane) => lane.kind !== "upstream").map((lane) => {
+            It was briefly deleted on the grounds that the strip's "Incoming"
+            tag said the same thing twenty pixels below. That was wrong in
+            three ways: the tag only renders when you are actually behind, so
+            "up to date with the remote" was then stated nowhere; the whole
+            strip is unmounted in Branches view; and the tag's container is
+            aria-hidden, so the chip was the only non-visual source of upstream
+            divergence in the app. What was right about the deletion was
+            removing its click-to-pull behaviour: it was pixel-identical to the
+            inert chips beside it, differing only in `cursor`, so a status
+            label ran an operation that rewrites the working tree while a
+            button labelled Pull sat forty pixels above doing the same thing.
+            One verb, one owner. The chip stays; the verb does not. */}
+        {contextLanes.map((lane) => {
+          const upstream = lane.kind === "upstream";
           const inSync = lane.behind === 0 && lane.ahead === 0;
-          // Only local branches reach here now. A local branch cannot go stale
-          // -- staleness is a property of what we last learned from the
-          // network -- so the unknown/stale states went with the upstream chip.
+          // Only what we learned over the network can go stale. A trunk lane is
+          // a local branch, so it is always known-good.
+          const freshness = upstream
+            ? remoteFreshness(lastFetchedAt, now)
+            : { state: "fresh" as const };
           const chipBody = (
             <>
-              <span className="chip-kind">Base</span>
+              <span className="chip-kind">{upstream ? "Remote" : "Base"}</span>
               <GitBranch size={12} aria-hidden />
               <span className="chip-ref">{lane.refName}</span>
               {/* Counts say what they would cost you, in the words the buttons
@@ -654,7 +656,11 @@ export function HistoryTimeline({
                   notation, which is the vocabulary this interface is supposed
                   not to have; "2 to update" matches "Update from main" and
                   needs nothing explained. */}
-              {inSync ? (
+              {freshness.state === "unknown" ? (
+                // Never reached, so "in sync" would be a guess presented as a
+                // fact. Say what is actually known.
+                <span className="chip-sync unknown">not checked</span>
+              ) : inSync ? (
                 <span className="chip-sync">in sync</span>
               ) : (
                 <>
@@ -666,12 +672,20 @@ export function HistoryTimeline({
                   ) : null}
                 </>
               )}
+              {freshness.state === "stale" ? (
+                <span className="chip-age">{freshness.age}</span>
+              ) : null}
             </>
           );
           return (
             <div
               className={`context-chip${lane.behind > 0 ? " behind" : ""}`}
               key={`chip-${lane.kind}-${lane.refName}`}
+              // The chips are a run of loose text to a screen reader otherwise:
+              // "Remote origin/main 2 to update Base main in sync" with no
+              // boundary between them and nothing saying what any of it is.
+              role="group"
+              aria-label={`${upstream ? "Remote" : "Base branch"} ${lane.refName}`}
             >
               {chipBody}
             </div>

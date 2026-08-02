@@ -13,12 +13,12 @@
   /* Used by .timeline-action and the selected timeline node. Was referenced
      without ever being defined, which made `border: 1px solid var(--border-strong)`
      invalid at computed-value time, so those borders silently didn't render. */
-  --border-strong: #c5cfdd;
+  --border-strong: #8695ab;
   --text: #111827;
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
   --accent-soft: rgba(59, 130, 246, 0.12);
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.12);
@@ -155,7 +155,7 @@
     --bg-active: #1a2744;
     --border: #252d3d;
     --border-subtle: #1e2533;
-    --border-strong: #39445c;
+    --border-strong: #5a6889;
     --text: #eef2f7;
     --text-secondary: #a8b3c4;
     --text-muted: #7a8699;
@@ -3181,6 +3181,24 @@ button.context-chip.pullable.busy,
 
 .chip-sync {
   color: var(--text-muted);
+}
+
+/* Never contacted. This is the third state PRODUCT.md requires wherever
+   freshness is shown -- known-good, known-stale, and unknown -- and it is
+   deliberately not styled as a warning: not knowing is not an error. */
+.chip-sync.unknown {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* How long ago the remote was last reached, shown only once that is stale.
+   No opacity: --text-muted is 4.83:1 on the light surface and 4.92:1 on the
+   dark one, so it clears 4.5:1 with almost no margin, and the 0.8 opacity this
+   used to carry dropped it to 3.29:1 / 3.61:1 -- a failure introduced purely
+   by dimming text that was already at the edge. */
+.chip-age {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .chip-update {

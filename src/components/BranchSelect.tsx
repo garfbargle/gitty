@@ -122,6 +122,7 @@ export function BranchSelect({
           className="branch-picker-list"
           id={listId}
           role="listbox"
+          aria-label="Switch branch"
           ref={listRef}
           onKeyDown={onListKeyDown}
         >
@@ -129,19 +130,28 @@ export function BranchSelect({
             const at = elsewhere.get(name);
             const isCurrent = name === branch;
             return (
-              <div className={`branch-option-row${isCurrent ? " current" : ""}`} key={name}>
+              <div
+                className={`branch-option-row${isCurrent ? " current" : ""}`}
+                key={name}
+                role="presentation"
+              >
                 <button
                   type="button"
                   role="option"
                   aria-selected={isCurrent}
                   className="branch-option"
-                  disabled={!!at}
+                  aria-disabled={!!at}
                   title={
                     at
                       ? `${name} is already open in ${at.path}. Git will not check the same branch out twice.`
                       : `Switch to ${name}`
                   }
                   onClick={() => {
+                    // aria-disabled, not `disabled`: the real attribute makes
+                    // .focus() a no-op, so arrow-keying onto a worktree-held
+                    // branch stalled and the user could not reach the branches
+                    // past it. The guard replaces what `disabled` enforced.
+                    if (at) return;
                     setOpen(false);
                     onBranchChange(name);
                   }}
