@@ -757,7 +757,7 @@ export function HistoryTimeline({
             {onOpenVersion ? (
               <button
                 type="button"
-                className="timeline-action"
+                className="timeline-action open-folder"
                 title={
                   inPreview
                     ? "Open this version's files in a folder"
@@ -766,7 +766,11 @@ export function HistoryTimeline({
                 onClick={onOpenVersion}
               >
                 <FolderOpen size={13} aria-hidden />
-                Open in folder
+                {/* The label is the first thing the narrow ladder spends: the
+                    icon still says what the button does, and the title carries
+                    the rest. Keeping 127px of label here cost the branch name
+                    its last characters. */}
+                <span className="action-label">Open in folder</span>
               </button>
             ) : null}
             {showPreviewActions ? (
