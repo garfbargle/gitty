@@ -2573,7 +2573,10 @@ button:focus-visible {
    rail; the present is not a commit, so a dot here claimed a position on the
    line this node does not hold. The word "Now" carries the node instead, and
    state is told by its colour and the line beneath it. */
-.node-now {
+/* .node-hash.node-now, not .node-now: the element carries both classes, they
+   would tie on specificity, and .node-hash is declared later so it would win
+   the mono face and 11px back. */
+.node-hash.node-now {
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-md);
