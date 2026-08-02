@@ -876,13 +876,24 @@ fn validate_tag_name(name: &str) -> Result<String, String> {
     Ok(name)
 }
 
+/// Tag name -> the commit it ultimately points at.
+///
+/// `%(objectname)` is the *tag object's* hash for an annotated tag, and the
+/// commit's hash for a lightweight one. The remote side reads `ls-remote`,
+/// which reports both `refs/tags/x` and the peeled `refs/tags/x^{}` and keeps
+/// the peeled commit. Comparing one against the other therefore never matched
+/// for an annotated tag, and every one of them was reported as unpushed for
+/// ever: in one repository, 72 of 244 tags, all of them present on the remote.
+///
+/// `%(*objectname)` is the peeled commit and is empty for a lightweight tag, so
+/// preferring it and falling back gives the same thing on both sides.
 fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
     let Ok(output) = git(
         repo_path,
         &[
             "for-each-ref",
             "refs/tags",
-            "--format=%(refname:short)\x1f%(objectname)",
+            "--format=%(refname:short)\x1f%(objectname)\x1f%(*objectname)",
         ],
     ) else {
         return HashMap::new();
@@ -893,7 +904,9 @@ fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
         .filter_map(|line| {
             let mut parts = line.split('\x1f');
             let name = parts.next()?.to_string();
-            let hash = parts.next()?.to_string();
+            let object = parts.next()?.to_string();
+            let peeled = parts.next().unwrap_or("").to_string();
+            let hash = if peeled.is_empty() { object } else { peeled };
             if name.is_empty() || hash.is_empty() {
                 return None;
             }
@@ -5831,6 +5844,42 @@ locked under review
         );
 
         let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// An annotated tag's own object hash is not the commit it points at, and
+    /// the remote side reports the peeled commit. Comparing the two marked every
+    /// annotated tag as unpushed for ever -- 72 of 244 in one real repository,
+    /// every one of them already on the remote.
+    #[test]
+    fn a_pushed_annotated_tag_is_not_reported_as_unpushed() {
+        let repo = scratch_repo("tags");
+        let remote = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-tag-remote-{}.git", std::process::id()));
+        let _ = fs::remove_dir_all(&remote);
+        fs::create_dir_all(&remote).expect("remote dir");
+        run_git(&remote, &["init", "-q", "--bare", "."]);
+        run_git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+
+        // One of each kind: the lightweight tag always compared equal, so the
+        // bug was invisible in a repository that only used those.
+        run_git(&repo, &["tag", "light-1"]);
+        run_git(&repo, &["tag", "-a", "annotated-1", "-m", "a release"]);
+        run_git(&repo, &["push", "-q", "origin", "main", "--tags"]);
+
+        let unpushed = unpushed_tags(&repo);
+        assert!(
+            unpushed.is_empty(),
+            "both tags are on the remote, but these were reported unpushed: {unpushed:?}"
+        );
+
+        // And a tag that genuinely has not been pushed is still caught.
+        run_git(&repo, &["tag", "-a", "annotated-2", "-m", "not pushed"]);
+        assert_eq!(unpushed_tags(&repo), vec!["annotated-2".to_string()]);
+
+        let _ = fs::remove_dir_all(&remote);
         let _ = fs::remove_dir_all(&repo);
     }
 
