@@ -658,6 +658,12 @@ function App() {
   const focusFingerprintByPathRef = useRef(new Map<string, string>());
   const snapshotGenerationRef = useRef(0);
   const changesRefreshRequestRef = useRef(0);
+  /// Guards the commit preview the same way the others guard their reads.
+  /// inspectCommit sets the viewed commit, then awaits its files and diff; with
+  /// nothing to compare against, an inspection still in flight when you press
+  /// "Back to now" landed afterwards and put the commit's files and diff back
+  /// on screen. Bumped on return-to-now so those late writes are dropped.
+  const commitInspectRef = useRef(0);
   const FOCUS_REFRESH_DEBOUNCE_MS = 400;
   const FOCUS_REFRESH_MIN_INTERVAL_MS = 2000;
   const summaryCacheRef = useRef<SummaryCache>(emptySummaryCache());
@@ -1429,11 +1435,14 @@ function App() {
   }
 
   async function inspectCommit(commit: CommitEntry, path = selectedPath) {
+    const generation = ++commitInspectRef.current;
+    const current = () => generation === commitInspectRef.current;
+
     setViewingCommit(commit);
     const files = await run(() =>
       invoke<FileChange[]>("commit_files_command", { path, commit: commit.hash }),
     );
-    if (files === null) return;
+    if (files === null || !current()) return;
 
     setCommitFiles(files);
     if (files.length === 0) {
@@ -1441,29 +1450,39 @@ function App() {
       const result = await run(() =>
         invoke<string>("commit_diff", { path, commit: commit.hash }),
       );
-      if (result !== null) setDiff(result || "This commit has no patch output.");
+      if (result !== null && current()) setDiff(result || "This commit has no patch output.");
       return;
     }
 
-    await inspectCommitFile(files[0], commit, path);
+    await inspectCommitFile(files[0], commit, path, generation);
   }
 
   async function inspectCommitFile(
     file: FileChange,
     commit: CommitEntry = viewingCommit!,
     path = selectedPath,
+    /// Passed through from inspectCommit so a diff that arrives after the user
+    /// has left the preview is discarded rather than drawn over the working
+    /// tree. Callers that start here take the current generation.
+    generation = commitInspectRef.current,
   ) {
     setFocus({ kind: "file", file, section: "commit" });
     const result = await run(() =>
       invoke<string>("file_diff", { path, filePath: file.path, commit: commit.hash }),
     );
-    if (result !== null) setDiff(result || "This file has no patch in this commit.");
+    if (result !== null && generation === commitInspectRef.current) {
+      setDiff(result || "This file has no patch in this commit.");
+    }
   }
 
   async function selectWorkingTree(options?: {
     snapshot?: RepoSnapshot | null;
     refresh?: boolean;
   }) {
+    // Any commit inspection still in flight belongs to the view we are leaving.
+    // Without this its files and diff arrive after the clear and put the commit
+    // back on screen, which reads as "Back to now" spinning and doing nothing.
+    commitInspectRef.current += 1;
     setViewingCommit(null);
     setCommitFiles([]);
     setFocus(null);
@@ -1770,7 +1789,21 @@ function App() {
   // no detached HEAD, no stash, nothing to undo. Your checkout is untouched.
   async function openCommitInFolder(commit?: CommitEntry) {
     const target = commit ?? viewingCommit;
-    if (!target || !selectedPath) return;
+    if (!selectedPath) return;
+
+    // No commit in view, so this is simply "show me this repository on disk".
+    // The action used to appear only while previewing a commit, which meant the
+    // one thing every repository can always do was hidden except in a mode you
+    // had to enter first.
+    if (!target) {
+      try {
+        await openPath(selectedPath);
+      } catch (err) {
+        setError(String(err));
+      }
+      return;
+    }
+
     const dir = await run(() =>
       invoke<string>("open_commit_worktree", { path: selectedPath, commit: target.hash }),
     );

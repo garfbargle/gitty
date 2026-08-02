@@ -513,6 +513,7 @@ export function HistoryTimeline({
   const showActions =
     (canUpdateFromMain && !!onUpdateFromMain) ||
     (canMergeIntoMain && !!onMergeIntoMain) ||
+    !!onOpenVersion ||
     showPreviewActions;
 
   function renderContextChips() {
@@ -691,11 +692,20 @@ export function HistoryTimeline({
                 Merge into main
               </button>
             ) : null}
-            {showPreviewActions && onOpenVersion ? (
+            {/* Not gated on the preview. Opening the repository on disk is
+                something every repository can always do, and hiding it except
+                while previewing a commit meant you had to enter a mode to
+                reach it. In the preview it opens that version's files; at the
+                present it opens the folder you are working in. */}
+            {onOpenVersion ? (
               <button
                 type="button"
                 className="timeline-action"
-                title="Open this version's files in a folder"
+                title={
+                  inPreview
+                    ? "Open this version's files in a folder"
+                    : "Open this repository's folder"
+                }
                 onClick={onOpenVersion}
               >
                 <FolderOpen size={13} aria-hidden />
