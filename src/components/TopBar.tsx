@@ -15,6 +15,7 @@ import type {
   RepoEntry,
   WorktreeEntry,
 } from "../types";
+import { folderName } from "../lib/git";
 import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
@@ -200,7 +201,7 @@ export function TopBar({
               return (
                 <option key={name} value={name}>
                   {elsewhere
-                    ? `${name}  →  open ${elsewhere.split("/").filter(Boolean).pop()}`
+                    ? `${name}  →  open ${folderName(elsewhere)}`
                     : name}
                 </option>
               );

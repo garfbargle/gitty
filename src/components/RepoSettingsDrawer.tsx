@@ -12,7 +12,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import type { LinkedFolder, RemoteEntry } from "../types";
+import type { LinkedFolder, RemoteEntry, WorktreeEntry } from "../types";
 import { SettingsModal } from "./SettingsModal";
 import { RepoIcon } from "./RepoIcon";
 import { WorktreeSection } from "./WorktreeSection";
@@ -48,6 +48,10 @@ type RepoSettingsDrawerProps = {
   onUpdateFolder: (prefix: string) => Promise<void>;
   /// Switch Gitty to another checkout of the same repository.
   onOpenWorktree?: (path: string) => void;
+  /// Owned by App so this panel and the context row cannot disagree.
+  worktrees: WorktreeEntry[];
+  onWorktreesChanged: () => void;
+  onConfirmRemove: (worktree: WorktreeEntry) => void;
   backupAvailable: boolean;
   backupOnPush: boolean;
   hasBackupRemote: boolean;
@@ -634,6 +638,9 @@ export function RepoSettingsDrawer({
   onRemoveRepo,
   onUpdateFolder,
   onOpenWorktree,
+  worktrees,
+  onWorktreesChanged,
+  onConfirmRemove,
   backupAvailable,
   backupOnPush,
   hasBackupRemote,
@@ -883,7 +890,14 @@ export function RepoSettingsDrawer({
       />
 
       {open ? (
-        <WorktreeSection repoPath={repoPath} disabled={disabled} onOpenWorktree={onOpenWorktree} />
+        <WorktreeSection
+          repoPath={repoPath}
+          disabled={disabled}
+          worktrees={worktrees}
+          onWorktreesChanged={onWorktreesChanged}
+          onOpenWorktree={onOpenWorktree}
+          onConfirmRemove={onConfirmRemove}
+        />
       ) : null}
     </SettingsModal>
   );

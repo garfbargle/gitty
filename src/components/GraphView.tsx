@@ -4,6 +4,7 @@ import { buildGraphRows } from "../lib/graph";
 import {
   authorInitials,
   branchRefs,
+  folderName,
   formatRelativeTime,
   tagName,
   tagRefs,
@@ -13,6 +14,10 @@ import { TagBadge } from "./TagBadge";
 
 /// Horizontal distance between lanes, and the vertical rhythm of one row. Both
 /// feed the SVG geometry, so the strands and the dots cannot drift apart.
+///
+/// ROW_H is also published to CSS as --graph-row-h below. The row must be
+/// exactly this tall: the SVG is drawn at a fixed height, and a row that grows
+/// past it tears the lanes away from the content they belong to.
 const LANE_W = 20;
 const ROW_H = 44;
 
@@ -161,7 +166,7 @@ export function GraphView({
                       title={`${entry.branch ?? "detached"} is checked out in ${entry.path}`}
                     >
                       <SquareArrowOutUpRight size={11} aria-hidden />
-                      {entry.path.split("/").filter(Boolean).pop()}
+                      {folderName(entry.path)}
                     </span>
                   ))}
                   {tags.map((name) => (

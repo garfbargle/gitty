@@ -284,3 +284,14 @@ export function remoteFreshness(
   if (age < REMOTE_FRESH_MS) return { state: "fresh" };
   return { state: "stale", age: formatRelativeTime(new Date(lastFetchedAt).toISOString(), now) };
 }
+
+/// The last segment of a path: the folder's own name.
+///
+/// Splits on both separators. A Windows path contains no forward slash, so a
+/// POSIX-only split returns the whole string and the caller renders a full
+/// path where it expected a name — the same mistake `shortenPath` above was
+/// fixed for.
+export function folderName(path: string): string {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? path;
+}

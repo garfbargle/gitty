@@ -74,6 +74,7 @@ import {
 import { SHORTCUT } from "./lib/platform";
 import { sortRepos } from "./lib/repoSort";
 import { GraphView } from "./components/GraphView";
+import { RemoveWorktreeConfirmDialog } from "./components/RemoveWorktreeConfirmDialog";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -365,6 +366,12 @@ function App() {
   /// open in another folder can't be checked out here, so we offer to open that
   /// folder instead) and the graph's "open elsewhere" marker.
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
+  /// Pending folder removal, held here so the confirmation is App's and the
+  /// settings panel stays presentational.
+  const [worktreeToRemove, setWorktreeToRemove] = useState<WorktreeEntry | null>(null);
+  const [removingWorktree, setRemovingWorktree] = useState(false);
+  /// Bumped whenever something mutates the checkout list.
+  const [worktreeRefresh, setWorktreeRefresh] = useState(0);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
   const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
@@ -407,7 +414,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, snapshot?.branch]);
+  }, [selectedPath, snapshot?.branch, worktreeRefresh]);
 
   useEffect(() => {
     if (!selectedPath || repoActions.length === 0) {
@@ -3707,6 +3714,9 @@ function App() {
             repoName={snapshot.repo.name}
             repoPath={snapshot.repo.path}
             remotes={snapshot.remotes}
+            worktrees={worktrees}
+            onWorktreesChanged={() => setWorktreeRefresh((n) => n + 1)}
+            onConfirmRemove={(entry) => setWorktreeToRemove(entry)}
             onOpenWorktree={(worktreePath) => {
               // Another checkout of the same repository is, to Gitty, just
               // another repo path: add it if it isn't saved yet, then select it.
@@ -3727,6 +3737,31 @@ function App() {
           />
         </>
       ) : null}
+
+      <RemoveWorktreeConfirmDialog
+        worktree={worktreeToRemove}
+        loading={removingWorktree}
+        onCancel={() => setWorktreeToRemove(null)}
+        onConfirm={() => {
+          const target = worktreeToRemove;
+          if (!target) return;
+          setRemovingWorktree(true);
+          void (async () => {
+            const result = await run(() =>
+              invoke<ActionResult>("remove_worktree", {
+                path: selectedPath,
+                worktree: target.path,
+              }),
+            );
+            setRemovingWorktree(false);
+            setWorktreeToRemove(null);
+            if (result) {
+              setMessage(result.message);
+              setWorktreeRefresh((n) => n + 1);
+            }
+          })();
+        }}
+      />
 
       <AppSettingsDrawer
         open={settingsOpen}

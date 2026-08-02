@@ -6,6 +6,7 @@ import { buildCommitTagMenuItems } from "../lib/commitTags";
 import {
   formatDate,
   formatRelativeTime,
+  folderName,
   relativeTimeRefreshMs,
   remoteFreshness,
   tagName,
@@ -13,12 +14,6 @@ import {
 } from "../lib/git";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
-
-/// A checkout's folder name. Paths are too long for a chip and the name is
-/// what tells one checkout from another.
-function folderName(path: string) {
-  return path.split("/").filter(Boolean).pop() ?? path;
-}
 
 const SCROLL_END_THRESHOLD = 24;
 const SCROLLBAR_HIDE_DELAY_MS = 800;

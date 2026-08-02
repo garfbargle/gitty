@@ -6539,11 +6539,6 @@ button.context-chip.pullable:disabled {
   color: var(--text);
 }
 
-.graph-tags {
-  display: inline-flex;
-  gap: var(--space-1);
-}
-
 .graph-author {
   color: var(--text-muted);
   font-size: var(--text-2xs);

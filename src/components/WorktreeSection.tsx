@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FolderOpen, Loader2, Lock, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { ActionResult, WorktreeEntry } from "../types";
@@ -8,45 +8,43 @@ import { revealInFinder } from "../lib/finder";
 type WorktreeSectionProps = {
   repoPath: string;
   disabled?: boolean;
+  /// Owned by App so the chip row and this panel cannot disagree. Adding a
+  /// worktree here used to leave the row showing a stale count until something
+  /// unrelated happened to refresh it.
+  worktrees: WorktreeEntry[];
+  /// Re-read the list after this panel mutates it.
+  onWorktreesChanged: () => void;
   /// Switch Gitty to another checkout of the same repository.
   onOpenWorktree?: (path: string) => void;
+  /// Confirm removing a checkout before its folder is deleted.
+  onConfirmRemove: (worktree: WorktreeEntry) => void;
 };
 
 /// Managing the repository's other checkouts.
 ///
-/// Named "workspaces" rather than "worktrees" to hold the line on git
-/// vocabulary in SIMPLIFICATION_PLAN.md, with the git term in the helper text
-/// so anyone who came looking for it still finds it.
-export function WorktreeSection({ repoPath, disabled, onOpenWorktree }: WorktreeSectionProps) {
-  const [worktrees, setWorktrees] = useState<WorktreeEntry[] | null>(null);
+/// One word for the concept, everywhere: "folder". It was "Workspaces" here,
+/// "Folder" in the context row and "open in" in the branch switcher, which is
+/// three names for one thing across three surfaces. The git term stays in the
+/// helper text so anyone who came looking for "worktree" still finds it.
+export function WorktreeSection({
+  repoPath,
+  disabled,
+  worktrees,
+  onWorktreesChanged,
+  onOpenWorktree,
+  onConfirmRemove,
+}: WorktreeSectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ branch: "", directory: "", createBranch: false });
-
-  const load = useCallback(async () => {
-    if (!repoPath) return;
-    try {
-      const result = await invoke<WorktreeEntry[]>("list_worktrees", { path: repoPath });
-      // Gitty's own scratch checkouts are an implementation detail of merging
-      // and commit previews, not something the user made.
-      setWorktrees(result.filter((entry) => !entry.internal));
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }, [repoPath]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     try {
       await action();
-      await load();
+      onWorktreesChanged();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -55,14 +53,14 @@ export function WorktreeSection({ repoPath, disabled, onOpenWorktree }: Worktree
   }
 
   const controlsDisabled = disabled || busy !== null;
-  const others = worktrees?.filter((entry) => !entry.isCurrent) ?? [];
+  const others = worktrees.filter((entry) => !entry.isCurrent);
 
   return (
     <div className="settings-field">
       <div className="settings-field-head">
-        <label>Workspaces</label>
+        <label>Folders</label>
         <div className="settings-field-head-actions">
-          {worktrees && worktrees.some((entry) => entry.prunable) ? (
+          {worktrees.some((entry) => entry.prunable) ? (
             <button
               type="button"
               className="settings-inline-link"
@@ -84,7 +82,7 @@ export function WorktreeSection({ repoPath, disabled, onOpenWorktree }: Worktree
             }}
           >
             <Plus size={12} />
-            Add workspace
+            Add folder
           </button>
         </div>
       </div>
@@ -153,16 +151,14 @@ export function WorktreeSection({ repoPath, disabled, onOpenWorktree }: Worktree
         </div>
       ) : null}
 
-      {worktrees === null ? (
-        <p className="settings-hint">Loading…</p>
-      ) : others.length === 0 && !adding ? (
+      {others.length === 0 && !adding ? (
         <p className="settings-hint">
-          This repository has one folder. Add a workspace to work on another branch alongside it.
+          This repository has one folder. Add a folder to work on another branch alongside it.
         </p>
       ) : null}
 
       <ul className="worktree-list">
-        {worktrees?.map((entry) => (
+        {worktrees.map((entry) => (
           <li key={entry.path} className={`worktree-item${entry.isCurrent ? " current" : ""}`}>
             <div className="worktree-text">
               <span className="worktree-branch">
@@ -208,21 +204,10 @@ export function WorktreeSection({ repoPath, disabled, onOpenWorktree }: Worktree
                   type="button"
                   className="settings-inline-link danger"
                   disabled={controlsDisabled}
-                  title="Remove this workspace and delete its folder"
-                  onClick={() =>
-                    void run(`remove-${entry.path}`, () =>
-                      invoke<ActionResult>("remove_worktree", {
-                        path: repoPath,
-                        worktree: entry.path,
-                      }),
-                    )
-                  }
+                  title="Remove this folder"
+                  onClick={() => onConfirmRemove(entry)}
                 >
-                  {busy === `remove-${entry.path}` ? (
-                    <Loader2 size={12} className="spin" />
-                  ) : (
-                    <Trash2 size={12} />
-                  )}
+                  <Trash2 size={12} />
                 </button>
               ) : null}
             </div>
