@@ -72,6 +72,7 @@ import {
 } from "./lib/timelineNavigation";
 import { SHORTCUT } from "./lib/platform";
 import { sortRepos } from "./lib/repoSort";
+import { GraphView } from "./components/GraphView";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -347,6 +348,9 @@ function App() {
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
+  /// Preview of the two densities in docs/GRAPH_VISUAL_LANGUAGE.md: the
+  /// working-tree strip, or the full branch graph over `graphCommits`.
+  const [historyView, setHistoryView] = useState<"strip" | "graph">("strip");
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
@@ -3161,6 +3165,26 @@ function App() {
             />
 
             <div className="working-view">
+                {/* Preview control for the two densities. Not part of the
+                    upstream proposal yet; see docs/GRAPH_VISUAL_LANGUAGE.md. */}
+                <div className="history-view-bar">
+                  <div className="history-view-toggle" role="group" aria-label="History view">
+                    <button
+                      type="button"
+                      className={historyView === "strip" ? "active" : ""}
+                      onClick={() => setHistoryView("strip")}
+                    >
+                      Timeline
+                    </button>
+                    <button
+                      type="button"
+                      className={historyView === "graph" ? "active" : ""}
+                      onClick={() => setHistoryView("graph")}
+                    >
+                      Graph
+                    </button>
+                  </div>
+                </div>
                 <HistoryTimeline
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
@@ -3312,6 +3336,14 @@ function App() {
                       </button>
                     </aside>
                   </div>
+                ) : historyView === "graph" ? (
+                  <GraphView
+                    commits={displaySnapshot.graphCommits ?? []}
+                    headHash={displaySnapshot.commits[0]?.hash}
+                    selectedHash={selectedCommit?.hash}
+                    unpushedTags={unpushedTagSet}
+                    onSelect={(commit) => void inspectCommit(commit)}
+                  />
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (

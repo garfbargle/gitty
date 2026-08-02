@@ -3,7 +3,6 @@ import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
 import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
-import { laneColor } from "../lib/graph";
 import { formatDate, formatRelativeTime, relativeTimeRefreshMs, tagName, tagRefs } from "../lib/git";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
@@ -340,10 +339,14 @@ export function HistoryTimeline({
 
   function renderCommitNode(
     commit: CommitEntry,
-    index: number,
     isAhead: boolean,
   ) {
-    const color = laneColor(index % 6);
+    // The strip draws exactly one branch, so there is no branch identity for
+    // colour to carry here and it stays free for state. (`laneColor` still does
+    // identity work in GraphView, where several branches share the screen.)
+    // Previously this was `laneColor(index % 6)` — the commit's position in the
+    // array, so colour varied per commit while encoding nothing.
+    const color = isAhead ? "var(--accent)" : "var(--border-strong)";
     const active = commit.hash === selectedHash && !workingTreeActive;
     const tags = tagRefs(commit.refs).map(tagName);
     const tagSummary = tags.length > 0 ? ` · ${tags.join(", ")}` : "";
@@ -599,7 +602,7 @@ export function HistoryTimeline({
             </div>
           ) : null}
           <div className="timeline-track">
-          {ancestry.map((commit, index) => renderCommitNode(commit, index, false))}
+          {ancestry.map((commit) => renderCommitNode(commit, false))}
 
           <button
             className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""} ${ahead.length > 0 ? "ahead-bridge" : ""}`}
@@ -619,9 +622,7 @@ export function HistoryTimeline({
             </span>
           </button>
 
-          {ahead.map((commit, index) =>
-            renderCommitNode(commit, ancestry.length + index, true),
-          )}
+          {ahead.map((commit) => renderCommitNode(commit, true))}
 
           {integrationPreview ? (
             <div
