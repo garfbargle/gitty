@@ -2886,6 +2886,10 @@ button:focus-visible {
   flex: 0 0 auto;
   gap: 8px;
   margin-left: auto;
+  /* Sits above the chips, so if the row is ever over-subscribed between two
+     ladder steps the actions stay legible rather than being painted on. */
+  position: relative;
+  z-index: 1;
 }
 
 .timeline-action {
@@ -2972,11 +2976,15 @@ button:focus-visible {
   display: inline-flex;
   font-size: var(--text-xs);
   gap: 5px;
-  /* Gives ground before the row wraps. flex-shrink was already 1, but a flex
-     item will not go below its own content without this, so a 41-character
-     branch name held the chip at 367px and pushed the actions onto a second
-     line. */
-  min-width: 0;
+  /* Gives ground before the row wraps, but never below what it can actually
+     draw. `min-width: 0` let flexbox allocate a chip less width than its own
+     non-shrinkable parts need: the caption and the count do not shrink, so the
+     content simply spilled past the chip's edge and painted over the chip
+     beside it -- 12px past, overlapping its neighbour by 4, while the row as a
+     whole reported no overflow at all. min-content is the honest floor; when
+     the row truly runs out of room the ladder below removes whole chips, which
+     is a decision rather than an accident. */
+  min-width: min-content;
   padding: 3px 5px 3px 9px;
 }
 
