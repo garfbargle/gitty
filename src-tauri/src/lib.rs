@@ -5549,6 +5549,196 @@ locked under review
     fn empty_output_yields_no_entries() {
         assert!(parse_worktree_list("", Path::new("/repo")).is_empty());
     }
+
+    // The commands below touch the filesystem: they create folders and delete
+    // them. Each runs against its own throwaway repository so they can run in
+    // parallel and leave nothing behind.
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git should run");
+        assert!(
+            status.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    /// A repository with one commit and a spare `feature` branch.
+    fn scratch_repo(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("gitty-wt-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp dir");
+        run_git(&root, &["init", "-q", "-b", "main", "."]);
+        run_git(&root, &["config", "user.email", "test@example.com"]);
+        run_git(&root, &["config", "user.name", "Test"]);
+        fs::write(root.join("a.txt"), "one").expect("write");
+        run_git(&root, &["add", "-A"]);
+        run_git(&root, &["commit", "-qm", "first"]);
+        run_git(&root, &["branch", "feature"]);
+        root
+    }
+
+    fn paths_of(repo: &Path) -> Vec<String> {
+        list_worktrees(repo.to_string_lossy().to_string())
+            .expect("list")
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    #[test]
+    fn adds_a_worktree_for_an_existing_branch() {
+        let repo = scratch_repo("add");
+        let target = repo.parent().unwrap().join(format!(
+            "gitty-wt-added-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&target);
+
+        let created = add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add_worktree should succeed");
+
+        assert!(Path::new(&created).exists(), "folder should be on disk");
+        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert_eq!(entries.len(), 2);
+        let added = entries
+            .iter()
+            .find(|entry| !entry.is_main)
+            .expect("linked worktree present");
+        assert_eq!(added.branch.as_deref(), Some("feature"));
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn refuses_a_folder_that_already_exists() {
+        let repo = scratch_repo("exists");
+        // The repository's own folder is the simplest thing that already exists.
+        let err = add_worktree(
+            repo.to_string_lossy().to_string(),
+            repo.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect_err("should refuse an existing folder");
+        assert!(err.contains("already exists"), "got: {err}");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn removing_the_main_checkout_is_refused() {
+        let repo = scratch_repo("main-guard");
+        let err = remove_worktree(
+            repo.to_string_lossy().to_string(),
+            repo.to_string_lossy().to_string(),
+            Some(false),
+        )
+        .expect_err("the main checkout must not be removable here");
+        assert!(err.contains("main folder"), "got: {err}");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn removes_a_linked_worktree() {
+        let repo = scratch_repo("remove");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-remove-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add");
+        assert_eq!(paths_of(&repo).len(), 2);
+
+        remove_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            Some(false),
+        )
+        .expect("remove_worktree should succeed");
+
+        assert!(!target.exists(), "folder should be gone from disk");
+        assert_eq!(paths_of(&repo).len(), 1, "registration should be gone too");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn prune_forgets_a_folder_deleted_behind_gits_back() {
+        let repo = scratch_repo("prune");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-prune-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add");
+
+        // Delete the folder the way a user would, leaving git's registration behind.
+        fs::remove_dir_all(&target).expect("remove folder");
+        let before = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert_eq!(before.len(), 2, "git still remembers it");
+        assert!(
+            before.iter().any(|entry| entry.prunable),
+            "the stale entry should be flagged prunable"
+        );
+
+        prune_worktrees(repo.to_string_lossy().to_string()).expect("prune");
+        assert_eq!(paths_of(&repo).len(), 1, "stale registration dropped");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn creates_a_new_branch_when_asked() {
+        let repo = scratch_repo("newbranch");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-new-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "brand-new".to_string(),
+            Some(true),
+        )
+        .expect("add with create_branch");
+
+        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.branch.as_deref() == Some("brand-new")),
+            "the new branch should be checked out in the new folder"
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
 }
 
 #[cfg(test)]
