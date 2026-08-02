@@ -185,6 +185,11 @@ const SNAPSHOT_SUPERSEDED = "__superseded__";
 const SIDEBAR_VISIBLE_KEY = "gitty.sidebarVisible";
 const REPO_SORT_KEY = "gitty.repoSort";
 const STATUS_MESSAGE_DISMISS_MS = 4_000;
+// Fetch shortly after returning to Gitty, then periodically while it stays
+// open. This keeps remote status useful without turning every render or local
+// refresh into a network request.
+const AUTO_FETCH_MIN_INTERVAL_MS = 15_000;
+const AUTO_FETCH_INTERVAL_MS = 5 * 60_000;
 
 const repoSortModes = new Set<RepoSortMode>([
   "manual",
@@ -297,6 +302,7 @@ function App() {
   const [nvidiaApiKeyConfigured, setNvidiaApiKeyConfigured] = useState(false);
   const [nvidiaApiKeyPreview, setNvidiaApiKeyPreview] = useState<string | null>(null);
   const [autoSummarizeEnabled, setAutoSummarizeEnabled] = useState(true);
+  const [fetchOnRefresh, setFetchOnRefresh] = useState(false);
   const [backupRemoteName, setBackupRemoteName] = useState("backup");
   const [backupUrlTemplate, setBackupUrlTemplate] = useState("");
   const [savedBackupRemoteName, setSavedBackupRemoteName] = useState("backup");
@@ -318,9 +324,11 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [pushPhases, setPushPhases] = useState<Record<string, PushPhase>>({});
   const [backupPhases, setBackupPhases] = useState<Record<string, PushPhase>>({});
+  const [fetchingPaths, setFetchingPaths] = useState<Record<string, boolean>>({});
   const [gitActivityByPath, setGitActivityByPath] = useState<Record<string, RepoGitActivity>>({});
   const pushPhase = pushPhases[selectedPath] ?? "idle";
   const backupPhase = backupPhases[selectedPath] ?? "idle";
+  const fetching = fetchingPaths[selectedPath] ?? false;
   const [pullPhase, setPullPhase] = useState<PullPhase>("idle");
   // Set when a normal push is rejected as non-fast-forward, so the push button
   // surfaces the force-push affordance even without a fresh fetch.
@@ -649,6 +657,9 @@ function App() {
   }>({ past: [], future: [] });
   const pushLockRef = useRef(new Set<string>());
   const backupLockRef = useRef(new Set<string>());
+  const fetchLockRef = useRef(new Set<string>());
+  const lastAutoFetchAtRef = useRef(new Map<string, number>());
+  const autoFetchRepoRef = useRef<(path: string) => void>(() => {});
   const pushDoneTimerRef = useRef(new Map<string, number>());
   const backupDoneTimerRef = useRef(new Map<string, number>());
   const pullLockRef = useRef(false);
@@ -817,6 +828,7 @@ function App() {
       setNvidiaApiKeyConfigured(false);
       setNvidiaApiKeyPreview(null);
       setAutoSummarizeEnabled(true);
+      setFetchOnRefresh(false);
     }
   }
 
@@ -824,6 +836,7 @@ function App() {
     setNvidiaApiKeyConfigured(settings.nvidiaApiKeyConfigured);
     setNvidiaApiKeyPreview(settings.nvidiaApiKeyPreview ?? null);
     setAutoSummarizeEnabled(settings.autoSummarizeEnabled);
+    setFetchOnRefresh(settings.fetchOnRefresh);
     setPushOnCommit(settings.pushOnCommit);
     const savedName = settings.backupRemoteName?.trim() || "backup";
     const savedTemplate = settings.backupUrlTemplate ?? "";
@@ -840,6 +853,17 @@ function App() {
       applyAppSettings(settings);
     } catch (err) {
       setError(String(err));
+    }
+  }
+
+  async function setFetchOnRefreshSetting(enabled: boolean) {
+    setFetchOnRefresh(enabled);
+    try {
+      const settings = await invoke<AppSettingsView>("set_fetch_on_refresh", { enabled });
+      applyAppSettings(settings);
+    } catch (err) {
+      setError(String(err));
+      void loadAppSettings();
     }
   }
 
@@ -1275,6 +1299,7 @@ function App() {
         if (!focused || !active) return;
         const { selectedPath } = focusRefreshContextRef.current;
         if (!selectedPath) return;
+        void autoFetchRepoRef.current(selectedPath);
         if (Date.now() - lastFocusRefreshAtRef.current < FOCUS_REFRESH_MIN_INTERVAL_MS) {
           return;
         }
@@ -2507,16 +2532,66 @@ function App() {
     }
   }
 
-  async function fetchRepo() {
-    const result = await run(() => invoke<ActionResult>("fetch_repo", { path: selectedPath }));
-    if (result) {
-      setMessage(result.message);
-      await refreshRepo();
-      // Fetch is the network moment we piggyback the linked-folder check on.
-      await refreshBehindFolders(selectedPath);
-      await refreshPublishableFolders(selectedPath);
+  async function fetchRepo(path = selectedPath, { silent = false }: { silent?: boolean } = {}): Promise<boolean> {
+    if (!path || fetchLockRef.current.has(path)) return false;
+
+    fetchLockRef.current.add(path);
+    setFetchingPaths((current) => ({ ...current, [path]: true }));
+    if (!silent) {
+      setLoading(true);
+      setError("");
+      setMessage("");
+    }
+
+    try {
+      const result = await invoke<ActionResult>("fetch_repo", { path });
+      if (!silent) setMessage(result.message);
+      await refreshRepoQuiet(path);
+      // Fetch is the network moment we piggyback the linked-folder checks on.
+      // Do not let a fetch that finishes after a repository switch overwrite the
+      // chips shown for the newly selected repository.
+      if (selectedPathRef.current === path) {
+        await refreshBehindFolders(path);
+        await refreshPublishableFolders(path);
+      }
+      return true;
+    } catch (err) {
+      // Automatic checks are advisory: offline work should stay quiet. An
+      // explicitly requested fetch still reports authentication/network errors.
+      if (!silent) setError(String(err));
+      return false;
+    } finally {
+      fetchLockRef.current.delete(path);
+      setFetchingPaths((current) => {
+        const { [path]: _finished, ...remaining } = current;
+        return remaining;
+      });
+      if (!silent) setLoading(false);
     }
   }
+
+  function autoFetchRepo(path: string) {
+    if (!path || document.visibilityState === "hidden") return;
+    const now = Date.now();
+    const lastFetch = lastAutoFetchAtRef.current.get(path) ?? 0;
+    if (now - lastFetch < AUTO_FETCH_MIN_INTERVAL_MS) return;
+    lastAutoFetchAtRef.current.set(path, now);
+    void fetchRepo(path, { silent: true });
+  }
+
+  autoFetchRepoRef.current = autoFetchRepo;
+
+  // A selected remote-backed repository gets one quiet check when opened and
+  // then a low-frequency update while Gitty stays in view. Returning focus also
+  // goes through `autoFetchRepoRef` above, so a merge made in GitHub is picked
+  // up promptly without needing to visit Repository Settings.
+  useEffect(() => {
+    const path = snapshot?.repo.path;
+    if (!path || path !== selectedPath || snapshot.remotes.length === 0) return;
+    autoFetchRepoRef.current(path);
+    const timer = window.setInterval(() => autoFetchRepoRef.current(path), AUTO_FETCH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [selectedPath, snapshot?.repo.path, snapshot?.remotes.length]);
 
   async function push(force: boolean, hard = false): Promise<boolean> {
     const path = selectedPath;
@@ -3149,6 +3224,7 @@ function App() {
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
               worktrees={worktrees}
               loading={loading}
+              fetching={fetching}
               pushPhase={pushPhase}
               pullPhase={pullPhase}
               ahead={displaySnapshot.ahead}
@@ -3181,7 +3257,7 @@ function App() {
                 void checkoutBranch(branch);
               }}
               viewingCommit={viewingCommit}
-              onRefresh={() => void refreshRepo()}
+              onRefresh={() => void (fetchOnRefresh ? fetchRepo() : refreshRepo())}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
@@ -3654,6 +3730,7 @@ function App() {
       <AppSettingsDrawer
         open={settingsOpen}
         autoSummarizeEnabled={autoSummarizeEnabled}
+        fetchOnRefresh={fetchOnRefresh}
         nvidiaApiKeyConfigured={nvidiaApiKeyConfigured}
         nvidiaApiKeyPreview={nvidiaApiKeyPreview}
         settingsNvidiaKey={settingsNvidiaKey}
@@ -3667,6 +3744,7 @@ function App() {
         backupSaveError={backupSaveError}
         onClose={() => setSettingsOpen(false)}
         onAutoSummarizeEnabledChange={(enabled) => void setAutoSummarizeEnabledSetting(enabled)}
+        onFetchOnRefreshChange={(enabled) => void setFetchOnRefreshSetting(enabled)}
         onSettingsNvidiaKeyChange={setSettingsNvidiaKey}
         onSaveNvidiaApiKey={() => void saveNvidiaApiKeyFromSettings()}
         onDeleteNvidiaApiKey={() => void deleteNvidiaApiKey()}

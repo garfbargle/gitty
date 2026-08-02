@@ -5130,6 +5130,14 @@ fn set_auto_summarize_enabled(app: AppHandle, enabled: bool) -> Result<settings:
 }
 
 #[tauri::command]
+fn set_fetch_on_refresh(app: AppHandle, enabled: bool) -> Result<settings::AppSettingsView, String> {
+    let mut current = settings::load_settings(&app)?;
+    current.fetch_on_refresh = enabled;
+    settings::save_settings(&app, &current)?;
+    settings::settings_view(&app)
+}
+
+#[tauri::command]
 fn set_push_on_commit(app: AppHandle, enabled: bool) -> Result<settings::AppSettingsView, String> {
     let mut current = settings::load_settings(&app)?;
     current.push_on_commit = enabled;
@@ -5436,6 +5444,7 @@ pub fn run() {
             set_remote,
             get_app_settings,
             set_auto_summarize_enabled,
+            set_fetch_on_refresh,
             set_push_on_commit,
             set_backup_profile,
             configure_backup_remote,

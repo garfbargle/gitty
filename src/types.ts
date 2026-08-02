@@ -175,6 +175,8 @@ export type ActionResult = {
 
 export type AppSettingsView = {
   autoSummarizeEnabled: boolean;
+  /** When enabled, the normal Refresh control first fetches the primary remote. */
+  fetchOnRefresh: boolean;
   pushOnCommit: boolean;
   nvidiaApiKeyConfigured: boolean;
   nvidiaApiKeyPreview?: string | null;

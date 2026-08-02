@@ -20,6 +20,40 @@ export type DiffFile = {
   stats?: { additions: number; deletions: number };
 };
 
+function parseDiffGitPaths(line: string): Pick<DiffFile, "oldPath" | "newPath"> {
+  const prefix = "diff --git ";
+  const paths = line.slice(prefix.length);
+  const tokens: string[] = [];
+  let position = 0;
+
+  while (position < paths.length && tokens.length < 2) {
+    while (paths[position] === " ") position += 1;
+    if (paths[position] === '"') {
+      let token = "";
+      position += 1;
+      while (position < paths.length && paths[position] !== '"') {
+        if (paths[position] === "\\" && position + 1 < paths.length) {
+          position += 1;
+        }
+        token += paths[position];
+        position += 1;
+      }
+      position += 1;
+      tokens.push(token);
+      continue;
+    }
+
+    const end = paths.indexOf(" ", position);
+    tokens.push(paths.slice(position, end === -1 ? undefined : end));
+    position = end === -1 ? paths.length : end + 1;
+  }
+
+  return {
+    oldPath: tokens[0] ?? "",
+    newPath: tokens[1] ?? "",
+  };
+}
+
 export function parseUnifiedDiff(raw: string): DiffFile[] {
   if (!raw.trim()) {
     return [];
@@ -45,9 +79,11 @@ export function parseUnifiedDiff(raw: string): DiffFile[] {
         finalizeStats(current);
         files.push(current);
       }
+      const paths = parseDiffGitPaths(rawLine);
       current = {
-        oldPath: "",
-        newPath: "",
+        // Binary-only diffs do not include ---/+++ lines, so retain the
+        // paths from their diff header for callers such as image previews.
+        ...paths,
         isNew: false,
         isDeleted: false,
         isBinary: false,

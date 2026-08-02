@@ -7,6 +7,7 @@ const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 type AppSettingsDrawerProps = {
   open: boolean;
   autoSummarizeEnabled: boolean;
+  fetchOnRefresh: boolean;
   nvidiaApiKeyConfigured: boolean;
   nvidiaApiKeyPreview?: string | null;
   settingsNvidiaKey: string;
@@ -20,6 +21,7 @@ type AppSettingsDrawerProps = {
   backupSaveError?: boolean;
   onClose: () => void;
   onAutoSummarizeEnabledChange: (enabled: boolean) => void;
+  onFetchOnRefreshChange: (enabled: boolean) => void;
   onSettingsNvidiaKeyChange: (value: string) => void;
   onSaveNvidiaApiKey: () => void;
   onDeleteNvidiaApiKey: () => void;
@@ -33,6 +35,7 @@ type AppSettingsDrawerProps = {
 export function AppSettingsDrawer({
   open,
   autoSummarizeEnabled,
+  fetchOnRefresh,
   nvidiaApiKeyConfigured,
   nvidiaApiKeyPreview,
   settingsNvidiaKey,
@@ -46,6 +49,7 @@ export function AppSettingsDrawer({
   backupSaveError = false,
   onClose,
   onAutoSummarizeEnabledChange,
+  onFetchOnRefreshChange,
   onSettingsNvidiaKeyChange,
   onSaveNvidiaApiKey,
   onDeleteNvidiaApiKey,
@@ -74,6 +78,20 @@ export function AppSettingsDrawer({
           className="settings-switch"
           checked={autoSummarizeEnabled}
           onChange={(event) => onAutoSummarizeEnabledChange(event.currentTarget.checked)}
+          disabled={disabled}
+        />
+      </label>
+
+      <label className="settings-row">
+        <span className="settings-row-copy">
+          <strong>Fetch with Refresh</strong>
+          <span>Check the primary remote before refreshing the repository view</span>
+        </span>
+        <input
+          type="checkbox"
+          className="settings-switch"
+          checked={fetchOnRefresh}
+          onChange={(event) => onFetchOnRefreshChange(event.currentTarget.checked)}
           disabled={disabled}
         />
       </label>
