@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeyboard } from "../lib/useMenuKeyboard";
 import { ArrowDownToLine, Loader2, Settings } from "lucide-react";
 import type { LinkedFolder } from "../types";
 
@@ -67,6 +68,8 @@ export function LinkedFolderUpdatesButton({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  useMenuKeyboard({ open, setOpen, rootRef, triggerSelector: ".linked-updates-main" });
 
   useEffect(() => {
     if (isBusy) setOpen(false);

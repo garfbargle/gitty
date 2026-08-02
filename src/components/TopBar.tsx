@@ -1,13 +1,13 @@
-import {
-  ChevronDown,
-  GitBranch,
-  Link2,
-  PanelLeft,
-  PanelLeftClose,
-  RefreshCw,
-  Settings,
-} from "lucide-react";
-import type { ActionExecutionState, CommitEntry, LinkedFolder, RepoAction, RepoEntry } from "../types";
+import { Link2, PanelLeft, PanelLeftClose, RefreshCw, Settings } from "lucide-react";
+import type {
+  ActionExecutionState,
+  CommitEntry,
+  LinkedFolder,
+  RepoAction,
+  RepoEntry,
+  WorktreeEntry,
+} from "../types";
+import { BranchSelect } from "./BranchSelect";
 import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
@@ -22,6 +22,9 @@ type TopBarProps = {
   selectedPath: string;
   branch: string;
   branches: string[];
+  /// Other checkouts of this repository, so the branch list can show which
+  /// branches are already open in another folder.
+  worktrees?: WorktreeEntry[];
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
   pushPhase?: PushPhase;
@@ -38,10 +41,14 @@ type TopBarProps = {
   disabled?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
+  /// Open another checkout of this repository, so a branch held by a worktree
+  /// offers a way there instead of only explaining why it can't be switched to.
+  onOpenWorktree?: (path: string) => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
+  onPushTags?: () => Promise<boolean>;
   backupSetupAvailable?: boolean;
   backupRemoteName?: string | null;
   backupPhase?: PushPhase;
@@ -76,6 +83,7 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
+  worktrees = [],
   viewingCommit,
   loading,
   pushPhase = "idle",
@@ -92,10 +100,12 @@ export function TopBar({
   disabled = false,
   onRepoChange,
   onBranchChange,
+  onOpenWorktree,
   onRefresh,
   onPush,
   onForcePush,
   onOverwrite,
+  onPushTags,
   backupSetupAvailable = false,
   backupRemoteName,
   backupPhase = "idle",
@@ -157,22 +167,18 @@ export function TopBar({
 
         <span className="breadcrumb-sep">›</span>
 
-        <div className="select-wrap">
-          <GitBranch size={14} className="branch-icon" />
-          <select
-            className="top-select branch-select-top"
-            value={branch}
-            disabled={repoSwitching || loading || fetching}
-            onChange={(event) => onBranchChange(event.currentTarget.value)}
-          >
-            {branches.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={14} className="select-chevron" />
-        </div>
+        {/* Not a <select>. A worktree is a branch *and* a place, and a native
+            option is one string with no room to say which half is which: it
+            read "dev/mcp-bridge  →  open gitty-mcp", two kinds of thing joined
+            by an arrow. The listbox draws the pairing. */}
+        <BranchSelect
+          branch={branch}
+          branches={branches}
+          worktrees={worktrees}
+          disabled={repoSwitching || loading || fetching}
+          onBranchChange={onBranchChange}
+          onOpenWorktree={onOpenWorktree}
+        />
 
         {inPreview && viewingCommit ? (
           <>
@@ -197,6 +203,7 @@ export function TopBar({
           type="button"
           className="ghost-btn"
           title={fetching ? "Fetching latest remote changes…" : "Refresh local repository status"}
+          aria-label="Refresh"
           disabled={loading || fetching || repoSwitching}
           onClick={onRefresh}
         >
@@ -227,6 +234,7 @@ export function TopBar({
             onPush={onPush}
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
+            onPushTags={onPushTags}
           />
         ) : null}
         {backupSetupAvailable && onSetupBackup && !repoSwitching ? (
@@ -271,7 +279,7 @@ export function TopBar({
           <button
             type="button"
             className="ghost-btn"
-            title="Repository settings"
+            title="Repository settings" aria-label="Repository settings"
             disabled={loading || fetching}
             onClick={onOpenRepoSettings}
           >

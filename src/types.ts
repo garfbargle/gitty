@@ -147,6 +147,10 @@ export type RepoSnapshot = {
   siblingTip?: SiblingTip | null;
   tags: TagEntry[];
   unpushedTags: string[];
+  /// Which commits on HEAD the remote does not have, newest first, so the
+  /// timeline can draw the push boundary rather than leaving the push button's
+  /// count as the only word on the subject.
+  unpushedCommits?: string[];
   /// The current branch exists locally but not on any remote, so pushing it
   /// would publish it — lights the push button even with no commits ahead.
   branchUnpublished?: boolean;
@@ -155,6 +159,9 @@ export type RepoSnapshot = {
   backupPushPending?: boolean;
   /** This repository copies successful primary pushes to its backup remotes. */
   backupOnPush?: boolean;
+  /** When the remote was last actually reached, epoch ms, or absent if never.
+   *  Everything shown about the remote is only as true as this. */
+  lastFetchedAt?: number | null;
 };
 
 /// The most recently active branch other than the current one and the trunk,
@@ -285,4 +292,20 @@ export type ConflictSides = {
   result: string;
   oursExists: boolean;
   theirsExists: boolean;
+};
+
+/// One checkout of a repository: the main clone plus every linked worktree.
+/// Lets a repository have several branches open at once in different folders.
+export type WorktreeEntry = {
+  path: string;
+  /// Short branch name, or null when the checkout is detached.
+  branch: string | null;
+  head: string;
+  isMain: boolean;
+  isCurrent: boolean;
+  detached: boolean;
+  locked: boolean;
+  prunable: boolean;
+  /// Gitty's own scratch checkout (merge or commit preview), not the user's.
+  internal: boolean;
 };

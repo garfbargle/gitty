@@ -13,12 +13,12 @@
   /* Used by .timeline-action and the selected timeline node. Was referenced
      without ever being defined, which made `border: 1px solid var(--border-strong)`
      invalid at computed-value time, so those borders silently didn't render. */
-  --border-strong: #c5cfdd;
+  --border-strong: #8695ab;
   --text: #111827;
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
   --accent-soft: rgba(59, 130, 246, 0.12);
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.12);
@@ -46,16 +46,30 @@
     Menlo, Consolas, "Liberation Mono", monospace;
 
   /* ---- Type scale -------------------------------------------------------
-     Steps are ~1.15-1.2x apart so adjacent levels read as different levels
-     rather than as a rendering inconsistency. Hierarchy is meant to come from
-     these, which lets weight go back to being an accent rather than the only
-     available signal. Nothing sits below 11px. */
-  --text-2xs: 11px;   /* keycaps, badge counts, dense metadata */
+     Steps are >=1.14x apart so adjacent levels read as different levels rather
+     than as a rendering inconsistency. Hierarchy is meant to come from these,
+     which lets weight go back to being an accent rather than the only
+     available signal.
+
+     The scale did not deliver that. It ran 11/12/13/15/18/22, whose bottom
+     three steps are 1.091 and 1.083 apart -- below the threshold where a size
+     change reads as intentional, and precisely the range the dense chrome
+     lives in. Three of the six steps were therefore indistinguishable, so rank
+     fell to weight, which is how 91% of every weight declaration in this file
+     ended up at 600 or heavier. The comment above claimed 1.15-1.2x; the
+     values never matched it.
+
+     Now 10/12/14/16/19/23: 1.20, 1.167, 1.143, 1.1875, 1.21. --text-xs is
+     unchanged, so the most-used token keeps its value; the floor drops to 10
+     to give captions a step of their own (29 declarations were already
+     hardcoding 10px past the old 11px floor), and the body default rises one
+     pixel, which the dense views can afford. */
+  --text-2xs: 10px;   /* captions, keycaps, badge counts */
   --text-xs: 12px;    /* secondary metadata: paths, timestamps, hashes */
-  --text-sm: 13px;    /* body default: file names, labels, most controls */
-  --text-md: 15px;    /* emphasis within a panel: repo name, section titles */
-  --text-lg: 18px;    /* panel headings */
-  --text-xl: 22px;    /* empty-state and dialog titles */
+  --text-sm: 14px;    /* body default: file names, labels, most controls */
+  --text-md: 16px;    /* emphasis within a panel: repo name, section titles */
+  --text-lg: 19px;    /* panel headings */
+  --text-xl: 23px;    /* empty-state and dialog titles */
 
   --leading-tight: 1.25;
   --leading-normal: 1.45;
@@ -101,12 +115,29 @@
   --timeline-dot-size: 12px;
   --timeline-rail-thickness: 2px;
   --timeline-rail-gap: 8px;
+  /* The stack above the dot, so the rail can be placed from the same numbers
+     the node is built from rather than a constant that silently stops matching
+     when the stack changes. hash 16 + one 2px gap puts the dot's centre at 24. */
+  --timeline-hash-h: 16px;
+  --timeline-stack-gap: 2px;
   --timeline-node-width: 132px;
-  /* A fixed height, not a floor: every node reserves the same space including
-     the tag band, so nodes never differ in height and the selection frame is
+  /* One height for every node, so they never differ and the selection frame is
      the same size on all of them. Sized to the real stack — dot 12, hash 16,
-     time 14, subject 17, three 2px gaps, then a 22px tag band. */
-  --timeline-node-height: 88px;
+     time 14, two 2px gaps.
+
+     Content is deliberately top-aligned rather than centred: the dot has to sit
+     at a constant y or the rail bends where a node's content is taller. That is
+     also why the tag band is no longer part of this number. Reserving it on
+     every node left 23px of dead air under the time on each untagged commit,
+     which is what made the row read as pinned to the top of the band. It is
+     added back only when something in view is actually tagged.
+
+     The commit message used to take a fourth line here. At 132px it clipped to
+     a few characters, often mid-word, which is not enough to recognise a commit
+     by; the inspector carries it in full instead. The working-tree node still
+     uses .node-subject for its state word ("no changes"), which is short and
+     always fits — it has no time line, so it sits inside this height. */
+  --timeline-node-height: 47px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -124,7 +155,7 @@
     --bg-active: #1a2744;
     --border: #252d3d;
     --border-subtle: #1e2533;
-    --border-strong: #39445c;
+    --border-strong: #5a6889;
     --text: #eef2f7;
     --text-secondary: #a8b3c4;
     --text-muted: #7a8699;
@@ -193,7 +224,15 @@ select:focus,
 textarea:focus,
 button:focus-visible {
   border-color: var(--accent);
-  outline: 2px solid var(--accent-soft);
+  /* Solid accent, offset. The ring used --accent-soft, which composites to
+     1.15:1 against a light surface and 1.23:1 against a dark one -- against a
+     3:1 requirement, so the visible half of this indicator was the
+     `border-color` line. That half is a no-op on anything declaring `border:
+     0`, which includes the push menu's items and the Timeline/Branches switch:
+     those controls had no focus indicator at all. The offset keeps the ring
+     clear of the control's own border rather than sitting on top of it. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Shell ── */
@@ -244,7 +283,7 @@ button:focus-visible {
 }
 
 .repo-loading-state p {
-  font-size: 14px;
+  font-size: var(--text-sm);
   margin: 0;
 }
 
@@ -368,7 +407,7 @@ button:focus-visible {
 
 .repo-sort-control option {
   background: var(--bg-panel);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .repo-list {
@@ -458,10 +497,10 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   gap: 8px;
   max-width: min(260px, 28vw);
@@ -508,7 +547,7 @@ button:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
   gap: 10px;
@@ -540,7 +579,7 @@ button:focus-visible {
 .repo-picker-item small {
   color: var(--text-muted);
   display: block;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -576,7 +615,7 @@ button:focus-visible {
 .repo-item small {
   color: var(--text-muted);
   display: block;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -592,7 +631,7 @@ button:focus-visible {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   gap: 6px;
   letter-spacing: 0.04em;
@@ -623,7 +662,7 @@ button:focus-visible {
 
 .repo-discovered-empty {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   margin: 0;
   padding: 4px 10px 8px;
@@ -823,7 +862,7 @@ button:focus-visible {
 }
 
 .ghost-btn.sm {
-  font-size: 12px;
+  font-size: var(--text-xs);
   min-height: 28px;
   padding: 0 8px;
 }
@@ -848,7 +887,7 @@ button:focus-visible {
 
 .view-mode-toggle:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* IDE / editor split-button chooser */
@@ -888,7 +927,7 @@ button:focus-visible {
 .ide-picker-caret:hover,
 .ide-picker.open .ide-picker-caret {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .ide-picker-main:disabled {
@@ -915,10 +954,10 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
-  font-size: 13px;
+  font-size: var(--text-sm);
   gap: 9px;
   padding: 7px 10px;
   text-align: left;
@@ -960,11 +999,11 @@ button:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -1000,7 +1039,7 @@ button:focus-visible {
 .repo-runner-caret:hover,
 .repo-runner.open .repo-runner-caret {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .repo-runner-main:disabled {
@@ -1033,7 +1072,7 @@ button:focus-visible {
 
 .repo-runner-group-title {
   color: var(--text-muted, #888);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   padding: 4px 8px;
@@ -1045,10 +1084,10 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   gap: 8px;
   padding: 6px 8px;
   text-align: left;
@@ -1088,7 +1127,7 @@ button:focus-visible {
 
 .repo-runner-item-cmd {
   color: var(--text-muted, #888);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: var(--font-mono, monospace);
   white-space: nowrap;
   overflow: hidden;
@@ -1111,19 +1150,19 @@ button:focus-visible {
   background: var(--bg-input, #1e1e1e);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
+  color: var(--text);
+  font-size: var(--text-xs);
   padding: 4px 8px;
   width: 100%;
 }
 
 .repo-runner-custom-btn {
-  background: var(--primary, #3b82f6);
+  background: var(--accent);
   border: 0;
   border-radius: var(--radius-sm);
   color: #fff;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 4px 10px;
 }
@@ -1159,7 +1198,7 @@ button:focus-visible {
   align-items: center;
   display: flex;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 500;
 }
 
@@ -1177,13 +1216,13 @@ button:focus-visible {
   background: #334155;
   border-radius: 4px;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 2px 6px;
 }
 
 .action-runner-timer {
   color: #64748b;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-family: monospace;
 }
 
@@ -1201,7 +1240,7 @@ button:focus-visible {
   color: #cbd5e1;
   cursor: pointer;
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--text-xs);
   gap: 4px;
   padding: 4px 8px;
 }
@@ -1233,7 +1272,7 @@ button:focus-visible {
   overflow-y: auto;
   padding: 10px 14px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.5;
   background: #020617;
   color: #e2e8f0;
@@ -1259,34 +1298,7 @@ button:focus-visible {
   user-select: none;
 }
 
-/* Segmented Changes | History switch */
-.view-mode-switch {
-  align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 2px;
-  height: 32px;
-  padding: 2px;
-}
 
-.view-mode-segment {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 500;
-  gap: 5px;
-  height: 100%;
-  padding: 0 9px;
-  white-space: nowrap;
-}
 
 .view-mode-segment:hover:not(:disabled):not(.active) {
   background: var(--bg-hover);
@@ -1299,13 +1311,7 @@ button:focus-visible {
   color: var(--accent);
 }
 
-.view-mode-switch:has(.view-mode-segment:disabled) {
-  opacity: 0.5;
-}
 
-.view-mode-segment:disabled {
-  cursor: default;
-}
 
 .sidebar-restore-btn {
   align-items: center;
@@ -1327,7 +1333,7 @@ button:focus-visible {
 
 .sidebar-restore-btn:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* ── Top bar ── */
@@ -1350,29 +1356,22 @@ button:focus-visible {
   min-width: 0;
 }
 
-.select-wrap {
-  align-items: center;
-  display: inline-flex;
-  position: relative;
+/* The right side holds refresh and Push and never gives ground: it is the
+   primary action of the screen, and it was being squeezed below its own
+   content — 142px of room for 169px of buttons — so Push ran past the window
+   edge with its badge left behind. Everything to its left truncates instead,
+   which is what breadcrumbs and a preview banner are for. */
+.top-bar-right {
+  flex: 0 0 auto;
 }
 
-.top-select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  font-weight: 600;
-  min-height: 32px;
-  padding: 0 22px 0 8px;
+.top-bar-left {
+  flex: 0 1 auto;
 }
 
-.repo-select {
-  font-size: 14px;
-}
 
-.branch-select-top {
-  color: var(--accent);
-  font-size: 13px;
-}
+
+
 
 .select-chevron {
   color: var(--text-muted);
@@ -1388,17 +1387,9 @@ button:focus-visible {
 
 .breadcrumb-sep {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
-.working-badge {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-}
 
 .working-dot {
   background: var(--success);
@@ -1408,37 +1399,8 @@ button:focus-visible {
   width: 8px;
 }
 
-.working-badge em {
-  background: var(--success-soft);
-  border-radius: 999px;
-  color: var(--success);
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 700;
-  padding: 1px 6px;
-}
 
-.working-tree-picker {
-  position: relative;
-}
 
-.working-tree-trigger {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-  max-width: min(320px, 30vw);
-  min-height: 32px;
-  min-width: 0;
-  padding: 0 6px;
-  transition: background 0.15s ease;
-}
 
 .working-tree-trigger:hover,
 .working-tree-picker.open .working-tree-trigger {
@@ -1450,31 +1412,8 @@ button:focus-visible {
   color: var(--success);
 }
 
-.working-tree-trigger code {
-  background: var(--bg-hover);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
-.working-tree-trigger .trigger-subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.working-tree-trigger em {
-  background: var(--success-soft);
-  border-radius: 999px;
-  color: var(--success);
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 700;
-  padding: 1px 6px;
-}
 
 .picker-chevron {
   color: var(--text-muted);
@@ -1486,62 +1425,16 @@ button:focus-visible {
   transform: rotate(180deg);
 }
 
-.working-tree-menu {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  left: 0;
-  max-height: min(420px, 60vh);
-  overflow: hidden;
-  position: absolute;
-  top: calc(100% + 4px);
-  width: min(300px, calc(100vw - 32px));
-  z-index: 50;
-}
 
-.working-tree-commit-list {
-  max-height: min(360px, 52vh);
-  overflow: auto;
-}
 
-.working-tree-menu-divider {
-  background: var(--border);
-  height: 1px;
-  margin: 4px 0;
-}
 
-.working-tree-option {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  font-size: 12px;
-  gap: 12px;
-  justify-content: space-between;
-  min-height: 36px;
-  padding: 8px 12px;
-  text-align: left;
-  width: 100%;
-}
 
-.working-tree-option:hover {
-  background: var(--bg-hover);
-}
 
 .working-tree-option.active {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
-.working-tree-option .option-leading {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-}
 
 .working-tree-option.commit {
   align-items: start;
@@ -1550,258 +1443,43 @@ button:focus-visible {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.working-tree-option .option-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
 
-.working-tree-option .option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.working-tree-option code {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  padding-top: 1px;
-}
 
-.working-tree-option .option-meta {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: nowrap;
-}
 
-.working-tree-menu-section {
-  padding: 8px 10px 4px;
-}
 
-.working-tree-menu-heading {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  font-size: 11px;
-  gap: 8px;
-  justify-content: space-between;
-}
 
-.working-tree-resume-btn {
-  background: transparent;
-  border: 0;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0;
-}
 
-.working-tree-resume-btn:hover {
-  text-decoration: underline;
-}
 
 .working-tree-option.commit.ahead code,
 .working-tree-option.commit.ahead .option-label {
   color: var(--accent);
 }
 
-/* Current-branch divergence line at the top of the picker. */
-.wt-branch-current {
-  align-items: center;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  display: flex;
-  font-size: 11px;
-  gap: 6px;
-  padding: 8px 12px;
-}
 
-.wt-branch-current-name {
-  color: var(--text);
-  font-weight: 600;
-}
 
-.wt-branch-vs {
-  margin-left: auto;
-  opacity: 0.8;
-}
 
-/* "Other branches" rows: a wide switch button plus a merge affordance. */
-.wt-branches {
-  display: flex;
-  flex-direction: column;
-}
 
-.wt-branch-row {
-  align-items: stretch;
-  display: flex;
-  gap: 2px;
-}
 
-.wt-branch-main {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex: 1;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 8px;
-  text-align: left;
-}
 
-.wt-branch-main:hover {
-  background: var(--bg-hover);
-}
 
-.wt-branch-main svg {
-  color: var(--text-muted);
-  flex: 0 0 auto;
-}
 
-.wt-branch-main svg.wt-branch-remote {
-  opacity: 0.6;
-}
 
-.wt-branch-name {
-  flex: 1;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.wt-branch-counts {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  gap: 6px;
-}
 
-.wt-ahead {
-  color: var(--success);
-}
 
-.wt-behind {
-  color: var(--warning);
-}
 
-.wt-even {
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  opacity: 0.7;
-}
 
-.wt-branch-merge {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  flex: 0 0 auto;
-  padding: 0 8px;
-}
 
-.wt-branch-merge:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
 
-.option-ahead-badge {
-  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
-  border-radius: 999px;
-  color: var(--accent);
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  margin-left: 6px;
-  padding: 1px 6px;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
 
-.resume-branch-btn {
-  align-items: center;
-  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: var(--radius-sm);
-  color: var(--accent);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-  padding: 6px 10px;
-}
 
-.resume-branch-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-soft) 90%, transparent);
-}
 
-.resume-branch-btn em {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-radius: 999px;
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 700;
-  min-width: 18px;
-  padding: 1px 6px;
-  text-align: center;
-}
 
-.commit-crumb {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 8px;
-  max-width: min(320px, 30vw);
-  min-width: 0;
-}
 
-.commit-crumb code {
-  background: var(--bg-hover);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
-.commit-crumb span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .preview-banner,
-.time-travel-banner {
-  align-items: center;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  font-size: 12px;
-  gap: 6px;
-  max-width: min(420px, 40vw);
-  min-height: 32px;
-  padding: 0 10px;
-}
 
 .preview-banner {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -1810,61 +1488,24 @@ button:focus-visible {
 }
 
 .preview-label,
-.time-travel-label {
-  color: var(--text-muted);
-  font-weight: 600;
-}
 
 .preview-meta {
   color: var(--text-muted);
+  /* Already clipped itself, but a flex item will not go below its content
+     without this, so the clipping never got the chance to happen. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .preview-banner code,
-.time-travel-banner code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-}
 
-.time-travel-banner {
-  background: color-mix(in srgb, var(--warning, #d97706) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 28%, transparent);
-}
 
-.time-travel-label {
-  color: color-mix(in srgb, var(--warning, #d97706) 85%, var(--text));
-}
 
-.return-to-latest-btn {
-  align-items: center;
-  background: color-mix(in srgb, var(--warning, #d97706) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 35%, transparent);
-  border-radius: var(--radius-sm);
-  color: color-mix(in srgb, var(--warning, #d97706) 90%, var(--text));
-  display: inline-flex;
-  font-size: 13px;
-  font-weight: 700;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 14px;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
 
-.return-to-latest-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning, #d97706) 22%, transparent);
-}
 
-.return-to-latest-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
 
-.visit-commit-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 
 .top-bar.time-travel-mode {
   border-bottom-color: color-mix(in srgb, var(--warning, #d97706) 30%, var(--border));
@@ -1877,7 +1518,7 @@ button:focus-visible {
   border-radius: var(--radius-sm);
   color: var(--accent);
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 6px;
   min-height: 32px;
@@ -1903,7 +1544,7 @@ button:focus-visible {
   color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   gap: 6px;
   min-height: 32px;
@@ -1942,7 +1583,7 @@ button:focus-visible {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   color: #fff;
   display: inline-flex;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 800;
   justify-content: center;
   left: -7px;
@@ -1979,7 +1620,7 @@ button:focus-visible {
   border: 1px solid color-mix(in srgb, var(--success) 70%, #000);
   color: #052e1a;
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   gap: 6px;
   min-height: 32px;
@@ -2143,7 +1784,7 @@ button:focus-visible {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   margin-left: 2px;
   padding: 2px 5px;
@@ -2182,7 +1823,7 @@ button:focus-visible {
   border-radius: 5px;
   color: var(--text);
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 8px;
   min-height: 34px;
@@ -2193,7 +1834,7 @@ button:focus-visible {
 
 .push-btn-menu-item small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   margin-left: auto;
 }
@@ -2217,36 +1858,24 @@ button:focus-visible {
   position: relative;
 }
 
-.pull-btn-badge {
-  align-items: center;
-  background: var(--accent);
-  border: 2px solid var(--bg-panel);
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  color: #fff;
-  display: inline-flex;
-  font-size: 10px;
-  font-weight: 800;
-  justify-content: center;
-  left: -7px;
-  line-height: 1;
-  min-width: 18px;
-  padding: 2px 5px;
-  pointer-events: none;
-  position: absolute;
-  top: -7px;
-  z-index: 2;
-}
 
+/* Tonal, not filled.
+   Pull and Push sat side by side as two fully saturated fills of equal weight,
+   eight pixels apart, so the bar had no primary action at all -- and up to four
+   such fills could coexist here. Push keeps the fill: it owns the keybinding
+   and it is the irreversible one. Pull states the same thing in the accent's
+   quiet register, which still reads as the accent action without competing.
+   Its count moves inline (see .pull-btn-main), which is what retires the
+   floating badge. */
 .pull-btn-main,
 .pull-btn-chevron {
   align-items: center;
-  background: var(--accent);
-  border: 1px solid var(--accent-hover);
-  color: #fff;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 34%, transparent);
+  color: var(--accent);
   display: inline-flex;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
   gap: 6px;
   min-height: 32px;
   transition: filter 0.15s ease, transform 0.15s ease;
@@ -2350,7 +1979,7 @@ button:focus-visible {
   border-radius: 5px;
   color: var(--text);
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 8px;
   min-height: 34px;
@@ -2361,7 +1990,7 @@ button:focus-visible {
 
 .pull-btn-menu-item small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 500;
   margin-left: auto;
 }
@@ -2388,7 +2017,7 @@ button:focus-visible {
   border: 0;
   border-radius: 5px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   min-height: 32px;
   padding: 0 10px;
@@ -2425,37 +2054,42 @@ button:focus-visible {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   padding: 14px 16px 6px;
+  /* The query target for the context row's sacrifice ladder. Named, so the
+     rules below cannot accidentally resolve against some future container
+     that happens to sit closer. */
+  container: timeline / inline-size;
 }
 
 .timeline-scroller {
+  /* Recessed, so the band that scrolls reads as data in a well and everything
+     on the panel surface around it reads as chrome. Without this the commit
+     row, the chips and the pinned Now node were all the same plane and nothing
+     said which parts move. */
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior: none;
   scroll-behavior: auto;
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
   touch-action: pan-x;
+  /* No reserved scrollbar gutter.
+
+     With one, this band was 84px tall around 69px of content: 13px of it was
+     space held for a scrollbar that is transparent unless you are mid-scroll,
+     plus 2px of border. The pinned Now panel could not cover that strip --
+     the gutter sits outside the content box -- so the well showed through
+     underneath it, and the commits read as pinned to the top of the band
+     rather than centred in it. Both symptoms, one cause.
+
+     The tradeoff, stated plainly: the thin thumb that used to appear while
+     scrolling is gone with it. Position is still legible from the commits
+     themselves, and the strip is drag, wheel and arrow-key navigable. */
+  scrollbar-width: none;
 }
 
 .timeline-scroller::-webkit-scrollbar {
-  height: 6px;
-}
-
-.timeline-scroller::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.timeline-scroller::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-}
-
-.timeline-scroller.is-scrolling {
-  scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
-}
-
-.timeline-scroller.is-scrolling::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  display: none;
 }
 
 .timeline-track {
@@ -2464,7 +2098,12 @@ button:focus-visible {
   flex-wrap: nowrap;
   gap: 0;
   min-width: min-content;
+  /* Air above and below the row so it sits in the band rather than against its
+     edges. Every node is now exactly its content, so this is the only vertical
+     space in the strip and it is symmetric. */
+  padding-block: var(--space-2);
 }
+
 
 /* Every node is the same width so the dots fall on an even rhythm. Previously
    `min-width: 100px` combined with a 120px subject cap meant nodes were 100px
@@ -2478,7 +2117,7 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: var(--space-0-5);
+  gap: var(--timeline-stack-gap);
   /* Fixed, so a tag, a long subject, or the absence of a timestamp can never
      make one node taller than another. Selection draws into this same box on
      every node. */
@@ -2507,7 +2146,14 @@ button:focus-visible {
   height: var(--timeline-rail-thickness);
   left: calc(50% + var(--timeline-dot-size) / 2 + var(--timeline-rail-gap));
   position: absolute;
-  top: calc((var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2);
+  /* The dot is no longer the first child: the hash sits above it and the time
+     below, so the rail runs through the middle of the row. Derived from the
+     stack rather than hard-coded, so moving a line does not leave the rail
+     4px off the dots the way a constant did before. */
+  top: calc(
+    var(--timeline-hash-h) + var(--timeline-stack-gap) +
+      (var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2
+  );
   width: calc(100% - var(--timeline-dot-size) - var(--timeline-rail-gap) * 2);
 }
 
@@ -2523,31 +2169,39 @@ button:focus-visible {
   opacity: 0.55;
 }
 
-/* Selection is one neutral treatment on every node, with no hue of its own.
-   It used to be accent blue on commits and success green on the working tree,
-   which meant the colour of "this is selected" changed depending on what was
-   selected. Worse, green was already spoken for on that node: a dirty working
-   tree turns its dot and label green to mean "you have uncommitted work", so
-   selecting it painted a second, unrelated green on top of the first.
+/* Selection is a cursor under the node, not a box around it.
 
-   Keeping selection neutral leaves the colour channel free to carry state —
-   green for uncommitted work, accent for ahead of upstream — while "where am
-   I" is communicated by surface and border, which nothing else uses. */
+   It used to be a filled rectangle covering the whole node, which competed
+   with the node's own content and, on the working tree, stacked a second
+   meaning onto a green that already meant "uncommitted work". A cursor marks
+   position without claiming the space. */
 .timeline-node.active::before {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  background: var(--accent);
+  border-radius: 999px;
+  /* Below the node, in the row's bottom padding. The node is now exactly its
+     content, so a cursor inset from the bottom edge sat on top of the
+     timestamp instead of under it. */
+  bottom: auto;
+  top: calc(100% + 3px);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
   content: "";
-  /* Sits inside the node. It used to extend 5px above and 3px below, but
-     .timeline-scroller is overflow-y: hidden, so both edges were clipped and
-     the highlight read as a cut-off rectangle. */
-  inset: 0;
+  height: 3px;
+  left: 50%;
   position: absolute;
-  z-index: 0;
+  transform: translateX(-50%);
+  width: 26px;
+  z-index: 1;
 }
 
+/* The present keeps its own colour when it is the selected thing. */
+.timeline-node.working-tree.active::before {
+  background: var(--success);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--success) 55%, transparent);
+}
+
+/* Selected goes a step brighter again, so the cursor is not the only signal. */
 .timeline-node.active .node-hash {
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
 .node-dot {
@@ -2558,14 +2212,25 @@ button:focus-visible {
   z-index: 1;
 }
 
-.node-dot.working {
-  background: transparent;
-  border: 2px dashed var(--success);
-  box-shadow: none;
+/* The working tree has no dot. Every other dot marks a commit sitting on the
+   rail; the present is not a commit, so a dot here claimed a position on the
+   line this node does not hold. The word "Now" carries the node instead, and
+   state is told by its colour and the line beneath it. */
+/* Scoped to the working-tree node, and naming both classes the element
+   carries. A bare .node-now ties with .node-hash, which is declared later and
+   would take back the mono face; and the node is always "active" when you are
+   at the present, so .timeline-node.active .node-hash would take back the
+   colour. This has to outrank both. */
+.timeline-node.working-tree .node-hash.node-now {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  letter-spacing: -0.01em;
 }
 
-.timeline-node.working-tree.active .node-dot.working {
-  background: var(--success-soft);
+.timeline-node.working-tree.has-changes .node-now {
+  color: var(--success);
 }
 
 /* The present carries the most important message on the strip ("3 unsaved
@@ -2574,27 +2239,123 @@ button:focus-visible {
 .timeline-node.working-tree {
   width: auto;
   min-width: var(--timeline-node-width);
-  padding-inline: var(--space-4);
+  padding-inline: var(--space-5);
+  /* "Now" and its state line were 2px apart in the same colour, so they read as
+     one wrapped phrase rather than a label and the thing it reports. */
+  gap: var(--space-1-5);
+}
+
+/* The state line is what "Now" is telling you, so it sits a step back from the
+   label. It takes the accent colour when there is work waiting, which is the
+   rule immediately below and the reason this stays a separate line at all. */
+/* :not(.has-changes) says what this means -- a quiet line when there is
+   nothing to report -- and also outranks .timeline-node.active .node-subject,
+   which ties on specificity and is declared later. The working tree is always
+   active while you are at the present, so without that this never applied. */
+.timeline-node.working-tree:not(.has-changes) .node-subject {
+  color: var(--text-muted);
+  font-weight: var(--weight-normal);
 }
 
 /* The present, always within reach: the working-tree node sticks to the right
    edge of the scroller so it stays one click away even at ancient history. The
    left fade lets older commits tuck softly underneath it. */
+/* The present is chrome, not a commit you scroll to. It sits on the panel
+   surface rather than in the recessed band, with a hairline separating it from
+   the history running underneath, so it reads as a fixed edge of the strip
+   instead of a card floating in the stream. */
 .timeline-node.working-tree.pinned {
   background: var(--bg-panel);
-  box-shadow: -18px 0 16px -12px var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 16px -14px rgb(0 0 0 / 0.5);
   position: sticky;
   right: 0;
   z-index: 3;
+  /* Chrome spans the band; a commit node does not. .timeline-track adds
+     padding-block so commits sit in the band rather than against its edges, but
+     this node is the band's fixed right edge, so that padding showed as a strip
+     of the darker scroller above and below it -- a 9px seam that read as a gap
+     under "Now". Cancelling the padding for this one item and re-adding it as
+     the node's own keeps the content box at --timeline-node-height (border-box),
+     so Now still lines up with every commit while its surface runs edge to edge. */
+  margin-block: calc(var(--space-2) * -1);
+  height: calc(var(--timeline-node-height) + var(--space-2) * 2);
+  padding-block: var(--space-2);
 }
 
-/* Uncommitted work waiting — solid dot and a brighter label make the node read
-   as a live call-to-action rather than just an anchor. */
-.timeline-node.working-tree.has-changes .node-dot.working {
-  background: var(--success);
-  border-style: solid;
+/* Not pushed yet.
+
+   The push button reported a count and nothing on the timeline said which
+   commits it meant, so "16 to push" was a number you had to trust. Colour is
+   free to carry state in a strip that only ever draws one branch, which is
+   exactly what the plan reserves it for here. */
+/* The dot's colour is set inline, walking the lane palette in the order the
+   commits were made, so the unpushed run has a visible shape. Nothing here
+   sets background or box-shadow: that would be a second source for the same
+   thing, and the inline value would win anyway. */
+
+/* The line itself, drawn once on the oldest unpushed commit rather than
+   between every pair.
+
+   A real element, not a pseudo: ::after is the rail between nodes and ::before
+   is the selection cursor, so both are already spoken for on this element.
+   Sits in the row's padding so it spans the full band without the node having
+   to grow to hold it. */
+.push-boundary-line {
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 70%, transparent) 0 3px,
+    transparent 3px 6px
+  );
+  bottom: calc(var(--space-2) * -1);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  width: 1px;
+  z-index: 2;
 }
 
+/* The band the label lives in: from the boundary to the end of the track, so
+   there is something on screen for the label to stick to long after the commit
+   it marks has scrolled off the left. Zero height — it exists only to give the
+   sticky label a containing block wide enough to survive. */
+.push-boundary-flag {
+  height: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 3;
+}
+
+/* A pill, not bare text. Sticking bare text to the left edge dropped it on top
+   of whichever commit hash happened to be scrolled there, and two strings in
+   the same place read as a rendering fault rather than a label. Its own
+   background makes it chrome floating over the strip, which is what it is. */
+.push-boundary-label {
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  left: var(--space-2);
+  letter-spacing: var(--tracking-caps);
+  line-height: 1;
+  padding: 3px var(--space-2);
+  /* Sticks to the left edge of the scroller while any of the unpushed run is
+     in view, then travels with the boundary once it comes back on screen. */
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  white-space: nowrap;
+}
+
+/* Uncommitted work waiting — a brighter label makes the node read as a live
+   call-to-action rather than just an anchor. */
 .timeline-node.working-tree.has-changes .node-subject {
   color: var(--success);
   font-weight: 600;
@@ -2604,11 +2365,20 @@ button:focus-visible {
    way: the hash was the boldest thing on the strip at weight 600 while the
    subject, the only part that says what actually happened, was unemphasised.
    Rank now comes from size, so weight is free to stay quiet. */
+/* The hash is what you scan for; the time is context under it. They used to be
+   the same size, weight and colour, separated only by typeface, so the pair
+   read as one grey block and neither led. The hash takes the brighter step and
+   medium weight, the time stays muted — rank by colour and weight rather than
+   by size, since 11px is already the floor and neither can shrink. */
+/* The hash names the commit; the time only qualifies it. They sat at the same
+   size and were told apart by colour alone, which is the pattern this scale
+   exists to end -- so the hash takes the step above and colour is left to say
+   which of them is the brighter. */
 .node-hash {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-normal);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   position: relative;
   z-index: 1;
 }
@@ -2660,18 +2430,124 @@ button:focus-visible {
    Its dashed ahead-bridge variant now lives on that rule as a modifier. */
 
 /* ── Branch-context chips (above the timeline) ── */
+/* Two rows, because they are two different kinds of thing.
+
+   This was one line carrying a view switch, four state readouts and the row's
+   verbs -- chrome, data, chrome -- all at the same 8px gap, so nothing said
+   which was which and they competed for the same pixels. At a 1280px window
+   the line wanted 1270px in a 1028px bar, and the rationing rules that
+   followed were all attempts to decide which of three unrelated things should
+   lose. Giving the data its own line ends the competition rather than
+   arbitrating it: the chips get the full width, and the row above is purely
+   controls.
+
+   Done with `order` and a full-width basis rather than by moving markup, so
+   the wrap point is a layout decision in one place instead of a nesting
+   structure that has to be kept in sync. */
 .timeline-context-bar {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 2px 10px;
+  padding: 0 2px 8px;
+  row-gap: 6px;
+}
+
+/* Row one: the controls. */
+.timeline-context-bar > .view-switch {
+  order: 1;
+}
+
+.timeline-context-bar > .timeline-actions {
+  order: 2;
+}
+
+/* Row two: the state. flex-basis: 100% is what forces the break, and with the
+   whole width to itself the group has room it never had on the shared line. */
+.timeline-context-bar > .context-chips {
+  order: 3;
+  flex-basis: 100%;
+}
+
+/* Never wraps and never shrinks, for the same reason the top bar's right half
+   does not: these are the actions, and a row that pushes them onto a second
+   line moves the whole timeline down every time you select a commit. The chips
+   beside them truncate instead — a branch name is the thing that can afford to
+   lose characters. */
+/* The chips as one shrinkable, self-clipping group. This is what lets the
+   chips have an honest min-content floor without the row's buttons paying for
+   it: the group takes the pressure, and anything that will not fit is clipped
+   inside it rather than painted over a neighbour or pushed off the edge. */
+.context-chips {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* On their own row, the inert chips stop dressing as controls.
+
+   Every chip wore a pill border and a raised fill, which is the vocabulary the
+   actions beside them used, so a status readout and a button were the same
+   object to the eye -- the whole reason a label could turn out to run a pull.
+   Now the readouts are set on the row's own surface with only their caption to
+   separate them, and a border means what it says everywhere else in the app:
+   you can click this. */
+.context-chips .context-chip:not(button) {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+/* Re-asserted, because `:not(button)` carries a type selector and so outranks
+   the plain `.context-chip.here` / `.context-chip.behind` rules further down
+   this file. Flattening the chips silently took the accent border off "where
+   you are" and the warning tint off a chip that is behind -- the two states in
+   this row that colour exists to carry -- and left them identical to an
+   in-sync chip. Specificity, not order, decides this, so matching the flatten
+   rule's shape is what makes these win. */
+/* Padding follows the border. Dropping the left padding is right for a chip
+   set flat on the row -- it lets the caption line up with everything else --
+   but these two keep a visible edge, and at padding-left: 0 the caption sat
+   1px off it while the buttons beside them had 10px. A border with nothing
+   behind it reads as a mistake rather than as a state. */
+.context-chips .context-chip.here:not(button) {
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  padding-left: 9px;
+}
+
+.context-chips .context-chip.behind:not(button) {
+  background: var(--warning-soft);
+  border-color: color-mix(in oklch, var(--warning) 35%, transparent);
+  padding-left: 9px;
+}
+
+/* Which leaves the two that really are controls looking like controls. */
+.context-chips button.context-chip {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+/* Specific enough to beat the per-variant hover rules further down rather than
+   tie with them. At equal specificity the winner was whichever block happened
+   to be later, so the two button chips in this row hovered to different
+   colours and moving either block would have swapped them. */
+.context-chips button.context-chip:hover:not(:disabled):not(.busy) {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .timeline-actions {
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 8px;
   margin-left: auto;
+  /* Sits above the chips, so if the row is ever over-subscribed between two
+     ladder steps the actions stay legible rather than being painted on. */
+  position: relative;
+  z-index: 1;
 }
 
 .timeline-action {
@@ -2756,9 +2632,95 @@ button:focus-visible {
   border-radius: 999px;
   color: var(--text-secondary);
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--text-xs);
   gap: 5px;
+  /* Gives ground before the row wraps, but never below what it can actually
+     draw. `min-width: 0` let flexbox allocate a chip less width than its own
+     non-shrinkable parts need: the caption and the count do not shrink, so the
+     content simply spilled past the chip's edge and painted over the chip
+     beside it -- 12px past, overlapping its neighbour by 4, while the row as a
+     whole reported no overflow at all. min-content is the honest floor; when
+     the row truly runs out of room the ladder below removes whole chips, which
+     is a decision rather than an accident. */
+  min-width: min-content;
   padding: 3px 5px 3px 9px;
+}
+
+/* The part that actually gives: the kind label and any count stay whole, the
+   ref name truncates -- but never to nothing.
+
+   With only `min-width: 0` the name was the sole thing in either bar that
+   could shrink, so it absorbed every pixel the window lost. At 1060px "main"
+   was already cut in half; at 900px the chip you stand on had no name at all;
+   at 640px it was a 29px empty pill still holding its border and caption. The
+   floor keeps enough characters to recognise a branch, and the ladder below
+   spends the cheaper things first. */
+.context-chip .chip-ref {
+  min-width: 7ch;
+  /* And a ceiling, which is what was missing. Chips size to min-content so
+     they can never be allocated less than they draw -- but min-content of a
+     name is the whole name, so a single 28-character branch took as much of
+     the row as it liked and the group clipped some other chip in half to pay
+     for it. Names are the one thing here with no bound on their length, so
+     they are the one thing that needs one. Past ~18 characters a branch is
+     recognised by its start, not read in full. */
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The sacrifice ladder.
+
+   Queried against the container rather than the viewport, because the sidebar
+   collapses independently: the same window is two different widths for this
+   row depending on it, and a viewport media query gets that wrong in both
+   directions. Order is cheapest first -- decoration, then redundancy, then
+   context -- and branch identity is never on the list. */
+@container timeline (max-width: 900px) {
+  /* Captions are scaffolding for reading the row the first few times. Losing
+     them costs recognition; losing the name costs the answer. */
+  .context-chip .chip-kind {
+    display: none;
+  }
+}
+
+/* Hidden by the priority+ hook, which measures rather than guessing from a
+   breakpoint. The two container queries that used to live here dropped the
+   folders chip at 780px and every non-`here` chip at 660px -- both of which
+   are buttons, so narrowing the window quietly removed the only way to reach
+   another checkout. What does not fit now goes into the "+N" menu instead of
+   going away. */
+.context-chips .context-chip.is-overflowed {
+  display: none;
+}
+
+.context-chips .chip-overflow {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  padding-left: 9px;
+}
+
+.context-chips .chip-overflow:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+
+/* These are the parts that must stay whole, so they neither shrink nor wrap.
+   Spelling the counts out as words ("13 to merge" rather than an arrow and a
+   number) made them long enough to wrap inside the chip, which took one chip to
+   43px and the whole row from 41px to 53px. Phrases are only clearer than
+   notation while they stay on one line. */
+.context-chip .chip-kind,
+.context-chip .chip-sync,
+.context-chip .chip-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .context-chip.behind {
@@ -2769,7 +2731,7 @@ button:focus-visible {
 button.context-chip.sibling {
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   transition: background 120ms ease, border-color 120ms ease;
 }
 
@@ -2783,23 +2745,9 @@ button.context-chip.sibling:disabled {
 }
 
 /* The "origin/… ↓N" chip, clickable to pull the upstream. */
-button.context-chip.pullable {
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease;
-}
 
-button.context-chip.pullable:hover:not(:disabled) {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
 
 button.context-chip.pullable.busy,
-button.context-chip.pullable:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
 
 .context-chip .chip-ref {
   font-family: var(--font-mono);
@@ -2830,21 +2778,25 @@ button.context-chip.pullable:disabled {
   color: var(--text-muted);
 }
 
-.chip-update {
-  background: var(--warning);
-  border: 0;
-  border-radius: 999px;
-  color: #1b1206;
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 2px 9px;
+/* Never contacted. This is the third state PRODUCT.md requires wherever
+   freshness is shown -- known-good, known-stale, and unknown -- and it is
+   deliberately not styled as a warning: not knowing is not an error. */
+.chip-sync.unknown {
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
-.chip-update:hover {
-  filter: brightness(1.07);
+/* How long ago the remote was last reached, shown only once that is stale.
+   No opacity: --text-muted is 4.83:1 on the light surface and 4.92:1 on the
+   dark one, so it clears 4.5:1 with almost no margin, and the 0.8 opacity this
+   used to carry dropped it to 3.29:1 / 3.61:1 -- a failure introduced purely
+   by dimming text that was already at the edge. */
+.chip-age {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
+
+
 
 /* ── Branch-context lanes (ghost commits above the working tree) ── */
 .timeline-track-wrap {
@@ -2867,19 +2819,35 @@ button.context-chip.pullable:disabled {
   position: static;
 }
 
+/* Reads as a member of the chip family above it, rather than its own
+   miniature vocabulary. Says what it is ("not here"), which branch, and how
+   many commits are missing. */
 .lane-tag {
   align-items: center;
-  background: var(--bg-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-secondary);
   display: flex;
-  font-size: 10px;
-  font-weight: 600;
-  gap: 3px;
-  padding: 1px 7px 1px 5px;
+  font-size: var(--text-2xs);
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
   position: absolute;
   transform: translate(calc(-100% - 8px), -50%);
   white-space: nowrap;
+}
+
+.lane-tag .chip-kind {
+  border-right-color: var(--border-strong);
+}
+
+.lane-count {
+  background: var(--bg-hover);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  padding: 0 5px;
 }
 
 .lane-strand {
@@ -2921,16 +2889,6 @@ button.context-chip.pullable:disabled {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-secondary) 18%, transparent);
 }
 
-.lane-overflow {
-  background: var(--bg-panel);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  padding: 0 3px;
-  position: absolute;
-  transform: translate(-50%, -50%);
-}
 
 
 /* ── Workspace grid ── */
@@ -2959,7 +2917,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   gap: 6px;
   letter-spacing: 0.04em;
@@ -2970,7 +2928,7 @@ button.context-chip.pullable:disabled {
   background: var(--bg-hover);
   border-radius: 999px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-style: normal;
   padding: 1px 7px;
 }
@@ -3023,7 +2981,7 @@ button.context-chip.pullable:disabled {
 
 .change-group h4 {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   margin: 0;
 }
@@ -3098,7 +3056,7 @@ button.context-chip.pullable:disabled {
 
 .file-path-dir {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 400;
   line-height: 1.2;
   overflow: hidden;
@@ -3109,7 +3067,7 @@ button.context-chip.pullable:disabled {
 .status-chip {
   border-radius: 4px;
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   min-width: 18px;
   padding: 2px 4px;
@@ -3138,7 +3096,7 @@ button.context-chip.pullable:disabled {
 
 .empty-hint {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 8px 12px;
 }
 
@@ -3174,7 +3132,7 @@ button.context-chip.pullable:disabled {
 }
 
 .diff-path .file-path-name {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -3184,7 +3142,7 @@ button.context-chip.pullable:disabled {
 
 .badge {
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   padding: 2px 8px;
 }
@@ -3217,7 +3175,7 @@ button.context-chip.pullable:disabled {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   margin-left: 4px;
   padding: 1px 4px;
@@ -3257,7 +3215,7 @@ button.context-chip.pullable:disabled {
 
 .diff-selection-label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -3283,7 +3241,7 @@ button.context-chip.pullable:disabled {
 }
 
 .diff-empty.inline {
-  font-size: 12px;
+  font-size: var(--text-xs);
   min-height: 48px;
   padding: 16px 12px;
 }
@@ -3295,7 +3253,7 @@ button.context-chip.pullable:disabled {
   color: var(--accent);
   display: flex;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   gap: 8px;
   justify-content: space-between;
   padding: 6px 12px;
@@ -3353,7 +3311,7 @@ button.context-chip.pullable:disabled {
 
 .diff-lines {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .diff-line {
@@ -3372,7 +3330,7 @@ button.context-chip.pullable:disabled {
 
 .diff-gutter {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   padding: 1px 4px;
   text-align: right;
   user-select: none;
@@ -3418,12 +3376,12 @@ button.context-chip.pullable:disabled {
 }
 
 .diff-edit-input {
-  background: var(--surface, transparent);
+  background: var(--bg-input);
   border: 1px solid var(--accent, var(--text-muted));
   border-radius: 3px;
   color: inherit;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 0;
   min-width: 0;
   padding: 0 6px 0 0;
@@ -3450,21 +3408,7 @@ button.context-chip.pullable:disabled {
   color: var(--syn-cmt);
 }
 
-.diff-footer {
-  align-items: center;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 10px;
-}
 
-.diff-nav {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
 
 .diff-empty {
   align-items: center;
@@ -3503,7 +3447,7 @@ button.context-chip.pullable:disabled {
 
 .image-diff-pane figcaption {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3551,7 +3495,7 @@ button.context-chip.pullable:disabled {
 
 .field-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -3587,7 +3531,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 6px;
 }
@@ -3666,7 +3610,7 @@ button.context-chip.pullable:disabled {
 }
 
 .change-summary-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
@@ -3674,7 +3618,7 @@ button.context-chip.pullable:disabled {
   background: color-mix(in srgb, var(--text-muted) 15%, transparent);
   border-radius: 4px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   padding: 1px 4px;
 }
 
@@ -3684,7 +3628,7 @@ button.context-chip.pullable:disabled {
   border-radius: var(--radius-sm);
   color: var(--accent);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-xs);
   padding: 6px 8px;
   text-align: left;
   width: 100%;
@@ -3695,7 +3639,7 @@ button.context-chip.pullable:disabled {
 }
 
 .change-summary-body {
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   margin: 0;
 }
@@ -3712,7 +3656,7 @@ button.context-chip.pullable:disabled {
 }
 
 .settings-hint {
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 0 0 8px;
 }
 
@@ -3720,7 +3664,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   gap: 8px;
 }
 
@@ -3753,7 +3697,7 @@ button.context-chip.pullable:disabled {
   background: rgba(0, 0, 0, 0.15);
   border-radius: 4px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   margin-left: auto;
   padding: 2px 5px;
 }
@@ -3811,13 +3755,13 @@ button.context-chip.pullable:disabled {
 
 .reset-warning {
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
 .reset-context {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   margin: 0;
 }
@@ -3834,12 +3778,12 @@ button.context-chip.pullable:disabled {
 
 .reset-target code {
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
 .reset-target-message {
-  color: var(--text-primary);
-  font-size: 12px;
+  color: var(--text);
+  font-size: var(--text-xs);
   line-height: 1.45;
   max-height: 140px;
   min-height: 56px;
@@ -3850,7 +3794,7 @@ button.context-chip.pullable:disabled {
 
 .reset-mode-hint {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.35;
   margin: 0;
 }
@@ -3885,17 +3829,7 @@ button.context-chip.pullable:disabled {
   opacity: 0.5;
 }
 
-/* History full view */
-.history-full {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
 
-.history-full .history-table-wrap {
-  flex: 1;
-}
 
 /* Split pane */
 .split-pane {
@@ -3905,13 +3839,7 @@ button.context-chip.pullable:disabled {
   min-width: 0;
 }
 
-.split-pane-vertical {
-  flex-direction: column;
-}
 
-.split-pane-horizontal {
-  flex-direction: row;
-}
 
 .split-pane-primary,
 .split-pane-secondary {
@@ -3999,93 +3927,19 @@ button.context-chip.pullable:disabled {
   bottom: 12px;
 }
 
-/* Reuse history table styles */
-.history-table-wrap {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
 
-.history-table {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
 
 .history-header,
-.history-row {
-  align-items: center;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: auto 120px minmax(180px, 1fr) 72px 110px 80px 100px;
-  padding: 0 12px;
-}
 
-.history-header {
-  background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  flex: 0 0 34px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
 
-.history-body {
-  flex: 1;
-  overflow: auto;
-}
 
-.history-load-more {
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: center;
-  padding: 10px 12px;
-  position: sticky;
-  bottom: 0;
-}
 
-.history-load-more-btn {
-  font-size: 12px;
-  gap: 8px;
-}
 
-.history-row {
-  background: var(--bg-panel);
-  border: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  /* Fixed height (not min-height): the graph SVG is drawn at exactly this
-     height, so each row's strands meet its neighbours' centre-to-centre. If a
-     row could grow taller, the SVG would float centred and the lane line would
-     break into dashes. Keep this in sync with ROW_H in HistoryTable.tsx. */
-  height: 36px;
-  width: 100%;
-}
 
-/* The graph cell stretches the full row height and never clips the lane line. */
-.history-row .col-graph {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-}
 
 /* One ref per row, on a single line — extra refs must not grow the row and
    break the lane line. They stay reachable via the commit's full ref list. */
-.history-row .ref-badges {
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
 
-.history-row .branch-badge {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .history-row:hover,
 .history-row.active {
@@ -4096,32 +3950,11 @@ button.context-chip.pullable:disabled {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.col-message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.col-hash {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
 
 .col-date,
 .col-time,
-.col-author {
-  color: var(--text-muted);
-  font-size: 12px;
-}
 
-.branch-badge {
-  border: 1px solid;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
 /* The checked-out branch — "you are here". Filled, not tinted, so the branch
    you're on reads instantly against every other ref pill. */
@@ -4142,12 +3975,6 @@ button.context-chip.pullable:disabled {
   width: 6px;
 }
 
-.ref-badges {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
 
 .tag-badge {
   align-items: center;
@@ -4156,7 +3983,7 @@ button.context-chip.pullable:disabled {
   border-radius: 999px;
   color: var(--accent);
   display: inline-flex;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   gap: 3px;
   max-width: 100%;
@@ -4202,7 +4029,7 @@ button.context-chip.pullable:disabled {
 
 .previous-tag-meta {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* Tags sit in a band reserved on every node by --timeline-node-height, rather
@@ -4211,33 +4038,35 @@ button.context-chip.pullable:disabled {
    strip with a ragged bottom edge and made that node's selection frame taller
    than every other node's. Taking them out of flow keeps all nodes, and so all
    selection frames, identical. */
-.node-tags {
+/* Shares the bottom line with the timestamp rather than owning a row.
+   A row of its own had to be reserved on every node, tagged or not, because
+   the nodes must stay the same height for the rail to run straight — so one
+   tagged commit anywhere in history left every other commit sitting above a
+   band of empty space. Inline, a tag costs the row nothing. */
+.node-meta-line {
   align-items: center;
-  bottom: var(--space-0-5);
   display: flex;
   gap: var(--space-1);
   justify-content: center;
-  left: 0;
-  position: absolute;
-  right: 0;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.node-tags {
+  align-items: center;
+  display: flex;
+  gap: var(--space-1);
+  /* In flow on the meta line now, not absolutely placed against the node. */
+  position: static;
   /* A commit with several tags must not reflow the node; the row scrolls
      nowhere and simply clips past the node's width. */
   flex-wrap: nowrap;
+  min-width: 0;
   overflow: hidden;
-  padding: 0 var(--space-1);
 }
 
-.author-avatar {
-  align-items: center;
-  background: var(--bg-hover);
-  border-radius: 50%;
-  display: inline-flex;
-  font-size: 10px;
-  font-weight: 700;
-  height: 22px;
-  justify-content: center;
-  width: 22px;
-}
 
 /* Settings + empty + toast */
 .settings-overlay {
@@ -4276,14 +4105,14 @@ button.context-chip.pullable:disabled {
 }
 
 .settings-modal-header h2 {
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 650;
   margin: 0;
 }
 
 .settings-modal-subtitle {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 2px 0 0;
 }
 
@@ -4327,13 +4156,13 @@ button.context-chip.pullable:disabled {
 }
 
 .settings-row-copy strong {
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .settings-row-copy span {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.35;
 }
 
@@ -4359,7 +4188,7 @@ button.context-chip.pullable:disabled {
 .settings-field-head label,
 .settings-field > label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -4380,7 +4209,7 @@ button.context-chip.pullable:disabled {
 }
 
 .settings-input-compact {
-  font-size: 12px;
+  font-size: var(--text-xs);
   min-height: 30px;
   width: 88px;
 }
@@ -4392,7 +4221,7 @@ button.context-chip.pullable:disabled {
 
 .settings-field-note {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
@@ -4411,7 +4240,7 @@ button.context-chip.pullable:disabled {
   color: var(--accent);
   cursor: pointer;
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 4px;
   padding: 0;
@@ -4453,7 +4282,7 @@ button.context-chip.pullable:disabled {
   cursor: pointer;
   display: inline-flex;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   gap: 6px;
   justify-content: center;
@@ -4534,7 +4363,7 @@ button.context-chip.pullable:disabled {
 
 .settings-icon-choice span {
   direction: rtl;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   max-width: 100%;
   overflow: hidden;
   text-align: center;
@@ -4546,7 +4375,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   gap: 8px;
   padding: 8px 0;
 }
@@ -4595,7 +4424,7 @@ button.context-chip.pullable:disabled {
 
 .settings-remote-label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -4632,7 +4461,7 @@ button.context-chip.pullable:disabled {
 
 .subtree-item-name {
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4641,7 +4470,7 @@ button.context-chip.pullable:disabled {
 
 .subtree-item-source {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4665,7 +4494,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   display: inline-flex;
   flex: none;
-  font-size: 11px;
+  font-size: var(--text-xs);
   gap: 5px;
   margin-left: auto;
 }
@@ -4714,7 +4543,7 @@ button.context-chip.pullable:disabled {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   color: #fff;
   display: inline-flex;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 800;
   justify-content: center;
   left: -7px;
@@ -4734,7 +4563,7 @@ button.context-chip.pullable:disabled {
   border-radius: var(--radius-sm);
   color: #3b2500;
   display: inline-flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   gap: 6px;
   min-height: 32px;
@@ -4773,7 +4602,7 @@ button.context-chip.pullable:disabled {
 
 .linked-updates-menu-head {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   padding: 4px 6px 6px;
 }
@@ -4794,7 +4623,7 @@ button.context-chip.pullable:disabled {
 
 .linked-updates-item-name {
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4803,7 +4632,7 @@ button.context-chip.pullable:disabled {
 
 .linked-updates-item-source {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4822,7 +4651,7 @@ button.context-chip.pullable:disabled {
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
-  font-size: 11px;
+  font-size: var(--text-xs);
   gap: 6px;
   justify-content: center;
   margin-top: 4px;
@@ -4923,7 +4752,7 @@ button.context-chip.pullable:disabled {
 
 .reset-mode-list li {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.45;
 }
 
@@ -4932,13 +4761,13 @@ button.context-chip.pullable:disabled {
 }
 
 .confirm-dialog-header h2 {
-  font-size: 16px;
+  font-size: var(--text-md);
   margin: 0 0 4px;
 }
 
 .confirm-dialog-lead {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   margin: 0;
 }
@@ -4970,14 +4799,14 @@ button.context-chip.pullable:disabled {
   background: rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   padding: 1px 4px;
 }
 
 .discard-files-note {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
@@ -4985,7 +4814,7 @@ button.context-chip.pullable:disabled {
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  font-size: 13px;
+  font-size: var(--text-sm);
   gap: 4px;
   list-style: none;
   margin: 0;
@@ -5007,7 +4836,7 @@ button.context-chip.pullable:disabled {
 .reset-all-preview code {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5015,7 +4844,7 @@ button.context-chip.pullable:disabled {
 
 .reset-all-preview-more {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin-top: 2px;
 }
 
@@ -5023,7 +4852,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-secondary);
   display: flex;
-  font-size: 12px;
+  font-size: var(--text-xs);
   gap: 8px;
 }
 
@@ -5031,14 +4860,14 @@ button.context-chip.pullable:disabled {
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--text-xs);
   gap: 6px;
 }
 
 .reset-all-confirm-field code {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .reset-all-confirm-field input {
@@ -5047,7 +4876,7 @@ button.context-chip.pullable:disabled {
   border-radius: 8px;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-sm);
   padding: 8px 10px;
 }
 
@@ -5056,14 +4885,6 @@ button.context-chip.pullable:disabled {
   outline: none;
 }
 
-.link-btn {
-  background: transparent;
-  border: 0;
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0;
-}
 
 .link-btn.danger {
   color: var(--danger);
@@ -5131,7 +4952,7 @@ button.context-chip.pullable:disabled {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: var(--text-md);
   line-height: 1.5;
   padding: 16px 20px;
   position: relative;
@@ -5221,7 +5042,7 @@ button.context-chip.pullable:disabled {
   color: var(--text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   min-height: 23px;
 }
 
@@ -5238,7 +5059,7 @@ button.context-chip.pullable:disabled {
 .activity-feed-tabs > button.active,
 .activity-feed-terminal-tab.active {
   background: var(--bg-hover);
-  border-color: var(--primary);
+  border-color: var(--accent);
   color: var(--text);
 }
 
@@ -5316,7 +5137,7 @@ button.context-chip.pullable:disabled {
 .activity-feed-command {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5327,7 +5148,7 @@ button.context-chip.pullable:disabled {
   flex: 0 0 auto;
 }
 
-.activity-feed-icon.running { color: var(--primary); }
+.activity-feed-icon.running { color: var(--accent); }
 .activity-feed-icon.success { color: var(--success); }
 .activity-feed-icon.error { color: var(--danger); }
 
@@ -5354,7 +5175,7 @@ button.context-chip.pullable:disabled {
 .activity-feed-logs {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -5374,13 +5195,13 @@ button.context-chip.pullable:disabled {
 .activity-feed-empty {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: italic;
 }
 
 .toast pre {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 0;
   white-space: pre-wrap;
 }
@@ -5393,25 +5214,7 @@ button.context-chip.pullable:disabled {
 /* Superseded by the layout tokens in the responsive section at the end of this
    file, which drive .workspace-grid's columns directly. */
 
-/* ───────────────────────── Merge mode ───────────────────────── */
 
-/* Top-bar relationship strip */
-.merge-strip-arrow {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.merge-strip {
-  align-items: center;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  padding: 2px 8px 2px 7px;
-}
 
 .merge-strip.active {
   background: var(--accent-soft);
@@ -5428,61 +5231,14 @@ button.context-chip.pullable:disabled {
   padding: 1px 15px 1px 2px;
 }
 
-.merge-strip-icon {
-  color: var(--accent);
-}
 
-.merge-strip-into {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
 
-.merge-strip-base {
-  font-weight: 600;
-}
 
-.merge-strip-select-wrap {
-  align-items: center;
-  display: inline-flex;
-  position: relative;
-}
 
-.merge-strip-select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: 600;
-  outline: none;
-  padding: 1px 16px 1px 4px;
-}
 
-.merge-strip-select:hover {
-  background: var(--bg-active);
-}
 
-.merge-strip-select:focus-visible {
-  outline: 2px solid var(--accent-soft);
-}
 
-.merge-strip-chevron {
-  color: var(--text-muted);
-  pointer-events: none;
-  position: absolute;
-  right: 3px;
-}
 
-.merge-chip {
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 7px;
-  white-space: nowrap;
-}
 
 .merge-chip.ahead {
   background: var(--accent-soft);
@@ -5509,45 +5265,10 @@ button.context-chip.pullable:disabled {
   color: var(--text-muted);
 }
 
-.merge-strip-clear {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  flex-shrink: 0;
-  justify-content: center;
-  padding: 2px;
-}
 
-.merge-strip-clear:hover {
-  background: var(--bg-active);
-  color: var(--text);
-}
 
-.merge-strip-clear:focus-visible {
-  outline: 2px solid var(--accent-soft);
-}
 
-/* Top-bar Merge button */
-.merge-action-btn {
-  align-items: center;
-  background: var(--accent);
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: #fff;
-  display: flex;
-  font-weight: 600;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-}
 
-.merge-action-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
 
 .merge-action-btn.active {
   background: var(--accent-hover);
@@ -5601,12 +5322,6 @@ button.context-chip.pullable:disabled {
   gap: 12px;
 }
 
-.merge-panel-title {
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
 
 .merge-branch-name.source {
   color: var(--accent);
@@ -5616,38 +5331,9 @@ button.context-chip.pullable:disabled {
   color: var(--text);
 }
 
-.merge-arrow {
-  margin: 0 2px;
-  vertical-align: -1px;
-  color: var(--text-muted);
-}
 
-.merge-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.merge-step {
-  align-items: flex-start;
-  display: flex;
-  gap: 9px;
-  padding: 4px 0;
-}
 
-.merge-step-icon {
-  align-items: center;
-  border-radius: 50%;
-  display: flex;
-  flex-shrink: 0;
-  height: 20px;
-  justify-content: center;
-  margin-top: 1px;
-  width: 20px;
-}
 
 .merge-step.done .merge-step-icon {
   background: var(--success-soft);
@@ -5669,29 +5355,13 @@ button.context-chip.pullable:disabled {
   color: var(--text-muted);
 }
 
-.merge-step-num {
-  font-size: 11px;
-  font-weight: 700;
-}
 
-.merge-step-body {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
 
-.merge-step-label {
-  font-weight: 600;
-}
 
 .merge-step.pending .merge-step-label {
   color: var(--text-muted);
 }
 
-.merge-step-detail {
-  color: var(--text-muted);
-  font-size: 11px;
-}
 
 .merge-step.active .merge-step-detail {
   color: var(--accent);
@@ -5701,127 +5371,23 @@ button.context-chip.pullable:disabled {
   color: var(--danger);
 }
 
-/* Cards */
-.merge-card {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-}
 
-.merge-card-muted {
-  align-items: center;
-  color: var(--text-muted);
-  flex-direction: row;
-  gap: 8px;
-}
 
-.merge-card-success {
-  background: var(--success-soft);
-  border-color: color-mix(in srgb, var(--success) 30%, transparent);
-}
 
-.merge-card-head {
-  align-items: center;
-  display: flex;
-  font-weight: 600;
-  gap: 6px;
-}
 
-.merge-card-success .merge-card-head {
-  color: var(--success);
-}
 
-.merge-card-sub {
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin: 0;
-}
 
-.merge-count {
-  background: var(--accent);
-  border-radius: 6px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  min-width: 18px;
-  padding: 1px 6px;
-  text-align: center;
-}
 
-.merge-commit-list {
-  color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  gap: 3px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.merge-commit-list li {
-  overflow: hidden;
-  padding-left: 12px;
-  position: relative;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.merge-commit-list li::before {
-  color: var(--text-muted);
-  content: "•";
-  left: 2px;
-  position: absolute;
-}
 
-.merge-card-foot {
-  color: var(--text-muted);
-  font-size: 11px;
-}
 
-/* Safety card */
-.merge-safety {
-  align-items: flex-start;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-}
 
-.merge-safety p {
-  color: var(--text-secondary);
-  font-size: 11px;
-  margin: 2px 0 0;
-}
 
-.merge-safety strong {
-  font-size: 12px;
-}
 
-.merge-safety-ok {
-  background: var(--success-soft);
-  color: var(--success);
-}
 
-.merge-safety-warn {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
 
-/* Buttons */
-.merge-primary {
-  background: var(--accent);
-  color: #fff;
-}
 
-.merge-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  filter: none;
-}
 
 .merge-secondary {
   background: var(--bg-elevated);
@@ -5842,35 +5408,10 @@ button.context-chip.pullable:disabled {
   border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
-.merge-link {
-  background: none;
-  border: 0;
-  color: var(--accent);
-  font-size: 12px;
-  padding: 4px 0;
-  text-align: center;
-  width: 100%;
-}
 
-.merge-link:hover:not(:disabled) {
-  text-decoration: underline;
-}
 
-.merge-link:disabled {
-  color: var(--text-muted);
-}
 
-.merge-commands {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  gap: 5px;
-  justify-content: center;
-}
 
-.spin-slow {
-  animation: spin 2s linear infinite;
-}
 
 /* ── Conflict layout ── */
 .merge-conflict-grid {
@@ -5895,7 +5436,7 @@ button.context-chip.pullable:disabled {
   color: var(--text);
   display: flex;
   flex-wrap: wrap;
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   gap: 6px;
 }
@@ -5907,7 +5448,7 @@ button.context-chip.pullable:disabled {
 
 .integration-panel-sub {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   margin: 0;
 }
 
@@ -5927,7 +5468,7 @@ button.context-chip.pullable:disabled {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   justify-content: space-between;
   letter-spacing: 0.04em;
@@ -5948,7 +5489,7 @@ button.context-chip.pullable:disabled {
 
 .conflict-list-empty {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   padding: 4px 12px;
 }
 
@@ -5987,7 +5528,7 @@ button.context-chip.pullable:disabled {
 
 .conflict-file-row-path {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6050,7 +5591,7 @@ button.context-chip.pullable:disabled {
   border-radius: 999px;
   color: var(--danger);
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 700;
   padding: 1px 8px;
 }
@@ -6111,7 +5652,7 @@ button.context-chip.pullable:disabled {
   background: var(--bg-sidebar);
   color: var(--text-secondary);
   display: flex;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 700;
   gap: 8px;
   padding: 5px 14px;
@@ -6139,7 +5680,7 @@ button.context-chip.pullable:disabled {
 
 .conflict-code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   overflow-x: auto;
   padding: 4px 0;
 }
@@ -6188,7 +5729,7 @@ button.context-chip.pullable:disabled {
   border-radius: 0;
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   min-height: 140px;
   padding: 8px 14px;
   resize: none;
@@ -6356,4 +5897,564 @@ button.context-chip.pullable:disabled {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ───────────────────── Branch graph ─────────────────────
+   The dense end of the visual language (docs/GRAPH_VISUAL_LANGUAGE.md).
+   Many branches are on screen, so colour carries branch identity here and a
+   lane keeps its colour for its whole run. Fill answers "is this on my line",
+   weight separates your branch from context. */
+
+.graph-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) 0 var(--space-6);
+}
+
+.graph-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.graph-row {
+  align-items: center;
+  /* Must equal ROW_H in GraphView. The SVG is drawn at a fixed height, so a row
+     that grows taller than it tears the lanes away from their content.
+
+     The row must NOT clip. Lane strands are drawn past its bottom edge into
+     the next row's band, which is how one commit's line reaches the next, so
+     overflow: hidden here severed every strand at the row boundary and left
+     the graph as disconnected stubs. Each text cell clips itself instead. */
+  height: var(--graph-row-h);
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-3);
+/* Three cells: lanes, message, trailing meta. Branch labels live inside the
+     message cell rather than a column of their own.
+
+     A fixed column *count* is not a fixed column *width*. When refs had their
+     own auto track, each row sized it independently -- 0px on the 32 rows
+     without labels, 276px on one with them -- so the subject started at eight
+     different x positions down a list whose entire job is being scanned. */
+  grid-template-columns: var(--graph-gutter) minmax(0, 1fr) auto;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  text-align: left;
+  width: 100%;
+}
+
+
+/* The global button focus ring is 2px of --accent-soft, which is the accent at
+   14% alpha: legible on a small control, not legible as "which of these forty
+   rows am I on". Keyboard is the point of this list, so the cursor is drawn at
+   full strength. Inset, because the row deliberately does not clip and an
+   outset ring would sit over the neighbouring row's lane strands. */
+.graph-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.graph-row:hover {
+  background: var(--bg-hover);
+}
+
+/* Selection stays the same neutral treatment used on the timeline strip, so
+   "where am I" never competes with the colour carrying branch identity. */
+.graph-row.active {
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.graph-lanes {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.graph-strand {
+  fill: none;
+  opacity: 0.4;
+  stroke-width: 1.5;
+}
+
+.graph-strand.on-head {
+  opacity: 1;
+  stroke-width: 2;
+}
+
+.graph-dot {
+  fill: var(--bg-panel);
+  stroke-width: 2;
+  opacity: 0.55;
+}
+
+.graph-dot.on-head {
+  opacity: 1;
+}
+
+.graph-subject {
+  color: var(--text-secondary);
+  /* Fill the column and align the text inside it, rather than shrink-wrapping
+     the box. justify-self: start sized this to max-content, so a long subject
+     grew past its own track and ran underneath the hash and time instead of
+     ending in an ellipsis -- the clip happened at the box's edge, and the box
+     was wider than the column. Stretching is what makes the ellipsis land at
+     the column boundary. text-align keeps the left edge that start was for. */
+  justify-self: stretch;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ───────────────────── Workspaces (git worktrees) ───────────────────── */
+
+.worktree-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.worktree-item {
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+  padding: var(--space-1-5) var(--space-2);
+}
+
+.worktree-item.current {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.worktree-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.worktree-branch {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  gap: var(--space-1);
+}
+
+.worktree-text small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-row.on-head .graph-subject {
+  color: var(--text);
+}
+
+.graph-row.active .graph-subject {
+  color: var(--text);
+}
+
+.graph-author {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+}
+
+.graph-hash {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.graph-time {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  min-width: 56px;
+  text-align: right;
+}
+
+.graph-empty {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+/* View toggle */
+.worktree-badge {
+  align-items: center;
+  background: var(--bg-elevated);
+  border-radius: 999px;
+  color: var(--text-muted);
+  display: inline-flex;
+  font-size: var(--text-2xs);
+  font-style: normal;
+  font-weight: var(--weight-medium);
+  gap: 3px;
+  letter-spacing: var(--tracking-caps);
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.worktree-badge.current {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.worktree-badge.missing {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.worktree-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.settings-inline-link.danger {
+  color: var(--danger);
+}
+
+.settings-check {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--space-1-5);
+}
+
+/* Segmented control heading the history region.
+
+   A recessed track with the selected half raised inside it. Earlier versions
+   rounded the outside but painted the selected half --bg-hover on a
+   --bg-elevated track, two tones a few points apart in dark theme, so nothing
+   showed which half was active. It read as a plain rounded box with two words
+   in it, or worse, as two separate buttons. */
+.view-switch {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-right: var(--space-2);
+  padding: 2px;
+}
+
+.view-switch button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  padding: var(--space-1) var(--space-3);
+  transition: background 150ms ease, color 150ms ease;
+  white-space: nowrap;
+}
+
+.view-switch button:hover:not(.active) {
+  color: var(--text-secondary);
+}
+
+/* The raised half: lifted off the track by tone and a hairline, so which view
+   you are in reads at a glance rather than by reading the labels. */
+.view-switch button.active {
+  background: var(--bg-elevated);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.25),
+    inset 0 0 0 1px var(--border-strong);
+  color: var(--text);
+}
+
+/* A branch open in another checkout. Its own marker, since "open elsewhere" is
+   a different kind of fact from "is this on my line". */
+.graph-elsewhere {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  padding: 1px 7px;
+}
+
+/* Branch labels in the graph. The label is the branch; the outline takes the
+   lane's colour so a name and its line are visibly the same thing. */
+.graph-ref {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  max-width: 200px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Remote-tracking refs are context, not somewhere you are. */
+.graph-ref.remote {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* The branch checked out in this folder. */
+.graph-ref.head {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+
+/* Refs share one cell so a row with two branches doesn't shift the columns of
+   every other row. */
+.graph-refs {
+  display: inline-flex;
+  /* A row is one line high. Without an explicit nowrap and a min-width of 0,
+     a commit carrying two long refs wraps the pills and blows the row past the
+     height the lane graphic is drawn at. */
+  flex-wrap: nowrap;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 34ch;
+  overflow: hidden;
+}
+
+/* Labels and message in one cell, so every row's text column starts together. */
+.graph-message {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Capped, because the whole point is that a label cannot shove the message.
+   The widest observed pair of refs measured 276px; without a ceiling a long
+   branch name reintroduces the ragged edge this change removes. Shrinks before
+   it truncates so short labels are never cut. */
+.graph-message .graph-refs {
+  flex: 0 1 auto;
+  max-width: 30%;
+  overflow: hidden;
+}
+
+.graph-meta {
+  align-items: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* States what the dots encode, once, where they are drawn. Dismissible: it is
+   a lesson, not furniture, and it should not cost space forever. */
+.graph-legend {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+}
+
+.graph-legend-item {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-1-5);
+}
+
+.graph-legend .legend-dot {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.graph-legend .legend-dot.on-head {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+/* Colours come from laneColor() via inline style, not from a copy of the
+   palette here. LANE_COLORS lives in src/lib/graph.ts, and a second copy in
+   CSS is a drift waiting to happen. */
+.graph-legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 4px;
+  width: 8px;
+}
+
+.graph-legend-dismiss {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 5px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+}
+
+.graph-legend-dismiss:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Every chip states what kind of thing it is. Without this the row is a run of
+   similar pills: your branch, your upstream, an unrelated branch and another
+   folder all looked identical, so the row couldn't be read left to right. */
+.chip-kind {
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  margin-right: var(--space-1);
+  padding-right: var(--space-1-5);
+  text-transform: uppercase;
+}
+
+/* The branch checked out in this folder: where you are. */
+.context-chip.here {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.context-chip.here .chip-ref {
+  color: var(--accent);
+}
+
+/* Another folder of this repository. Clickable: it takes you there. */
+.context-chip.elsewhere {
+  cursor: pointer;
+}
+
+.context-chip.elsewhere:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.context-chip.elsewhere:disabled {
+  cursor: default;
+}
+
+/* How old the remote information is. Muted because it qualifies a claim rather
+   than making one: the point is that "in sync" is aging, not to raise alarm. */
+
+/* The remote has never been reached, so nothing about it is known. Warning
+   rather than danger: it is not wrong, it is unverified. */
+
+/* Commit inspector. Shown when a past commit is selected, where the panel used
+   to be empty: the diff was on screen with nothing saying which commit it
+   belonged to, who wrote it, or why. */
+.commit-inspector {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.commit-inspector-subject {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  margin: 0 0 var(--space-2);
+}
+
+/* The reasoning a diff cannot show. Preserves the author's own line breaks. */
+.commit-inspector-body {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  margin: 0 0 var(--space-3);
+  max-height: 14em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.commit-inspector-meta {
+  column-gap: var(--space-3);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+  row-gap: var(--space-1);
+}
+
+.commit-inspector-meta dt {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.commit-inspector-meta dd {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-inspector-meta code {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.commit-inspector-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.commit-inspector-ref {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  padding: 1px 6px;
 }

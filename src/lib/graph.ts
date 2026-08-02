@@ -52,9 +52,38 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
   // a branch keeps one colour down its whole length.
   const lanes: Array<string | null> = [];
   const laneColorIdx: number[] = [];
+  /// For a lane opened by a merge, the lane the merge itself sat in.
+  ///
+  /// A strand is drawn from its lane index, which is right for a line that is
+  /// simply continuing. It is wrong for the row where a merge opens a lane: the
+  /// second parent's strand began at its own new column, so nothing joined the
+  /// merge to the line it was pulling in and no branch ever appeared to meet
+  /// another. Consumed once, by the band immediately below the merge, then
+  /// cleared — after that the lane really does continue from itself.
+  const laneOrigin: Array<number | null> = [];
   let nextColor = 0;
 
   const rows: GraphRow[] = [];
+
+  // Which commits are on the checked-out branch's first-parent line.
+  //
+  // Walked here, from the commits themselves, rather than inferred from lane
+  // colour. Colour follows a lane only while that lane stays continuously
+  // occupied; lanes are freed at merges and reused, so the head's colour id
+  // changes partway down and a colour test silently stops matching. In a real
+  // repository that marked the tip and one parent and left the rest of the
+  // branch looking like somebody else's work.
+  const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
+  const onHeadHashes = new Set<string>();
+  if (headHash) {
+    let cursor: string | undefined = headHash;
+    // The set is the cycle guard: history is a DAG, but a malformed parent
+    // list must not spin here.
+    while (cursor && byHash.has(cursor) && !onHeadHashes.has(cursor)) {
+      onHeadHashes.add(cursor);
+      cursor = byHash.get(cursor)?.parents[0];
+    }
+  }
 
   for (let i = 0; i < commits.length; i += 1) {
     const commit = commits[i];
@@ -68,6 +97,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         myLane = lanes.length;
         lanes.push(null);
         laneColorIdx.push(-1);
+        laneOrigin.push(null);
       }
       // A tip with no child in view starts a fresh colour.
       if (laneColorIdx[myLane] === -1) laneColorIdx[myLane] = nextColor++;
@@ -84,14 +114,19 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         if (lanes[k] === null) continue;
         const toLane = lanes[k] === commit.hash ? myLane : k;
         edges.push({
-          fromLane: k,
+          // A lane a merge just opened starts at the merge, not at itself.
+          fromLane: laneOrigin[k] ?? k,
           toLane,
           color: laneColor(laneColorIdx[k]),
           colorIdx: laneColorIdx[k],
-          onHead: false,
+          // The strand is heading toward lanes[k]; it is part of the mainline
+          // exactly when the commit it arrives at is.
+          onHead: onHeadHashes.has(lanes[k] as string),
         });
       }
       rows[i - 1].edges = edges;
+      // Spent. Below this band each lane continues from its own column.
+      laneOrigin.fill(null);
     }
 
     rows.push({
@@ -100,7 +135,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       color: laneColor(laneColorIdx[myLane]),
       colorIdx: laneColorIdx[myLane],
       laneCount: 0,
-      onHead: false,
+      onHead: onHeadHashes.has(commit.hash),
       edges: [],
     });
 
@@ -110,12 +145,13 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       if (k !== myLane && lanes[k] === commit.hash) {
         lanes[k] = null;
         laneColorIdx[k] = -1;
+        laneOrigin[k] = null;
       }
     }
 
     // Route the parents downward. The first parent continues this lane (and its
-    // colour — the mainline). Extra parents (a merge) each take a lane and a
-    // fresh colour for the side being brought in.
+    // colour — the mainline). Extra parents (a merge) take a lane for the side
+    // being brought in.
     const [firstParent, ...otherParents] = commit.parents;
     if (firstParent) {
       lanes[myLane] = firstParent;
@@ -124,20 +160,33 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       laneColorIdx[myLane] = -1;
     }
     for (const parent of otherParents) {
+      // If a lane is already heading for this commit, the incoming side of the
+      // merge *is* that branch, and it takes that branch's colour.
+      //
+      // A fresh colour every time is what turned a two-branch history into
+      // seven: merging main into a branch repeatedly gave each merge's
+      // incoming side its own hue, each surviving only the two or three rows
+      // until the commit arrived. Colour is supposed to answer "which branch",
+      // and it was answering "which merge".
+      const alreadyRouted = lanes.findIndex((hash) => hash === parent);
       let nl = lanes.findIndex((hash) => hash === null);
       if (nl === -1) {
         nl = lanes.length;
         lanes.push(null);
         laneColorIdx.push(-1);
+        laneOrigin.push(null);
       }
       lanes[nl] = parent;
-      laneColorIdx[nl] = nextColor++;
+      laneColorIdx[nl] = alreadyRouted === -1 ? nextColor++ : laneColorIdx[alreadyRouted];
+      // This lane leaves the merge, so its first strand is drawn from there.
+      laneOrigin[nl] = myLane;
     }
 
     // Trim trailing free lanes so the width reflects what's actually in use.
     while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
       lanes.pop();
       laneColorIdx.pop();
+      laneOrigin.pop();
     }
     rows[i].laneCount = Math.max(lanes.length, myLane + 1, 1);
   }
@@ -153,23 +202,6 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
     widest = Math.max(widest, rowMax);
   }
   for (const row of rows) row.laneCount = widest;
-
-  // Flag the checked-out branch's lane. A lane keeps one colour id for its whole
-  // continuous run, so tagging every row/edge that shares the HEAD commit's
-  // colour id traces that branch — and only that branch — top to bottom. The
-  // renderer draws it bold and full-strength so "the line you're on" is obvious.
-  if (headHash) {
-    const headRow = rows.find((row) => row.commit.hash === headHash);
-    if (headRow) {
-      const headColorIdx = headRow.colorIdx;
-      for (const row of rows) {
-        if (row.colorIdx === headColorIdx) row.onHead = true;
-        for (const edge of row.edges) {
-          if (edge.colorIdx === headColorIdx) edge.onHead = true;
-        }
-      }
-    }
-  }
 
   return rows;
 }

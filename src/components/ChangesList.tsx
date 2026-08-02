@@ -10,7 +10,7 @@ import { joinRepoPath, revealInFinder } from "../lib/finder";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FilePathLabel } from "./FilePathLabel";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 
 export type { ChangeSelectionEntry } from "../types";
 

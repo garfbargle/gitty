@@ -10,7 +10,8 @@ import {
   X,
 } from "lucide-react";
 import type { BranchEntry, CommitEntry } from "../types";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
+import { branchRefs, formatDate, formatRelativeTime } from "../lib/git";
 
 const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 
@@ -187,8 +188,49 @@ export function CommitPanel({
 
   const panelTitle = nvidiaApiKeyConfigured ? "What's in this" : "AI Auto Summarize";
 
+  // The subject is the first line; anything after the blank line is the body,
+  // which is where the reasoning usually lives and where a diff is silent.
+  const fullMessage = (selectedCommitMessage || selectedCommit?.subject || "").trim();
+  const body = fullMessage.split("\n").slice(1).join("\n").trim();
+  const refs = selectedCommit ? branchRefs(selectedCommit.refs) : [];
+
   return (
     <aside className="commit-panel">
+      {/* Viewing a commit used to leave this panel empty: the diff was on
+          screen with nothing saying which commit it belonged to, who wrote it
+          or when. The message is the part a diff cannot tell you. */}
+      {selectedCommit ? (
+        <section className="panel-block commit-inspector">
+          <h3 className="commit-inspector-subject">{selectedCommit.subject}</h3>
+
+          {body ? <p className="commit-inspector-body">{body}</p> : null}
+
+          <dl className="commit-inspector-meta">
+            <dt>Author</dt>
+            <dd>{selectedCommit.author}</dd>
+            <dt>When</dt>
+            <dd title={formatDate(selectedCommit.date)}>
+              {formatRelativeTime(selectedCommit.date)}
+            </dd>
+            <dt>Commit</dt>
+            <dd>
+              <code>{selectedCommit.shortHash}</code>
+            </dd>
+          </dl>
+
+          {refs.length > 0 ? (
+            <div className="commit-inspector-refs">
+              {refs.map((ref) => (
+                <span key={ref} className="commit-inspector-ref">
+                  <GitBranch size={10} aria-hidden />
+                  {ref.replace(/^HEAD -> /, "")}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {showStartBranch ? (
         <div className="start-branch-nudge">
           <div className="start-branch-nudge-body">

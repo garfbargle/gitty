@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
-import { SHORTCUT } from "../lib/platform";
+import { useMenuKeyboard } from "../lib/useMenuKeyboard";
+import { AlertTriangle, Check, ChevronDown, Loader2, Tag, Upload } from "lucide-react";
+import { SHORTCUT } from "../lib/shortcuts";
 
 export type PushPhase = "idle" | "pushing" | "done";
 
@@ -20,6 +21,8 @@ type PushButtonProps = {
   onForcePush: () => Promise<boolean>;
   /** Hard `git push --force` — overwrites the remote unconditionally, for when the lease is stale. */
   onOverwrite: () => Promise<boolean>;
+  /** Push tags as well. Opt-in, from the menu only — see `push` in App.tsx. */
+  onPushTags?: () => Promise<boolean>;
 };
 
 export function PushButton({
@@ -35,23 +38,38 @@ export function PushButton({
   onPush,
   onForcePush,
   onOverwrite,
+  onPushTags,
 }: PushButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const badgeAheadRef = useRef(ahead + unpushedTags);
+  const badgeAheadRef = useRef(ahead);
 
-  const pushCount = ahead + unpushedTags;
+  // The badge counts commits, and only commits. It used to be ahead + tags,
+  // which is two different kinds of thing summed into one number on a button
+  // that says "Push" — so a fork holding 31 upstream release tags and nothing
+  // of its own read as "31 to push" beside a bar reading "in sync". Both were
+  // true; together they were a lie. Tags are reachable from the menu.
+  const pushCount = ahead;
+  const hasTagsToOffer = unpushedTags > 0 && !!onPushTags;
   const suggestsForcePush = behind > 0 || forceSuggested;
   const visible =
     hasRemotes &&
     (pushCount > 0 ||
+      hasTagsToOffer ||
       unpublished ||
       suggestsForcePush ||
       pushPhase === "pushing" ||
       pushPhase === "done");
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
-  const showBadge = pushPhase === "pushing" || (pushPhase === "idle" && pushCount > 0);
+  // Only tags are outstanding, so the primary click has nothing to do: a
+  // commits-only push would return "Nothing to push." as an error. The button
+  // opens the menu instead, which is where the tags live.
+  const tagsOnly = pushCount === 0 && hasTagsToOffer && !unpublished && !suggestsForcePush;
+  // `> 0` matters during a push: the frozen count is commits, so a tags-only
+  // push used to sit next to a badge reading 0.
+  const badgeCountNow = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
+  const showBadge = pushPhase !== "done" && badgeCountNow > 0;
 
   useEffect(() => {
     if (pushPhase === "idle") {
@@ -80,6 +98,8 @@ export function PushButton({
     };
   }, [open]);
 
+  useMenuKeyboard({ open, setOpen, rootRef, triggerSelector: ".push-btn-main" });
+
   useEffect(() => {
     if (isBusy) setOpen(false);
   }, [isBusy]);
@@ -88,7 +108,6 @@ export function PushButton({
     return null;
   }
 
-  const badgeCount = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
 
   // Right-click anywhere on the button opens the push menu so force push is
   // always reachable — even when we haven't detected divergence (e.g. the
@@ -104,16 +123,12 @@ export function PushButton({
     if (pushPhase === "pushing") return "Push in progress…";
     if (pushPhase === "done") return "Push completed";
 
-    const parts: string[] = [];
-    if (ahead > 0) {
-      parts.push(`${ahead} commit${ahead === 1 ? "" : "s"}`);
-    }
-    if (unpushedTags > 0) {
-      parts.push(`${unpushedTags} tag${unpushedTags === 1 ? "" : "s"}`);
-    }
-    const summary = parts.length > 0 ? parts.join(" and ") : "changes";
+    const summary = ahead > 0 ? `${ahead} commit${ahead === 1 ? "" : "s"}` : "changes";
 
     const forceHint = "  •  right-click for push options";
+    if (pushCount === 0 && hasTagsToOffer && !unpublished && !suggestsForcePush) {
+      return `Nothing to push — ${unpushedTags} tag${unpushedTags === 1 ? "" : "s"} available from push options${forceHint}`;
+    }
     if (unpublished && pushCount === 0) {
       return `Publish this branch to the remote${forceHint}`;
     }
@@ -140,7 +155,7 @@ export function PushButton({
     >
       {showBadge ? (
         <span className="push-btn-badge" aria-hidden="true">
-          {badgeCount}
+          {badgeCountNow}
         </span>
       ) : null}
       <button
@@ -149,7 +164,9 @@ export function PushButton({
         title={pushTitle()}
         disabled={isLocked}
         aria-busy={pushPhase === "pushing"}
-        onClick={() => void onPush()}
+        aria-haspopup={tagsOnly ? "menu" : undefined}
+        aria-expanded={tagsOnly ? open : undefined}
+        onClick={() => (tagsOnly ? setOpen((current) => !current) : void onPush())}
       >
         {pushPhase === "pushing" ? (
           <>
@@ -170,11 +187,12 @@ export function PushButton({
         )}
       </button>
 
-      {suggestsForcePush ? (
+      {suggestsForcePush || hasTagsToOffer ? (
         <button
           type="button"
           className="push-btn-chevron"
           title="Push options"
+          aria-label="Push options"
           disabled={isLocked}
           aria-expanded={open}
           aria-haspopup="menu"
@@ -186,19 +204,42 @@ export function PushButton({
 
       {open ? (
         <div className="push-btn-menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            className="push-btn-menu-item"
-            disabled={isLocked}
-            onClick={() => {
-              setOpen(false);
-              void onPush();
-            }}
-          >
-            <Upload size={14} />
-            <span>Push</span>
-          </button>
+          {/* Hidden when only tags are outstanding: this item runs the same
+              commits-only push the primary button does, so offering it there
+              would just be a second way to reach "Nothing to push." */}
+          {tagsOnly ? null : (
+            <button
+              type="button"
+              role="menuitem"
+              className="push-btn-menu-item"
+              disabled={isLocked}
+              onClick={() => {
+                setOpen(false);
+                void onPush();
+              }}
+            >
+              <Upload size={14} />
+              <span>Push</span>
+            </button>
+          )}
+          {hasTagsToOffer ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="push-btn-menu-item"
+              disabled={isLocked}
+              onClick={() => {
+                setOpen(false);
+                void onPushTags?.();
+              }}
+            >
+              <Tag size={14} />
+              <span>
+                Push {unpushedTags} tag{unpushedTags === 1 ? "" : "s"}
+              </span>
+              <small>also publishes tags fetched from elsewhere</small>
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

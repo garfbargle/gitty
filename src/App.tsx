@@ -53,6 +53,7 @@ import type {
   UpdateOutcome,
   UpdateStatus,
   ConflictSides,
+  WorktreeEntry,
 } from "./types";
 import { changePathsKey, isStaged, isUnstaged, stagedPathsKey } from "./lib/git";
 import { timestampLogOutput } from "./lib/logs";
@@ -70,8 +71,16 @@ import {
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
-import { SHORTCUT } from "./lib/platform";
+import { SHORTCUT } from "./lib/shortcuts";
+import { useShortcut } from "./lib/useShortcut";
+import {
+  shouldIgnoreEnterShortcut,
+  shouldIgnoreKeyboardNavigation,
+} from "./lib/keyboardFocus";
+import { KeyboardSheet } from "./components/KeyboardSheet";
 import { sortRepos } from "./lib/repoSort";
+import { GraphView } from "./components/GraphView";
+import { RemoveWorktreeConfirmDialog } from "./components/RemoveWorktreeConfirmDialog";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -140,22 +149,6 @@ type IntegrationOp = {
   prefix?: string;
 };
 
-function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement;
-  const tag = target.tagName;
-  if (tag === "TEXTAREA" || tag === "SELECT") return true;
-  if (tag === "INPUT") {
-    const input = target as HTMLInputElement;
-    if (input.type !== "checkbox") return true;
-  }
-  if (target.isContentEditable) return true;
-  return false;
-}
-
-function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
-  if (shouldIgnoreKeyboardNavigation(event)) return true;
-  return (event.target as HTMLElement).tagName === "BUTTON";
-}
 
 type SummaryScope = "all" | "staged";
 
@@ -354,8 +347,22 @@ function App() {
   }, []);
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+  const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
+  /// Preview of the two densities in docs/GRAPH_VISUAL_LANGUAGE.md: the
+  /// working-tree strip, or the full branch graph over `graphCommits`.
+  const [historyView, setHistoryView] = useState<"strip" | "graph">("strip");
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
+  /// Other checkouts of this repository. Drives the branch switcher (a branch
+  /// open in another folder can't be checked out here, so we offer to open that
+  /// folder instead) and the graph's "open elsewhere" marker.
+  const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
+  /// Pending folder removal, held here so the confirmation is App's and the
+  /// settings panel stays presentational.
+  const [worktreeToRemove, setWorktreeToRemove] = useState<WorktreeEntry | null>(null);
+  const [removingWorktree, setRemovingWorktree] = useState(false);
+  /// Bumped whenever something mutates the checkout list.
+  const [worktreeRefresh, setWorktreeRefresh] = useState(0);
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
   const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
@@ -379,6 +386,26 @@ function App() {
       cancelled = true;
     };
   }, [selectedPath]);
+
+  // Refreshed alongside the snapshot, since checking a branch out or removing a
+  // checkout changes this list.
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedPath) {
+      setWorktrees([]);
+      return;
+    }
+    invoke<WorktreeEntry[]>("list_worktrees", { path: selectedPath })
+      .then((result) => {
+        if (!cancelled) setWorktrees(result.filter((entry) => !entry.internal));
+      })
+      .catch(() => {
+        if (!cancelled) setWorktrees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPath, snapshot?.branch, worktreeRefresh]);
 
   useEffect(() => {
     if (!selectedPath || repoActions.length === 0) {
@@ -515,22 +542,12 @@ function App() {
     [selectedPath],
   );
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "r") return;
-
-      const selectedAction =
-        repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
-      if (!selectedPath || !selectedAction) return;
-
-      event.preventDefault();
-      handleRunAction(selectedAction);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedPath, repoActions, selectedRepoActionId, handleRunAction]);
+  useShortcut("runAction", () => {
+    const selectedAction =
+      repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
+    if (!selectedPath || !selectedAction) return;
+    handleRunAction(selectedAction);
+  });
 
   const toggleSidebar = useCallback(() => {
     setSidebarVisible((current) => {
@@ -641,6 +658,12 @@ function App() {
   const focusFingerprintByPathRef = useRef(new Map<string, string>());
   const snapshotGenerationRef = useRef(0);
   const changesRefreshRequestRef = useRef(0);
+  /// Guards the commit preview the same way the others guard their reads.
+  /// inspectCommit sets the viewed commit, then awaits its files and diff; with
+  /// nothing to compare against, an inspection still in flight when you press
+  /// "Back to now" landed afterwards and put the commit's files and diff back
+  /// on screen. Bumped on return-to-now so those late writes are dropped.
+  const commitInspectRef = useRef(0);
   const FOCUS_REFRESH_DEBOUNCE_MS = 400;
   const FOCUS_REFRESH_MIN_INTERVAL_MS = 2000;
   const summaryCacheRef = useRef<SummaryCache>(emptySummaryCache());
@@ -1412,11 +1435,14 @@ function App() {
   }
 
   async function inspectCommit(commit: CommitEntry, path = selectedPath) {
+    const generation = ++commitInspectRef.current;
+    const current = () => generation === commitInspectRef.current;
+
     setViewingCommit(commit);
     const files = await run(() =>
       invoke<FileChange[]>("commit_files_command", { path, commit: commit.hash }),
     );
-    if (files === null) return;
+    if (files === null || !current()) return;
 
     setCommitFiles(files);
     if (files.length === 0) {
@@ -1424,29 +1450,39 @@ function App() {
       const result = await run(() =>
         invoke<string>("commit_diff", { path, commit: commit.hash }),
       );
-      if (result !== null) setDiff(result || "This commit has no patch output.");
+      if (result !== null && current()) setDiff(result || "This commit has no patch output.");
       return;
     }
 
-    await inspectCommitFile(files[0], commit, path);
+    await inspectCommitFile(files[0], commit, path, generation);
   }
 
   async function inspectCommitFile(
     file: FileChange,
     commit: CommitEntry = viewingCommit!,
     path = selectedPath,
+    /// Passed through from inspectCommit so a diff that arrives after the user
+    /// has left the preview is discarded rather than drawn over the working
+    /// tree. Callers that start here take the current generation.
+    generation = commitInspectRef.current,
   ) {
     setFocus({ kind: "file", file, section: "commit" });
     const result = await run(() =>
       invoke<string>("file_diff", { path, filePath: file.path, commit: commit.hash }),
     );
-    if (result !== null) setDiff(result || "This file has no patch in this commit.");
+    if (result !== null && generation === commitInspectRef.current) {
+      setDiff(result || "This file has no patch in this commit.");
+    }
   }
 
   async function selectWorkingTree(options?: {
     snapshot?: RepoSnapshot | null;
     refresh?: boolean;
   }) {
+    // Any commit inspection still in flight belongs to the view we are leaving.
+    // Without this its files and diff arrive after the clear and put the commit
+    // back on screen, which reads as "Back to now" spinning and doing nothing.
+    commitInspectRef.current += 1;
     setViewingCommit(null);
     setCommitFiles([]);
     setFocus(null);
@@ -1753,7 +1789,21 @@ function App() {
   // no detached HEAD, no stash, nothing to undo. Your checkout is untouched.
   async function openCommitInFolder(commit?: CommitEntry) {
     const target = commit ?? viewingCommit;
-    if (!target || !selectedPath) return;
+    if (!selectedPath) return;
+
+    // No commit in view, so this is simply "show me this repository on disk".
+    // The action used to appear only while previewing a commit, which meant the
+    // one thing every repository can always do was hidden except in a mode you
+    // had to enter first.
+    if (!target) {
+      try {
+        await openPath(selectedPath);
+      } catch (err) {
+        setError(String(err));
+      }
+      return;
+    }
+
     const dir = await run(() =>
       invoke<string>("open_commit_worktree", { path: selectedPath, commit: target.hash }),
     );
@@ -2564,7 +2614,10 @@ function App() {
     return () => window.clearInterval(timer);
   }, [selectedPath, snapshot?.repo.path, snapshot?.remotes.length]);
 
-  async function push(force: boolean, hard = false): Promise<boolean> {
+  // `tags` is opt-in. Ordinary Push ships commits only; tags go out through the
+  // push menu, because a fork's tags usually came from upstream and pushing
+  // them republishes someone else's releases under your name.
+  async function push(force: boolean, hard = false, tags = false): Promise<boolean> {
     const path = selectedPath;
     if (
       !path ||
@@ -2593,14 +2646,17 @@ function App() {
     await waitForPaint();
 
     try {
-      const result = await invoke<ActionResult>("push_repo", { path, force, hard });
+      const result = await invoke<ActionResult>("push_repo", { path, force, hard, tags });
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
         return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       if (selectedPath === path) setPushRejected(false);
       const snap = await refreshRepoQuiet(path);
-      const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
+      // Only count what this push actually tried to ship. Tags left behind by a
+      // commits-only push are not "remaining work" — counting them held the
+      // button in its post-push state forever on any fork carrying upstream tags.
+      const remaining = (snap?.ahead ?? 0) + (tags ? snap?.unpushedTags?.length ?? 0 : 0);
       if (remaining === 0) {
         const timer = pushDoneTimerRef.current.get(path);
         if (timer !== undefined) {
@@ -2966,10 +3022,14 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [workingTreeActive]);
 
+  // Unpushed tags deliberately do not arm this. The keyboard shortcut and the
+  // primary button both run a commits-only push, so counting tags here armed
+  // an action that had nothing to do and returned "Nothing to push." as an
+  // error -- on a shortcut the button itself advertises. Tags are reachable
+  // from the push menu, which is where the count now lives.
   const canPush =
     hasRemotes &&
     ((snapshot?.ahead ?? 0) > 0 ||
-      (snapshot?.unpushedTags?.length ?? 0) > 0 ||
       (snapshot?.branchUnpublished ?? false) ||
       (snapshot?.backupPushPending ?? false));
   const unpushedTagSet = useMemo(
@@ -3001,67 +3061,28 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!workingTreeActive || loading) return;
+  useShortcut("stageAll", () => void stageAllRef.current(), {
+    enabled: workingTreeActive && !loading,
+  });
 
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "a") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      event.preventDefault();
-      void stageAllRef.current();
-    }
+  useShortcut("toggleSidebar", toggleSidebar);
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [workingTreeActive, loading]);
+  useShortcut("help", () => setKeyboardSheetOpen((was) => !was));
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "b") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      event.preventDefault();
-      toggleSidebar();
-    }
+  // Undo and redo for inline line edits, not general undo. While a line's input
+  // is focused the guard bails so the browser's own text undo runs; once the
+  // edit is committed and focus leaves, these take over.
+  //
+  // Two separate bindings rather than one handler branching on Shift, so the
+  // table can name them separately and the sheet can say plainly that this is
+  // a line edit rather than anything that would bring a commit back.
+  const lineEditsActive = workingTreeActive && !viewingCommit && !loading;
+  useShortcut("undoEdit", () => void undoEdit(), { enabled: lineEditsActive });
+  useShortcut("redoEdit", () => void redoEdit(), { enabled: lineEditsActive });
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggleSidebar]);
-
-  // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z redo for inline line edits. While a line's
-  // input is focused, shouldIgnoreKeyboardNavigation bails so the browser's own
-  // text undo runs; once the edit is committed and focus leaves, this takes over.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-      if (event.key.toLowerCase() !== "z") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!workingTreeActive || viewingCommit || loading) return;
-      event.preventDefault();
-      if (event.shiftKey) void redoEdit();
-      else void undoEdit();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workingTreeActive, viewingCommit, loading, selectedPath]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "m") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!canMergeIntoMain || integrationOp || integrationRunning) return;
-      event.preventDefault();
-      void mergeIntoMain();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canMergeIntoMain, integrationOp, integrationRunning]);
+  useShortcut("mergeIntoMain", () => void mergeIntoMain(), {
+    enabled: !!canMergeIntoMain && !integrationOp && !integrationRunning,
+  });
 
   useEffect(() => {
     if (!snapshot) return;
@@ -3071,6 +3092,10 @@ function App() {
       if (shouldIgnoreKeyboardNavigation(event)) return;
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
       if (navZone !== "timeline") return;
+      // The strip isn't on screen in the graph, and navZone stays "timeline"
+      // across the switch, so without this arrows kept moving a selection the
+      // user could no longer see. The graph owns its own keys while it's up.
+      if (historyView === "graph") return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -3110,6 +3135,7 @@ function App() {
   }, [
     snapshot,
     navZone,
+    historyView,
     timelineItems,
     selectedCommit?.hash,
     workingTreeActive,
@@ -3193,6 +3219,7 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
+              worktrees={worktrees}
               loading={loading}
               fetching={fetching}
               pushPhase={pushPhase}
@@ -3213,12 +3240,26 @@ function App() {
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
-              onBranchChange={(branch) => void checkoutBranch(branch)}
+              onOpenWorktree={(path) => void addRepo(path)}
+              onBranchChange={(branch) => {
+                // Git can't check out a branch that's open in another folder.
+                // Rather than let it fail, go to that folder — which is what
+                // the user meant by selecting the branch.
+                const elsewhere = worktrees.find(
+                  (entry) => !entry.isCurrent && entry.branch === branch,
+                );
+                if (elsewhere) {
+                  void addRepo(elsewhere.path);
+                  return;
+                }
+                void checkoutBranch(branch);
+              }}
               viewingCommit={viewingCommit}
               onRefresh={() => void (fetchOnRefresh ? fetchRepo() : refreshRepo())}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
+              onPushTags={() => push(false, false, true)}
               disabled={backupPhase !== "idle"}
               backupSetupAvailable={backupSetupAvailable}
               backupRemoteName={savedBackupRemoteName.trim() || null}
@@ -3238,6 +3279,13 @@ function App() {
 
             <div className="working-view">
                 <HistoryTimeline
+                  historyView={historyView}
+                  onHistoryViewChange={setHistoryView}
+                  lastFetchedAt={displaySnapshot.lastFetchedAt}
+                  currentBranch={displaySnapshot.branch}
+                  worktrees={worktrees}
+                  unpushedCommits={displaySnapshot.unpushedCommits}
+                  onOpenCheckout={(path) => void addRepo(path)}
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
                   aheadCommits={displaySnapshot.aheadCommits ?? []}
@@ -3253,8 +3301,6 @@ function App() {
                   integrationBusy={integrationRunning}
                   onUpdateFromMain={() => void updateFromMain()}
                   onMergeIntoMain={() => void mergeIntoMain()}
-                  onPullUpstream={!integrationOp ? () => void pull(false) : undefined}
-                  pullBusy={pullPhase !== "idle"}
                   inPreview={!!viewingCommit}
                   onOpenVersion={() => void openCommitInFolder()}
                   onReturnToWorkingTree={() => void selectWorkingTree()}
@@ -3388,6 +3434,22 @@ function App() {
                       </button>
                     </aside>
                   </div>
+                ) : historyView === "graph" ? (
+                  <GraphView
+                    commits={displaySnapshot.graphCommits ?? []}
+                    headHash={displaySnapshot.commits[0]?.hash}
+                    headBranch={displaySnapshot.branch}
+                    selectedHash={selectedCommit?.hash}
+                    unpushedTags={unpushedTagSet}
+                    worktrees={worktrees}
+                    onSelect={(commit) => {
+                      // Picking a commit here is picking it in the app, not just
+                      // in this view: land on it in the normal view, the same
+                      // state as selecting it on the timeline.
+                      setHistoryView("strip");
+                      void inspectCommit(commit);
+                    }}
+                  />
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
@@ -3643,6 +3705,15 @@ function App() {
             repoName={snapshot.repo.name}
             repoPath={snapshot.repo.path}
             remotes={snapshot.remotes}
+            worktrees={worktrees}
+            onWorktreesChanged={() => setWorktreeRefresh((n) => n + 1)}
+            onConfirmRemove={(entry) => setWorktreeToRemove(entry)}
+            onOpenWorktree={(worktreePath) => {
+              // Another checkout of the same repository is, to Gitty, just
+              // another repo path: add it if it isn't saved yet, then select it.
+              setRepoSettingsOpen(false);
+              void addRepo(worktreePath);
+            }}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}
             onRemoveRemote={removeRemote}
@@ -3657,6 +3728,33 @@ function App() {
           />
         </>
       ) : null}
+
+      <KeyboardSheet open={keyboardSheetOpen} onClose={() => setKeyboardSheetOpen(false)} />
+
+      <RemoveWorktreeConfirmDialog
+        worktree={worktreeToRemove}
+        loading={removingWorktree}
+        onCancel={() => setWorktreeToRemove(null)}
+        onConfirm={() => {
+          const target = worktreeToRemove;
+          if (!target) return;
+          setRemovingWorktree(true);
+          void (async () => {
+            const result = await run(() =>
+              invoke<ActionResult>("remove_worktree", {
+                path: selectedPath,
+                worktree: target.path,
+              }),
+            );
+            setRemovingWorktree(false);
+            setWorktreeToRemove(null);
+            if (result) {
+              setMessage(result.message);
+              setWorktreeRefresh((n) => n + 1);
+            }
+          })();
+        }}
+      />
 
       <AppSettingsDrawer
         open={settingsOpen}

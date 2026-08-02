@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { FileChange } from "../types";
 import { isStaged, isUntracked, isUnstaged } from "../lib/git";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 
 type ResetAllConfirmDialogProps = {
   open: boolean;

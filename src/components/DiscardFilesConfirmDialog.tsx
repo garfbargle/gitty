@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { FileChange } from "../types";
 import { isUntracked } from "../lib/git";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 
 type DiscardFilesConfirmDialogProps = {
   open: boolean;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeyboard } from "../lib/useMenuKeyboard";
 import { Check, ChevronDown, Download, GitMerge, Loader2 } from "lucide-react";
 
 export type PullPhase = "idle" | "pulling" | "done";
@@ -70,6 +71,8 @@ export function PullButton({
     };
   }, [open]);
 
+  useMenuKeyboard({ open, setOpen, rootRef, triggerSelector: ".pull-btn-main" });
+
   useEffect(() => {
     if (isBusy) setOpen(false);
   }, [isBusy]);
@@ -97,11 +100,6 @@ export function PullButton({
       ref={rootRef}
       aria-live="polite"
     >
-      {showBadge ? (
-        <span className="pull-btn-badge" aria-hidden="true">
-          {badgeCount}
-        </span>
-      ) : null}
       <button
         type="button"
         className="pull-btn-main"
@@ -122,8 +120,13 @@ export function PullButton({
           </>
         ) : (
           <>
+            {/* The count sits in the label rather than on a floating badge
+                pinned to the button's corner. A notification badge is a phone
+                pattern: it overlapped the refresh button beside it, and it made
+                the number look like an alert rather than the size of the thing
+                the button is about to do. "Pull 2" needs no decoding. */}
             <Download size={15} />
-            Pull
+            {showBadge ? `Pull ${badgeCount}` : "Pull"}
           </>
         )}
       </button>
@@ -133,6 +136,7 @@ export function PullButton({
           type="button"
           className="pull-btn-chevron"
           title="Pull options"
+          aria-label="Pull options"
           disabled={isLocked}
           aria-expanded={open}
           aria-haspopup="menu"

@@ -1,0 +1,126 @@
+/* Keyboard reference
+ *
+ * Component-scoped, like BranchSelect.css. App.css is ~7,000 lines and that is
+ * how a block once landed inside another rule unnoticed. */
+
+.keyboard-sheet-scrim {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: var(--space-6);
+  position: fixed;
+  z-index: 60;
+}
+
+.keyboard-sheet {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow), 0 24px 64px rgba(0, 0, 0, 0.35);
+  max-height: 80vh;
+  max-width: 720px;
+  overflow-y: auto;
+  padding: var(--space-5);
+  width: 100%;
+}
+
+.keyboard-sheet-head {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+
+.keyboard-sheet-head h2 {
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  margin: 0;
+}
+
+.keyboard-sheet-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  padding: 2px var(--space-2);
+}
+
+.keyboard-sheet-close:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+/* Two columns where there is room. The groups are short, so a single column
+   leaves the sheet tall and mostly empty. */
+.keyboard-sheet-groups {
+  column-gap: var(--space-6);
+  display: grid;
+  grid-template-columns: 1fr;
+  row-gap: var(--space-5);
+}
+
+@media (min-width: 620px) {
+  .keyboard-sheet-groups {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.keyboard-sheet-group h3 {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  margin: 0 0 var(--space-2);
+  text-transform: uppercase;
+}
+
+.keyboard-sheet-group dl {
+  display: grid;
+  gap: var(--space-1-5);
+  margin: 0;
+}
+
+/* Keys share one column so they line up down the group; the description takes
+   the rest. A ragged key column is the same scanning problem the graph had. */
+.keyboard-sheet-row {
+  align-items: baseline;
+  column-gap: var(--space-3);
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+}
+
+.keyboard-sheet-row dt {
+  margin: 0;
+}
+
+.keyboard-sheet-row dd {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.keyboard-sheet-row kbd {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  padding: 1px var(--space-1-5);
+  white-space: nowrap;
+}
+
+.keyboard-sheet-note {
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  margin: var(--space-5) 0 0;
+  padding-top: var(--space-3);
+}

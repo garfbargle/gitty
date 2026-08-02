@@ -153,6 +153,10 @@ struct RepoSnapshot {
     sibling_tip: Option<SiblingTip>,
     tags: Vec<TagEntry>,
     unpushed_tags: Vec<String>,
+    /// Which commits on HEAD the remote does not have, newest first, so the
+    /// timeline can draw the push boundary instead of leaving the count in the
+    /// push button as the only word on the subject.
+    unpushed_commits: Vec<String>,
     /// The current branch exists locally but not on any remote, so pushing it
     /// would publish it. Lights the push button even with no commits ahead.
     branch_unpublished: bool,
@@ -164,6 +168,17 @@ struct RepoSnapshot {
     /// configured backup remotes. Backup setup enables this by default; users
     /// can change it later in repository settings.
     backup_on_push: bool,
+    /// When the remote was last actually reached, as milliseconds since the
+    /// epoch, or `None` if it never has been.
+    ///
+    /// Everything the interface says about the remote (in sync, ahead, behind,
+    /// the ghost lane) is only as true as the last successful fetch, and until
+    /// now those claims were stated flat. A repository that has never been
+    /// fetched, or whose fetches have been failing quietly, looked exactly like
+    /// one checked a second ago. This lets the interface age its own claims
+    /// instead of asserting them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_fetched_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -683,6 +698,87 @@ fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Check that a folder we are about to create can actually be created.
+///
+/// Without this, `git worktree add` into an unwritable location fails with its
+/// own text and the whole command echoed back — accurate, and useless to
+/// anyone who isn't reading git's source. Walks up to the nearest ancestor
+/// that exists and probes it, because that is the directory git will write in.
+fn writable_ancestor(directory: &Path) -> Result<(), String> {
+    let mut ancestor = directory;
+    while !ancestor.exists() {
+        match ancestor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => ancestor = parent,
+            _ => return Err(format!("{} is not a path this computer has.", directory.display())),
+        }
+    }
+
+    if !ancestor.is_dir() {
+        return Err(format!(
+            "{} is a file, so a folder can't be created inside it.",
+            ancestor.display()
+        ));
+    }
+
+    // Permission bits alone don't answer this: ownership, ACLs and read-only
+    // mounts all decide it too. Creating something is the only honest test.
+    //
+    // The name has to be unique per call, not per process. Keyed on the pid
+    // alone, two probes of the same directory at once collided: the second
+    // create failed with "already exists" and was reported as "you cannot write
+    // here". It surfaced as a test that failed roughly one run in three,
+    // because the suite runs in parallel threads inside one process, and it
+    // would have done the same to two concurrent adds in the app.
+    static PROBE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let unique = PROBE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = ancestor.join(format!(".gitty-write-test-{}-{unique}", std::process::id()));
+    let _ = fs::remove_dir_all(&probe);
+    match fs::create_dir(&probe) {
+        Ok(()) => {
+            let _ = fs::remove_dir_all(&probe);
+            Ok(())
+        }
+        Err(err) => Err(format!(
+            "Gitty can't create a folder in {} ({err}). Choose somewhere you can write to.",
+            ancestor.display()
+        )),
+    }
+}
+
+/// When this repository last successfully reached its remote.
+///
+/// Read from `FETCH_HEAD`'s modification time rather than anything Gitty
+/// stores. Git rewrites that file on every fetch, including one that brings
+/// nothing back, so the answer survives restarts, needs no cache to keep in
+/// sync, and stays correct when the user fetches from a terminal instead.
+///
+/// `--git-common-dir` rather than `--git-dir`: a linked worktree has its own
+/// git dir, but FETCH_HEAD lives in the shared one.
+///
+/// A *failed* fetch still rewrites FETCH_HEAD, so mtime alone would report a
+/// remote we could not reach as freshly contacted — the exact "in sync about a
+/// remote we never talked to" claim the unknown state exists to prevent. Git
+/// truncates the file to nothing when the fetch fails and writes one line per
+/// ref when it succeeds, so an empty file means the last attempt did not land.
+fn last_fetched_at(repo_path: &Path) -> Option<u64> {
+    let common = git(repo_path, &["rev-parse", "--git-common-dir"]).ok()?;
+    let common = PathBuf::from(common.trim());
+    let common = if common.is_absolute() {
+        common
+    } else {
+        repo_path.join(common)
+    };
+    let meta = fs::metadata(common.join("FETCH_HEAD")).ok()?;
+    if meta.len() == 0 {
+        return None;
+    }
+    meta.modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|since| since.as_millis() as u64)
+}
+
 fn normalize_repo(path: &str) -> Result<RepoEntry, String> {
     let repo_path = PathBuf::from(path);
     if !repo_path.exists() {
@@ -793,13 +889,24 @@ fn validate_tag_name(name: &str) -> Result<String, String> {
     Ok(name)
 }
 
+/// Tag name -> the commit it ultimately points at.
+///
+/// `%(objectname)` is the *tag object's* hash for an annotated tag, and the
+/// commit's hash for a lightweight one. The remote side reads `ls-remote`,
+/// which reports both `refs/tags/x` and the peeled `refs/tags/x^{}` and keeps
+/// the peeled commit. Comparing one against the other therefore never matched
+/// for an annotated tag, and every one of them was reported as unpushed for
+/// ever: in one repository, 72 of 244 tags, all of them present on the remote.
+///
+/// `%(*objectname)` is the peeled commit and is empty for a lightweight tag, so
+/// preferring it and falling back gives the same thing on both sides.
 fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
     let Ok(output) = git(
         repo_path,
         &[
             "for-each-ref",
             "refs/tags",
-            "--format=%(refname:short)\x1f%(objectname)",
+            "--format=%(refname:short)\x1f%(objectname)\x1f%(*objectname)",
         ],
     ) else {
         return HashMap::new();
@@ -810,7 +917,9 @@ fn local_tag_hashes(repo_path: &Path) -> HashMap<String, String> {
         .filter_map(|line| {
             let mut parts = line.split('\x1f');
             let name = parts.next()?.to_string();
-            let hash = parts.next()?.to_string();
+            let object = parts.next()?.to_string();
+            let peeled = parts.next().unwrap_or("").to_string();
+            let hash = if peeled.is_empty() { object } else { peeled };
             if name.is_empty() || hash.is_empty() {
                 return None;
             }
@@ -862,10 +971,116 @@ fn unpushed_tags_to_remote(repo_path: &Path, remote: &str) -> Vec<String> {
         .collect()
 }
 
+/// The commits on HEAD that no remote has yet, newest first.
+///
+/// The push button reported a count and nothing said which commits it meant, so
+/// "16 to push" was a number you had to take on trust. The timeline can only
+/// draw the boundary if it is told where the boundary is, and it cannot work
+/// that out itself: an unpublished branch has no ref on it to anchor to.
+///
+/// The anchor is the branch's own upstream when it has one. When it does not,
+/// the remote's copy of the trunk is the honest answer — nothing on this branch
+/// has been pushed anywhere, so everything since it left the trunk is new to
+/// the remote. With no remotes at all there is nothing to be ahead of.
+fn unpushed_commit_hashes(
+    repo_path: &Path,
+    upstream: &Option<String>,
+    branch: &str,
+    trunk: Option<&str>,
+    has_remotes: bool,
+) -> Vec<String> {
+    if !has_remotes {
+        return Vec::new();
+    }
+
+    // Same ladder `ahead_behind` and `branch_published` use, and for the same
+    // reason: a branch can exist on the remote without a configured upstream
+    // -- fetched from a colleague, or tracking lost in a config edit. Skipping
+    // the `<remote>/<branch>` rung and going straight to the trunk marked every
+    // commit since the fork point as unpushed while the header, which does
+    // check that rung, said the branch was in sync. The strip and the button
+    // must not disagree about what has been pushed.
+    let base = match upstream {
+        Some(name) if !name.is_empty() => name.clone(),
+        _ => {
+            let remote = match default_remote_name(repo_path) {
+                Some(remote) => remote,
+                None => return Vec::new(),
+            };
+            let own = format!("{remote}/{branch}");
+            let own_exists = !is_detached_branch(branch)
+                && git_raw(repo_path, &["rev-parse", "--verify", "--quiet", &own])
+                    .map(|(ok, _, _)| ok)
+                    .unwrap_or(false);
+            if own_exists {
+                own
+            } else {
+                match trunk {
+                    Some(trunk) => format!("{remote}/{trunk}"),
+                    None => return Vec::new(),
+                }
+            }
+        }
+    };
+
+    // The base can be absent — a brand-new repository, or a trunk that exists
+    // locally but was never pushed. Saying "everything is unpushed" from a
+    // missing ref would be a guess, so say nothing.
+    let found = git_raw(repo_path, &["rev-parse", "--verify", "--quiet", &base])
+        .map(|(ok, _, _)| ok)
+        .unwrap_or(false);
+    if !found {
+        return Vec::new();
+    }
+
+    // Capped: this feeds a strip that draws a few dozen nodes, and a branch
+    // thousands of commits from its base does not need every hash to mark one
+    // boundary.
+    git_owned(
+        repo_path,
+        vec![
+            "rev-list".to_string(),
+            "--max-count=400".to_string(),
+            format!("{base}..HEAD"),
+        ],
+    )
+    .map(|out| {
+        out.lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 fn unpushed_tags(repo_path: &Path) -> Vec<String> {
     default_remote_name(repo_path)
         .map(|remote| unpushed_tags_to_remote(repo_path, &remote))
         .unwrap_or_default()
+}
+
+/// Which tags a push should carry, given whether the caller opted in.
+///
+/// This is a one-line decision, extracted because it is made twice -- once for
+/// the primary remote and once per backup -- and the two disagreed. The backup
+/// path computed its tags unconditionally, so a commits-only push still copied
+/// every unpushed tag to every backup remote, which on a fork means the
+/// upstream's entire release history published under your name. Having one
+/// function to call is what makes the rule testable rather than restated.
+fn tags_for_push(repo_path: &Path, opt_in: bool) -> Vec<String> {
+    if opt_in {
+        unpushed_tags(repo_path)
+    } else {
+        Vec::new()
+    }
+}
+
+fn backup_tags_for_push(repo_path: &Path, remote: &str, opt_in: bool) -> Vec<String> {
+    if opt_in {
+        unpushed_tags_to_remote(repo_path, remote)
+    } else {
+        Vec::new()
+    }
 }
 
 fn backup_push_pending(repo_path: &Path) -> bool {
@@ -1714,6 +1929,8 @@ fn repo_snapshot_blocking(
     };
 
     let trunk = integration_branch(&branches);
+    let unpushed_commits =
+        unpushed_commit_hashes(&repo_path, &upstream, &branch, trunk.as_deref(), !remotes.is_empty());
     let sibling = sibling_tip(&repo_path, &branch, &branches, &trunk);
 
     let is_clean = changes.is_empty();
@@ -1737,9 +1954,11 @@ fn repo_snapshot_blocking(
         sibling_tip: sibling,
         tags,
         unpushed_tags: unpushed_tag_names,
+        unpushed_commits,
         branch_unpublished,
         backup_push_pending: backup_push_pending(&repo_path),
         backup_on_push: backup_on_push(&repo_path),
+        last_fetched_at: last_fetched_at(&repo_path),
     })
 }
 
@@ -1908,6 +2127,15 @@ fn commit_diff(path: String, commit: String) -> Result<String, String> {
         vec![
             "--no-pager".to_string(),
             "show".to_string(),
+            // A merge commit defaults to a combined diff ("diff --cc"), which
+            // the frontend's parser does not understand, so it fell back to
+            // dumping the raw text as wrapped prose. These two flags ask for
+            // the merge's changes against its first parent in ordinary
+            // "diff --git" form, which is both parseable and the comparison a
+            // reader of a merge actually wants: what this merge brought in.
+            // They are no-ops on an ordinary commit.
+            "-m".to_string(),
+            "--first-parent".to_string(),
             "--stat".to_string(),
             "--patch".to_string(),
             "--find-renames".to_string(),
@@ -2356,6 +2584,20 @@ fn checkout_branch(path: String, branch: String) -> Result<ActionResult, String>
         {
             Ok(out) => out,
             Err(err) => {
+                // The wall you hit the day you start using worktrees: git
+                // refuses to check out a branch that is already open in another
+                // folder, and says so as `fatal: '<branch>' is already checked
+                // out at '<path>'`. We already know that path, so name the
+                // folder and let the caller offer to open it instead of showing
+                // a dead end.
+                if let Some(other) = existing_worktree_for(repo_path, &branch) {
+                    if !same_path(&other, repo_path) {
+                        return Err(format!(
+                            "{branch} is already open in {}. Open that folder instead of switching here.",
+                            other.display()
+                        ));
+                    }
+                }
                 if !changed_files(repo_path).is_empty() {
                     return Err(format!(
                         "Switching to {branch} would overwrite unsaved changes. Commit or set them aside first."
@@ -4172,6 +4414,193 @@ fn merge_into_trunk(path: String, source: Option<String>) -> Result<MergeOutcome
     })
 }
 
+/// One checkout of a repository. The main checkout plus every linked worktree,
+/// which is what lets a repository have several branches open at once in
+/// different folders.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeEntry {
+    path: String,
+    /// Short branch name, or `None` when the checkout is detached.
+    branch: Option<String>,
+    head: String,
+    /// The original clone. It cannot be removed while linked worktrees exist.
+    is_main: bool,
+    /// The checkout the user currently has open in Gitty.
+    is_current: bool,
+    detached: bool,
+    locked: bool,
+    /// Git considers the folder gone; `git worktree prune` would drop it.
+    prunable: bool,
+    /// Lives under Gitty's own scratch namespace (a merge or commit preview),
+    /// not something the user created. Hidden from the user's list.
+    internal: bool,
+}
+
+/// Parses `git worktree list --porcelain`. Blocks are separated by blank lines
+/// and the first block is always the main checkout.
+fn parse_worktree_list(output: &str, repo_path: &Path) -> Vec<WorktreeEntry> {
+    let mut entries: Vec<WorktreeEntry> = Vec::new();
+    let mut current: Option<WorktreeEntry> = None;
+
+    let finish = |entries: &mut Vec<WorktreeEntry>, entry: Option<WorktreeEntry>| {
+        if let Some(mut entry) = entry {
+            entry.is_main = entries.is_empty();
+            entries.push(entry);
+        }
+    };
+
+    for line in output.lines() {
+        let line = line.trim_end();
+        if line.is_empty() {
+            finish(&mut entries, current.take());
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            finish(&mut entries, current.take());
+            let wt_path = rest.trim().to_string();
+            let as_path = PathBuf::from(&wt_path);
+            current = Some(WorktreeEntry {
+                is_current: same_path(&as_path, repo_path),
+                internal: is_gitty_worktree(&as_path),
+                path: wt_path,
+                branch: None,
+                head: String::new(),
+                is_main: false,
+                detached: false,
+                locked: false,
+                prunable: false,
+            });
+        } else if let Some(entry) = current.as_mut() {
+            if let Some(rest) = line.strip_prefix("HEAD ") {
+                entry.head = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("branch ") {
+                entry.branch = Some(
+                    rest.trim()
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(rest.trim())
+                        .to_string(),
+                );
+            } else if line == "detached" {
+                entry.detached = true;
+            } else if line == "locked" || line.starts_with("locked ") {
+                entry.locked = true;
+            } else if line == "prunable" || line.starts_with("prunable ") {
+                entry.prunable = true;
+            }
+        }
+    }
+    finish(&mut entries, current.take());
+    entries
+}
+
+/// Compares two paths after canonicalising, so `/tmp` and `/private/tmp` (and
+/// trailing separators) don't read as different checkouts.
+fn same_path(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => left == right,
+    }
+}
+
+/// Every checkout of this repository. Gitty's own scratch worktrees are marked
+/// `internal` so the UI can leave them out.
+#[tauri::command]
+fn list_worktrees(path: String) -> Result<Vec<WorktreeEntry>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let output = git(&repo_path, &["worktree", "list", "--porcelain"])?;
+    Ok(parse_worktree_list(&output, &repo_path))
+}
+
+/// Open a branch in its own folder. `create_branch` starts a new branch at the
+/// current HEAD instead of checking out an existing one.
+#[tauri::command]
+fn add_worktree(
+    path: String,
+    directory: String,
+    branch: String,
+    create_branch: Option<bool>,
+) -> Result<String, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let branch = branch.trim().to_string();
+    let directory = directory.trim().to_string();
+    if branch.is_empty() {
+        return Err("Branch name is required.".to_string());
+    }
+    if directory.is_empty() {
+        return Err("Folder is required.".to_string());
+    }
+    if PathBuf::from(&directory).exists() {
+        return Err(format!("{directory} already exists. Choose a folder that doesn't exist yet."));
+    }
+    writable_ancestor(&PathBuf::from(&directory))?;
+
+    // Clear git's memory of folders deleted from underneath it, so a reused name
+    // doesn't fail with a stale registration.
+    let _ = git(&repo_path, &["worktree", "prune"]);
+
+    let args: Vec<String> = if create_branch.unwrap_or(false) {
+        vec![
+            "worktree".into(),
+            "add".into(),
+            "-b".into(),
+            branch.clone(),
+            directory.clone(),
+        ]
+    } else {
+        vec![
+            "worktree".into(),
+            "add".into(),
+            directory.clone(),
+            branch.clone(),
+        ]
+    };
+    git_owned(&repo_path, args)?;
+    Ok(directory)
+}
+
+/// Stop tracking a checkout and delete its folder. The main checkout can never
+/// be removed this way.
+#[tauri::command]
+fn remove_worktree(path: String, worktree: String, force: Option<bool>) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let target = PathBuf::from(worktree.trim());
+
+    if let Some(main) = main_worktree(&repo_path) {
+        if same_path(&target, &main) {
+            return Err("That's the repository's main folder, so it can't be removed here.".to_string());
+        }
+    }
+
+    let target_str = target.to_string_lossy().to_string();
+    let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
+    if force.unwrap_or(false) {
+        args.push("--force".into());
+    }
+    args.push(target_str.clone());
+
+    let output = git_owned(&repo_path, args)?;
+    Ok(ActionResult {
+        message: format!("Removed {target_str}"),
+        output,
+    })
+}
+
+/// Drop registrations for folders that no longer exist on disk.
+#[tauri::command]
+fn prune_worktrees(path: String) -> Result<ActionResult, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let output = git(&repo_path, &["worktree", "prune", "-v"])?;
+    Ok(ActionResult {
+        message: "Cleaned up folders git could no longer find.".to_string(),
+        output,
+    })
+}
+
 /// Check `commit` out into a throwaway worktree and return its path, so the user
 /// can browse an old version on disk without detaching HEAD or touching their
 /// working tree. Replaces the old "time travel" checkout.
@@ -4459,6 +4888,7 @@ fn push_repo_blocking(
     path: String,
     force: bool,
     hard: bool,
+    tags: bool,
 ) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -4467,7 +4897,7 @@ fn push_repo_blocking(
     if let Some(remote) = remote.as_deref() {
         emit_git_progress(&app, &repo.path, format!("Checking {remote}"), "Checking tags and remote state…");
     }
-    let tags_to_push = unpushed_tags(repo_path);
+    let tags_to_push = tags_for_push(repo_path, tags);
     let backup_after_push = backup_on_push(repo_path);
     let retrying_backup = backup_push_pending(repo_path) && backup_after_push;
     let mut outputs = Vec::new();
@@ -4537,7 +4967,13 @@ fn push_repo_blocking(
         // Compare each backup independently. This repairs tags that reached the
         // primary before a backup failed, and makes a retry complete rather
         // than merely re-sending the branch.
-        let backup_tags = unpushed_tags_to_remote(repo_path, &backup);
+        //
+        // Gated on the same `tags` opt-in as the primary. Without the gate this
+        // computed every unpushed tag regardless, so a commits-only push still
+        // copied the upstream's whole release history to every backup remote --
+        // the exact harm the flag exists to prevent, aimed at a different
+        // remote, and it left the backup holding tags the primary does not.
+        let backup_tags = backup_tags_for_push(repo_path, &backup, tags);
         if backup_branch.is_none() && backup_tags.is_empty() {
             continue;
         }
@@ -4682,14 +5118,24 @@ async fn backup_repo(app: AppHandle, path: String) -> Result<ActionResult, Strin
         .map_err(|err| format!("Backup task failed: {err}"))?
 }
 
+/// `tags` is opt-in and defaults to false.
+///
+/// Pushing tags alongside commits was silent and unconditional, which is wrong
+/// whenever the tags did not originate here. A fork typically carries the
+/// upstream's whole release history — tags arrive with a fetch, are never
+/// mirrored to the fork by `git push`, and so read as permanently unpushed.
+/// Pressing Push then published someone else's releases under your name, in a
+/// count the button never said was tags. The caller now has to ask.
 #[tauri::command]
 async fn push_repo(
     app: AppHandle,
     path: String,
     force: bool,
     hard: bool,
+    tags: Option<bool>,
 ) -> Result<ActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(app, path, force, hard))
+    let tags = tags.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(app, path, force, hard, tags))
         .await
         .map_err(|err| format!("Push task failed: {err}"))?
 }
@@ -5211,6 +5657,10 @@ pub fn run() {
             remove_linked_folder,
             open_commit_worktree,
             cleanup_commit_worktrees,
+            list_worktrees,
+            add_worktree,
+            remove_worktree,
+            prune_worktrees,
             merge_status,
             abort_merge,
             resolve_conflict,
@@ -5254,6 +5704,464 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+
+    const SAMPLE: &str = "\
+worktree /repo/main
+HEAD aaaa1111
+branch refs/heads/main
+
+worktree /repo/feature
+HEAD bbbb2222
+branch refs/heads/feature
+
+worktree /repo/detached
+HEAD cccc3333
+detached
+
+worktree /repo/gone
+HEAD dddd4444
+branch refs/heads/old
+prunable gitdir file points to non-existent location
+
+worktree /repo/held
+HEAD eeee5555
+branch refs/heads/held
+locked under review
+";
+
+    #[test]
+    fn parses_every_block_shape() {
+        let entries = parse_worktree_list(SAMPLE, Path::new("/repo/feature"));
+        assert_eq!(entries.len(), 5);
+
+        // First block is always the main checkout.
+        assert!(entries[0].is_main);
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        assert!(!entries[1].is_main);
+
+        // refs/heads/ is stripped so the UI can show a plain branch name.
+        assert_eq!(entries[1].branch.as_deref(), Some("feature"));
+
+        // Detached checkouts have no branch.
+        assert!(entries[2].detached);
+        assert_eq!(entries[2].branch, None);
+
+        // Flags carry their trailing reason text without breaking parsing.
+        assert!(entries[3].prunable);
+        assert!(entries[4].locked);
+        assert_eq!(entries[4].branch.as_deref(), Some("held"));
+
+        // HEAD is captured per block.
+        assert_eq!(entries[0].head, "aaaa1111");
+        assert_eq!(entries[4].head, "eeee5555");
+    }
+
+    #[test]
+    fn marks_only_the_open_checkout_as_current() {
+        let entries = parse_worktree_list(SAMPLE, Path::new("/repo/feature"));
+        let current: Vec<&str> = entries
+            .iter()
+            .filter(|entry| entry.is_current)
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert_eq!(current, vec!["/repo/feature"]);
+    }
+
+    #[test]
+    fn tolerates_trailing_block_without_blank_line() {
+        // git omits the trailing newline in some versions; the last block must
+        // still be emitted rather than dropped.
+        let out = "worktree /only\nHEAD ffff6666\nbranch refs/heads/solo";
+        let entries = parse_worktree_list(out, Path::new("/elsewhere"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].branch.as_deref(), Some("solo"));
+        assert!(entries[0].is_main);
+        assert!(!entries[0].is_current);
+    }
+
+    #[test]
+    fn flags_gitty_scratch_worktrees_as_internal() {
+        let out = "worktree /tmp/gitty-worktrees/abc/feature\nHEAD 1111\nbranch refs/heads/feature\n";
+        let entries = parse_worktree_list(out, Path::new("/repo"));
+        assert!(entries[0].internal);
+    }
+
+    #[test]
+    fn empty_output_yields_no_entries() {
+        assert!(parse_worktree_list("", Path::new("/repo")).is_empty());
+    }
+
+    // The commands below touch the filesystem: they create folders and delete
+    // them. Each runs against its own throwaway repository so they can run in
+    // parallel and leave nothing behind.
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git should run");
+        assert!(
+            status.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&status.stderr)
+        );
+    }
+
+    /// A repository with one commit and a spare `feature` branch.
+    fn scratch_repo(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("gitty-wt-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("temp dir");
+        run_git(&root, &["init", "-q", "-b", "main", "."]);
+        run_git(&root, &["config", "user.email", "test@example.com"]);
+        run_git(&root, &["config", "user.name", "Test"]);
+        fs::write(root.join("a.txt"), "one").expect("write");
+        run_git(&root, &["add", "-A"]);
+        run_git(&root, &["commit", "-qm", "first"]);
+        run_git(&root, &["branch", "feature"]);
+        root
+    }
+
+    fn paths_of(repo: &Path) -> Vec<String> {
+        list_worktrees(repo.to_string_lossy().to_string())
+            .expect("list")
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    #[test]
+    fn adds_a_worktree_for_an_existing_branch() {
+        let repo = scratch_repo("add");
+        let target = repo.parent().unwrap().join(format!(
+            "gitty-wt-added-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&target);
+
+        let created = add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add_worktree should succeed");
+
+        assert!(Path::new(&created).exists(), "folder should be on disk");
+        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert_eq!(entries.len(), 2);
+        let added = entries
+            .iter()
+            .find(|entry| !entry.is_main)
+            .expect("linked worktree present");
+        assert_eq!(added.branch.as_deref(), Some("feature"));
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn refuses_a_folder_that_already_exists() {
+        let repo = scratch_repo("exists");
+        // The repository's own folder is the simplest thing that already exists.
+        let err = add_worktree(
+            repo.to_string_lossy().to_string(),
+            repo.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect_err("should refuse an existing folder");
+        assert!(err.contains("already exists"), "got: {err}");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn removing_the_main_checkout_is_refused() {
+        let repo = scratch_repo("main-guard");
+        let err = remove_worktree(
+            repo.to_string_lossy().to_string(),
+            repo.to_string_lossy().to_string(),
+            Some(false),
+        )
+        .expect_err("the main checkout must not be removable here");
+        assert!(err.contains("main folder"), "got: {err}");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn removes_a_linked_worktree() {
+        let repo = scratch_repo("remove");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-remove-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add");
+        assert_eq!(paths_of(&repo).len(), 2);
+
+        remove_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            Some(false),
+        )
+        .expect("remove_worktree should succeed");
+
+        assert!(!target.exists(), "folder should be gone from disk");
+        assert_eq!(paths_of(&repo).len(), 1, "registration should be gone too");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn prune_forgets_a_folder_deleted_behind_gits_back() {
+        let repo = scratch_repo("prune");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-prune-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add");
+
+        // Delete the folder the way a user would, leaving git's registration behind.
+        fs::remove_dir_all(&target).expect("remove folder");
+        let before = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert_eq!(before.len(), 2, "git still remembers it");
+        assert!(
+            before.iter().any(|entry| entry.prunable),
+            "the stale entry should be flagged prunable"
+        );
+
+        prune_worktrees(repo.to_string_lossy().to_string()).expect("prune");
+        assert_eq!(paths_of(&repo).len(), 1, "stale registration dropped");
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn creates_a_new_branch_when_asked() {
+        let repo = scratch_repo("newbranch");
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-new-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "brand-new".to_string(),
+            Some(true),
+        )
+        .expect("add with create_branch");
+
+        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.branch.as_deref() == Some("brand-new")),
+            "the new branch should be checked out in the new folder"
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// The writability probe creates a directory to prove it can. Named on the
+    /// process id alone, two probes of the same parent at once collided: the
+    /// loser's create failed with "already exists" and was reported to the user
+    /// as "you cannot write here". It showed up as add_worktree failing about
+    /// one suite run in three, since tests share a process, and would have done
+    /// the same to two adds running together in the app.
+    #[test]
+    fn concurrent_writability_probes_do_not_collide() {
+        let dir = std::env::temp_dir().join(format!("gitty-probe-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+
+        let target = dir.join("not-created-yet");
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| writable_ancestor(&target)))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|h| h.join().expect("probe thread").err())
+                .collect()
+        });
+
+        assert!(
+            failures.is_empty(),
+            "probing one directory from several threads reported it unwritable: {failures:?}"
+        );
+        // And nothing is left behind afterwards.
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .expect("read temp dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(leftovers.is_empty(), "probe files left behind: {leftovers:?}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// An annotated tag's own object hash is not the commit it points at, and
+    /// the remote side reports the peeled commit. Comparing the two marked every
+    /// annotated tag as unpushed for ever -- 72 of 244 in one real repository,
+    /// every one of them already on the remote.
+    /// The push button's headline behaviour, which had no test at all: a
+    /// commits-only push must not carry tags, to the primary *or* to a backup.
+    ///
+    /// A fork carries the upstream's whole release history -- tags arrive with
+    /// a fetch and `git push` never mirrors them -- so "unpushed tags" on a
+    /// fork are usually someone else's releases. Pushing them republishes them
+    /// under the fork's name. The backup path got this wrong while the primary
+    /// path got it right, and nothing failed.
+    #[test]
+    fn a_commits_only_push_carries_no_tags_to_any_remote() {
+        let repo = scratch_repo("tags-optin");
+        let make_remote = |suffix: &str| {
+            let path = repo
+                .parent()
+                .unwrap()
+                .join(format!("gitty-optin-{}-{}.git", suffix, std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("remote dir");
+            run_git(&path, &["init", "-q", "--bare", "."]);
+            path
+        };
+        let origin = make_remote("origin");
+        let backup = make_remote("backup");
+        run_git(&repo, &["remote", "add", "origin", &origin.to_string_lossy()]);
+        run_git(&repo, &["remote", "add", "backup", &backup.to_string_lossy()]);
+        run_git(&repo, &["push", "-q", "origin", "main"]);
+        run_git(&repo, &["tag", "-a", "v9.9.9", "-m", "someone else's release"]);
+
+        assert!(
+            tags_for_push(&repo, false).is_empty(),
+            "a commits-only push must not select any tag for the primary remote"
+        );
+        assert!(
+            backup_tags_for_push(&repo, "backup", false).is_empty(),
+            "a commits-only push must not select any tag for a backup remote either -- \
+             this is the case that shipped broken"
+        );
+
+        // And the opt-in still works, or the flag would be a way to never push
+        // a tag at all.
+        assert!(
+            tags_for_push(&repo, true).contains(&"v9.9.9".to_string()),
+            "opting in must still select the unpushed tag"
+        );
+        assert!(
+            backup_tags_for_push(&repo, "backup", true).contains(&"v9.9.9".to_string()),
+            "opting in must still select the tag for the backup remote"
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&backup);
+    }
+
+    #[test]
+    fn a_pushed_annotated_tag_is_not_reported_as_unpushed() {
+        let repo = scratch_repo("tags");
+        let remote = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-tag-remote-{}.git", std::process::id()));
+        let _ = fs::remove_dir_all(&remote);
+        fs::create_dir_all(&remote).expect("remote dir");
+        run_git(&remote, &["init", "-q", "--bare", "."]);
+        run_git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+
+        // One of each kind: the lightweight tag always compared equal, so the
+        // bug was invisible in a repository that only used those.
+        run_git(&repo, &["tag", "light-1"]);
+        run_git(&repo, &["tag", "-a", "annotated-1", "-m", "a release"]);
+        run_git(&repo, &["push", "-q", "origin", "main", "--tags"]);
+
+        let unpushed = unpushed_tags(&repo);
+        assert!(
+            unpushed.is_empty(),
+            "both tags are on the remote, but these were reported unpushed: {unpushed:?}"
+        );
+
+        // And a tag that genuinely has not been pushed is still caught.
+        run_git(&repo, &["tag", "-a", "annotated-2", "-m", "not pushed"]);
+        assert_eq!(unpushed_tags(&repo), vec!["annotated-2".to_string()]);
+
+        let _ = fs::remove_dir_all(&remote);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// A fetch that could not reach the remote still rewrites FETCH_HEAD, so
+    /// its mtime moves forward on failure just as it does on success. Only the
+    /// file's contents tell the two apart, and reporting a failed fetch as
+    /// fresh is the "in sync with a remote we never reached" claim the unknown
+    /// state was added to prevent.
+    #[test]
+    fn a_failed_fetch_does_not_count_as_reaching_the_remote() {
+        let repo = scratch_repo("fetchfail");
+        let remote = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-remote-{}.git", std::process::id()));
+        let _ = fs::remove_dir_all(&remote);
+        fs::create_dir_all(&remote).expect("remote dir");
+        run_git(&remote, &["init", "-q", "--bare", "."]);
+
+        // Never fetched: no FETCH_HEAD at all.
+        assert_eq!(last_fetched_at(&repo), None, "never fetched is unknown");
+
+        run_git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+        run_git(&repo, &["push", "-q", "origin", "main"]);
+        run_git(&repo, &["fetch", "-q", "origin"]);
+        assert!(
+            last_fetched_at(&repo).is_some(),
+            "a fetch that reached the remote is a real timestamp"
+        );
+
+        // Point the remote somewhere that cannot answer. Git empties
+        // FETCH_HEAD but still updates its mtime.
+        run_git(
+            &repo,
+            &["remote", "set-url", "origin", "/nonexistent/nope.git"],
+        );
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["fetch", "origin"])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output();
+
+        assert_eq!(
+            last_fetched_at(&repo),
+            None,
+            "a failed fetch must read as unknown, not fresh"
+        );
+
+        let _ = fs::remove_dir_all(&remote);
+        let _ = fs::remove_dir_all(&repo);
+    }
 }
 
 #[cfg(test)]
