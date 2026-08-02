@@ -262,42 +262,94 @@ button:focus-visible {
   min-height: 0;
 }
 
+/* The label and the controls are different kinds of thing and now read that
+   way. Previously both sat at 11px/700 uppercase with the sort control also
+   carrying a filled background, which made the control heavier than the
+   heading it sat beside, and `space-between` pushed them apart with no
+   breathing room in between. The row also overflowed: heading, sort control
+   and two icon buttons need roughly 258px inside a 220px sidebar, so the
+   buttons spilled past the sidebar's edge. */
+/* The label and the controls are different kinds of thing and now read that
+   way. Both used to sit at 11px/700 uppercase, with the sort control also
+   carrying a filled background, so the control read louder than the heading
+   beside it.
+
+   They also didn't fit. Heading (~105px), labelled sort control (~72px) and
+   the collapse button (28px) need about 215px of the 196px available inside a
+   220px sidebar, so the row overflowed the sidebar's edge. Rather than
+   truncating the heading or dropping a control, the actions wrap onto their
+   own line when the sidebar is narrow and sit inline once it's wide enough —
+   which the layout tokens allow at 1600px and above. */
 .sidebar-header {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 11px;
-  font-weight: 700;
-  justify-content: space-between;
-  letter-spacing: 0.05em;
-  padding: 14px 12px 8px;
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  gap: var(--space-2);
+  letter-spacing: var(--tracking-caps);
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  row-gap: var(--space-1-5);
   text-transform: uppercase;
+}
+
+/* The heading keeps its full width; the controls are what move. */
+.sidebar-header > span {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sidebar-header-actions {
   align-items: center;
   display: inline-flex;
-  gap: 4px;
+  flex-shrink: 0;
+  gap: var(--space-0-5);
+  /* Stays right-aligned whether it shares the heading's line or has its own. */
+  margin-left: auto;
 }
 
+/* Quiet until touched. The filled background made this control read louder
+   than the "Repositories" heading next to it, which inverted the hierarchy of
+   a section label and one of its controls. */
+/* Icon only, matching the neighbouring icon buttons. It used to render the
+   current mode as text in a filled pill, which made a control read louder
+   than the heading beside it and, with the collapse button, pushed the row
+   past the sidebar's width. The current mode is in the tooltip and in the
+   picker itself. */
 .repo-sort-control {
   align-items: center;
-  background: var(--bg-hover);
+  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
+  cursor: pointer;
   display: inline-flex;
-  gap: 4px;
-  min-height: 28px;
-  padding: 0 5px;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  position: relative;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  width: 28px;
+}
+
+/* An icon-only control would otherwise hide that a non-default order is in
+   effect, so the icon carries the accent while one is. */
+.repo-sort-control.is-sorted {
+  color: var(--accent);
 }
 
 .repo-sort-control:focus-within,
 .repo-sort-control:hover {
+  background: var(--bg-hover);
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
   color: var(--text-secondary);
 }
 
+/* The select covers the control invisibly so the native picker still opens on
+   click and keyboard, while only the icon is drawn. The mode labels live in
+   the picker's own options, where there's room for them, instead of spending
+   the header's width restating the current value. */
 .repo-sort-control select {
   appearance: none;
   background: transparent;
@@ -305,13 +357,13 @@ button:focus-visible {
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  max-width: 102px;
+  height: 100%;
+  inset: 0;
+  opacity: 0;
   outline: 0;
-  padding: 0 2px;
-  text-transform: none;
+  padding: 0;
+  position: absolute;
+  width: 100%;
 }
 
 .repo-sort-control option {
