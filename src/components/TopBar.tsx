@@ -22,7 +22,6 @@ type TopBarProps = {
   selectedPath: string;
   branch: string;
   branches: string[];
-  changeCount: number;
   viewingCommit?: CommitEntry | null;
   loading?: boolean;
   pushPhase?: PushPhase;
@@ -38,8 +37,6 @@ type TopBarProps = {
   disabled?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
-  onReturnToWorkingTree: () => void;
-  onOpenVersion?: () => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
@@ -78,7 +75,6 @@ export function TopBar({
   selectedPath,
   branch,
   branches,
-  changeCount,
   viewingCommit,
   loading,
   pushPhase = "idle",
@@ -94,8 +90,6 @@ export function TopBar({
   disabled = false,
   onRepoChange,
   onBranchChange,
-  onReturnToWorkingTree,
-  onOpenVersion,
   onRefresh,
   onPush,
   onForcePush,
@@ -191,29 +185,12 @@ export function TopBar({
       </div>
 
       <div className="top-bar-right">
-        {inPreview && onOpenVersion ? (
-          <button
-            type="button"
-            className="visit-commit-btn"
-            title="Open this version's files in a folder"
-            disabled={loading}
-            onClick={onOpenVersion}
-          >
-            Open in folder
-          </button>
-        ) : null}
-        {inPreview ? (
-          <button
-            type="button"
-            className="return-to-changes-btn"
-            title="Back to your current work"
-            onClick={onReturnToWorkingTree}
-          >
-            <span className="working-dot" />
-            Back to now
-            {changeCount > 0 ? <em>{changeCount}</em> : null}
-          </button>
-        ) : null}
+        {/* "Open in folder" and "Back to now" moved to the timeline's action
+            row, alongside "Merge into main". They only exist while a commit is
+            selected, and gaining then losing a pair of buttons here made the
+            whole top bar reflow on every selection change — and at common
+            widths they collided with the Viewing banner and wrapped to two
+            lines. The timeline row is where the commit context already lives. */}
         <button type="button" className="ghost-btn" title="Refresh" disabled={loading || repoSwitching} onClick={onRefresh}>
           <RefreshCw size={15} className={loading || repoSwitching ? "spin" : ""} />
         </button>

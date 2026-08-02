@@ -1730,40 +1730,6 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.return-to-changes-btn {
-  align-items: center;
-  background: var(--success-soft);
-  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
-  border-radius: var(--radius-sm);
-  color: var(--success);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
-
-.return-to-changes-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-}
-
-.return-to-changes-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.return-to-changes-btn em {
-  background: color-mix(in srgb, var(--success) 16%, transparent);
-  border-radius: 999px;
-  color: var(--success);
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 700;
-  padding: 1px 6px;
-}
-
 .preview-banner,
 .time-travel-banner {
   align-items: center;
@@ -1809,26 +1775,6 @@ button:focus-visible {
 
 .time-travel-label {
   color: color-mix(in srgb, var(--warning, #d97706) 85%, var(--text));
-}
-
-.visit-commit-btn {
-  align-items: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.visit-commit-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: color-mix(in srgb, var(--text) 18%, var(--border));
 }
 
 .return-to-latest-btn {
@@ -2658,14 +2604,24 @@ button:focus-visible {
 
 .timeline-action {
   align-items: center;
+  /* Neutral by default so an unmodified action is styled; .update and .merge
+     override from here. */
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
   gap: 5px;
-  padding: 4px 12px;
+  padding: var(--space-1) var(--space-3);
   transition: background 120ms ease, border-color 120ms ease, filter 120ms ease, transform 80ms ease;
+  white-space: nowrap;
+}
+
+.timeline-action:hover:not(:disabled) {
+  background: var(--bg-hover);
 }
 
 .timeline-action:active:not(:disabled) {
@@ -2695,6 +2651,30 @@ button:focus-visible {
 
 .timeline-action.merge:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+/* Leaving a past commit and returning to the working tree. Carries the same
+   green as the "Now" node it takes you back to, so the destination is legible
+   before you click. */
+.timeline-action.return-to-now {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+  color: var(--success);
+}
+
+.timeline-action.return-to-now:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.timeline-action.return-to-now em {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-radius: 999px;
+  color: var(--success);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  font-weight: var(--weight-strong);
+  padding: 1px 6px;
 }
 
 .context-chip {

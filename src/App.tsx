@@ -3108,14 +3108,12 @@ function App() {
               selectedPath={selectedPath}
               branch="…"
               branches={["…"]}
-              changeCount={0}
               loading
               repoSwitching
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={() => {}}
-              onReturnToWorkingTree={() => {}}
               onRefresh={() => {}}
             />
             <div className="repo-loading-state" aria-busy="true" aria-live="polite">
@@ -3132,7 +3130,6 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
-              changeCount={displaySnapshot.changes.length}
               loading={loading}
               pushPhase={pushPhase}
               pullPhase={pullPhase}
@@ -3154,8 +3151,6 @@ function App() {
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
-              onOpenVersion={() => void openCommitInFolder()}
-              onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
@@ -3196,6 +3191,9 @@ function App() {
                   onMergeIntoMain={() => void mergeIntoMain()}
                   onPullUpstream={!integrationOp ? () => void pull(false) : undefined}
                   pullBusy={pullPhase !== "idle"}
+                  inPreview={!!viewingCommit}
+                  onOpenVersion={() => void openCommitInFolder()}
+                  onReturnToWorkingTree={() => void selectWorkingTree()}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}

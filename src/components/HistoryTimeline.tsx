@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
+import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
 import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
@@ -54,6 +54,13 @@ type HistoryTimelineProps = {
   /// the toolbar Pull button, offered where the user is looking at the gap.
   onPullUpstream?: () => void;
   pullBusy?: boolean;
+  /// Viewing a past commit rather than the working tree. The actions for
+  /// leaving that state live here rather than in the top bar: they only exist
+  /// while a commit is selected, and the top bar has no spare room to gain and
+  /// lose a pair of buttons every time the selection changes.
+  inPreview?: boolean;
+  onOpenVersion?: () => void;
+  onReturnToWorkingTree?: () => void;
   /// A live integration op, drawn as a preview node on the track.
   integrationPreview?: {
     kind: "update" | "merge";
@@ -89,6 +96,9 @@ export function HistoryTimeline({
   onMergeIntoMain,
   onPullUpstream,
   pullBusy,
+  inPreview,
+  onOpenVersion,
+  onReturnToWorkingTree,
   integrationPreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -460,8 +470,12 @@ export function HistoryTimeline({
     );
   }
 
+  const showPreviewActions = !!inPreview && !!onReturnToWorkingTree;
+
   const showActions =
-    (canUpdateFromMain && !!onUpdateFromMain) || (canMergeIntoMain && !!onMergeIntoMain);
+    (canUpdateFromMain && !!onUpdateFromMain) ||
+    (canMergeIntoMain && !!onMergeIntoMain) ||
+    showPreviewActions;
 
   function renderContextChips() {
     if (contextLanes.length === 0 && !siblingTip && !showActions) return null;
@@ -539,6 +553,29 @@ export function HistoryTimeline({
               >
                 <ArrowUp size={13} aria-hidden />
                 Merge into main
+              </button>
+            ) : null}
+            {showPreviewActions && onOpenVersion ? (
+              <button
+                type="button"
+                className="timeline-action"
+                title="Open this version's files in a folder"
+                onClick={onOpenVersion}
+              >
+                <FolderOpen size={13} aria-hidden />
+                Open in folder
+              </button>
+            ) : null}
+            {showPreviewActions ? (
+              <button
+                type="button"
+                className="timeline-action return-to-now"
+                title="Back to your current work"
+                onClick={onReturnToWorkingTree}
+              >
+                <span className="working-dot" />
+                Back to now
+                {changeCount > 0 ? <em>{changeCount}</em> : null}
               </button>
             ) : null}
           </div>
