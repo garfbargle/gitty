@@ -727,26 +727,34 @@ export function HistoryTimeline({
         </div>
         {showActions ? (
           <div className="timeline-actions">
+            {/* Icons, with the wording moved into the tooltip and the
+                accessible name. These three are always-available verbs, and
+                spelled out they took 274px -- a quarter of the row -- to say
+                things their icons already say once you have used them twice.
+                The name still exists for screen readers and on hover; it just
+                stops charging the branch name for the privilege. */}
             {canUpdateFromMain && onUpdateFromMain ? (
               <button
                 type="button"
-                className="timeline-action update"
+                className="timeline-action update icon-only"
+                title="Update from main"
+                aria-label="Update from main"
                 disabled={integrationBusy}
                 onClick={onUpdateFromMain}
               >
-                <ArrowDown size={13} aria-hidden />
-                Update from main
+                <ArrowDown size={14} aria-hidden />
               </button>
             ) : null}
             {canMergeIntoMain && onMergeIntoMain ? (
               <button
                 type="button"
-                className="timeline-action merge"
+                className="timeline-action merge icon-only"
+                title="Merge into main"
+                aria-label="Merge into main"
                 disabled={integrationBusy}
                 onClick={onMergeIntoMain}
               >
-                <ArrowUp size={13} aria-hidden />
-                Merge into main
+                <ArrowUp size={14} aria-hidden />
               </button>
             ) : null}
             {/* Not gated on the preview. Opening the repository on disk is
@@ -757,20 +765,20 @@ export function HistoryTimeline({
             {onOpenVersion ? (
               <button
                 type="button"
-                className="timeline-action open-folder"
+                className="timeline-action open-folder icon-only"
                 title={
+                  inPreview
+                    ? "Open this version's files in a folder"
+                    : "Open this repository's folder"
+                }
+                aria-label={
                   inPreview
                     ? "Open this version's files in a folder"
                     : "Open this repository's folder"
                 }
                 onClick={onOpenVersion}
               >
-                <FolderOpen size={13} aria-hidden />
-                {/* The label is the first thing the narrow ladder spends: the
-                    icon still says what the button does, and the title carries
-                    the rest. Keeping 127px of label here cost the branch name
-                    its last characters. */}
-                <span className="action-label">Open in folder</span>
+                <FolderOpen size={14} aria-hidden />
               </button>
             ) : null}
             {showPreviewActions ? (

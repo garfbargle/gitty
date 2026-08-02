@@ -3054,13 +3054,14 @@ button:focus-visible {
     display: none;
   }
 
-  /* Only now do the actions pay. Their 274px never yielded, so at this width
-     the chips had no room left and the branch name -- the one thing the ladder
-     exists to protect -- was clipped out of its own group. The icon still says
-     what the button does. */
-  .timeline-action.open-folder .action-label {
-    display: none;
-  }
+}
+
+/* Square, so an icon action reads as one target rather than as a pill that
+   lost its text. The label lives in `title` and `aria-label`. */
+.timeline-action.icon-only {
+  padding: 0;
+  width: 27px;
+  justify-content: center;
 }
 
 /* These are the parts that must stay whole, so they neither shrink nor wrap.
