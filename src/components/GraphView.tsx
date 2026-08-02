@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import type { CommitEntry } from "../types";
+import type { CommitEntry, WorktreeEntry } from "../types";
 import { buildGraphRows } from "../lib/graph";
 import { formatRelativeTime, authorInitials, tagName, tagRefs } from "../lib/git";
+import { SquareArrowOutUpRight } from "lucide-react";
 import { TagBadge } from "./TagBadge";
 
 /// Horizontal distance between lanes, and the vertical rhythm of one row. Both
@@ -15,6 +16,9 @@ type GraphViewProps = {
   headHash?: string;
   selectedHash?: string;
   unpushedTags?: Set<string>;
+  /// Other checkouts of this repository, so rows can show which commits are
+  /// the HEAD of a branch open in another folder.
+  worktrees?: WorktreeEntry[];
   onSelect: (commit: CommitEntry) => void;
 };
 
@@ -26,9 +30,21 @@ export function GraphView({
   headHash,
   selectedHash,
   unpushedTags,
+  worktrees = [],
   onSelect,
 }: GraphViewProps) {
   const rows = useMemo(() => buildGraphRows(commits, headHash), [commits, headHash]);
+  // Several checkouts can sit on one commit, so this maps hash -> entries.
+  const openElsewhere = useMemo(() => {
+    const map = new Map<string, WorktreeEntry[]>();
+    for (const entry of worktrees) {
+      if (entry.isCurrent || entry.internal) continue;
+      const list = map.get(entry.head) ?? [];
+      list.push(entry);
+      map.set(entry.head, list);
+    }
+    return map;
+  }, [worktrees]);
   const laneCount = rows[0]?.laneCount ?? 1;
   const gutter = Math.max(laneCount * LANE_W + LANE_W, LANE_W * 3);
 
@@ -92,6 +108,19 @@ export function GraphView({
                 </svg>
 
                 <span className="graph-subject">{row.commit.subject}</span>
+                {/* A checkout in another folder is its own kind of fact, not a
+                    degree of "is this mine", so it gets its own marker rather
+                    than bending fill or weight to mean a third thing. */}
+                {openElsewhere.get(row.commit.hash)?.map((entry) => (
+                  <span
+                    key={entry.path}
+                    className="graph-elsewhere"
+                    title={`${entry.branch ?? "detached"} is open in ${entry.path}`}
+                  >
+                    <SquareArrowOutUpRight size={11} aria-hidden />
+                    {entry.branch ?? "detached"}
+                  </span>
+                ))}
                 {tags.length > 0 ? (
                   <span className="graph-tags">
                     {tags.map((name) => (

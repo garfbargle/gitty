@@ -6597,3 +6597,54 @@ button.context-chip.pullable:disabled {
   font-size: var(--text-xs);
   gap: var(--space-1-5);
 }
+
+/* Segmented control heading the history region. A view switch over one thing,
+   so it reads as one control with two states rather than two buttons. */
+.view-switch {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+}
+
+.view-switch button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  padding: var(--space-1) var(--space-2);
+  text-transform: uppercase;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.view-switch button:hover:not(.active) {
+  color: var(--text-secondary);
+}
+
+.view-switch button.active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* A branch open in another checkout. Its own marker, since "open elsewhere" is
+   a different kind of fact from "is this on my line". */
+.graph-elsewhere {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  padding: 1px 7px;
+}
