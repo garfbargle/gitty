@@ -56,6 +56,26 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
 
   const rows: GraphRow[] = [];
 
+  // Which commits are on the checked-out branch's first-parent line.
+  //
+  // Walked here, from the commits themselves, rather than inferred from lane
+  // colour. Colour follows a lane only while that lane stays continuously
+  // occupied; lanes are freed at merges and reused, so the head's colour id
+  // changes partway down and a colour test silently stops matching. In a real
+  // repository that marked the tip and one parent and left the rest of the
+  // branch looking like somebody else's work.
+  const byHash = new Map(commits.map((commit) => [commit.hash, commit]));
+  const onHeadHashes = new Set<string>();
+  if (headHash) {
+    let cursor: string | undefined = headHash;
+    // The set is the cycle guard: history is a DAG, but a malformed parent
+    // list must not spin here.
+    while (cursor && byHash.has(cursor) && !onHeadHashes.has(cursor)) {
+      onHeadHashes.add(cursor);
+      cursor = byHash.get(cursor)?.parents[0];
+    }
+  }
+
   for (let i = 0; i < commits.length; i += 1) {
     const commit = commits[i];
 
@@ -88,7 +108,9 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
           toLane,
           color: laneColor(laneColorIdx[k]),
           colorIdx: laneColorIdx[k],
-          onHead: false,
+          // The strand is heading toward lanes[k]; it is part of the mainline
+          // exactly when the commit it arrives at is.
+          onHead: onHeadHashes.has(lanes[k] as string),
         });
       }
       rows[i - 1].edges = edges;
@@ -100,7 +122,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       color: laneColor(laneColorIdx[myLane]),
       colorIdx: laneColorIdx[myLane],
       laneCount: 0,
-      onHead: false,
+      onHead: onHeadHashes.has(commit.hash),
       edges: [],
     });
 
@@ -153,23 +175,6 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
     widest = Math.max(widest, rowMax);
   }
   for (const row of rows) row.laneCount = widest;
-
-  // Flag the checked-out branch's lane. A lane keeps one colour id for its whole
-  // continuous run, so tagging every row/edge that shares the HEAD commit's
-  // colour id traces that branch — and only that branch — top to bottom. The
-  // renderer draws it bold and full-strength so "the line you're on" is obvious.
-  if (headHash) {
-    const headRow = rows.find((row) => row.commit.hash === headHash);
-    if (headRow) {
-      const headColorIdx = headRow.colorIdx;
-      for (const row of rows) {
-        if (row.colorIdx === headColorIdx) row.onHead = true;
-        for (const edge of row.edges) {
-          if (edge.colorIdx === headColorIdx) edge.onHead = true;
-        }
-      }
-    }
-  }
 
   return rows;
 }
