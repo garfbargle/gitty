@@ -203,6 +203,21 @@ export function HistoryTimeline({
     forks: [],
   });
 
+  /// Where the push boundary sits in track coordinates.
+  ///
+  /// The label used to live inside the boundary node, so it left the screen
+  /// with the commit it marks — which is most of the time, since the strip
+  /// opens at the present and the run can be long. It now sits in a band that
+  /// spans from the boundary to the end of the track, and sticks to the left
+  /// edge while any of that band is in view.
+  const [boundaryX, setBoundaryX] = useState<number | null>(null);
+
+  const measureBoundary = useCallback(() => {
+    const node = oldestUnpushedInView ? nodeRefs.current.get(oldestUnpushedInView) : undefined;
+    const next = node ? node.offsetLeft : null;
+    setBoundaryX((prev) => (prev === next ? prev : next));
+  }, [oldestUnpushedInView]);
+
   const measureLanes = useCallback(() => {
     if (lanes.length === 0) {
       setGeom((prev) => (prev.rightX === null && prev.forks.length === 0 ? prev : { rightX: null, forks: [] }));
@@ -329,7 +344,16 @@ export function HistoryTimeline({
 
   useLayoutEffect(() => {
     measureLanes();
-  }, [measureLanes, headHash, ancestry.length, ahead.length, changeCount, !!integrationPreview]);
+    measureBoundary();
+  }, [
+    measureLanes,
+    measureBoundary,
+    headHash,
+    ancestry.length,
+    ahead.length,
+    changeCount,
+    !!integrationPreview,
+  ]);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
@@ -339,13 +363,14 @@ export function HistoryTimeline({
     const observer = new ResizeObserver(() => {
       scheduleApplyScrollPosition();
       measureLanes();
+      measureBoundary();
     });
 
     observer.observe(container);
     if (track) observer.observe(track);
 
     return () => observer.disconnect();
-  }, [scheduleApplyScrollPosition, measureLanes]);
+  }, [scheduleApplyScrollPosition, measureLanes, measureBoundary]);
 
   function selectCommit(commit: CommitEntry) {
     onInteract?.();
@@ -414,12 +439,7 @@ export function HistoryTimeline({
         {/* The push line, drawn on the oldest commit the remote does not have.
             A real element rather than a pseudo: ::after is the rail and
             ::before is the selection cursor. */}
-        {startsUnpushed ? (
-          <>
-            <span className="push-boundary-line" aria-hidden />
-            <span className="push-boundary-label">not pushed</span>
-          </>
-        ) : null}
+        {startsUnpushed ? <span className="push-boundary-line" aria-hidden /> : null}
         {/* Hash above the dot, time below it, so the rail runs through the
             middle of the row instead of along its top edge and each commit
             reads as an identity sitting on the line with its age underneath. */}
@@ -790,6 +810,15 @@ export function HistoryTimeline({
               aria-hidden
             >
               {lanes.map((lane, index) => renderLane(lane, index))}
+            </div>
+          ) : null}
+          {/* Spans from the boundary to the end of the track, so the label can
+              stick to the left edge of the view. Inside the boundary node it
+              scrolled away with the commit it marks, which is most of the time:
+              the strip opens at the present and the unpushed run can be long. */}
+          {boundaryX !== null ? (
+            <div className="push-boundary-flag" style={{ left: boundaryX }}>
+              <span className="push-boundary-label">not pushed</span>
             </div>
           ) : null}
           <div className="timeline-track">

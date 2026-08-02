@@ -2690,18 +2690,32 @@ button:focus-visible {
   z-index: 2;
 }
 
-.push-boundary-label {
-  color: var(--accent);
-  font-family: var(--font-ui);
-  font-size: var(--text-2xs);
-  left: var(--space-1);
-  letter-spacing: var(--tracking-caps);
+/* The band the label lives in: from the boundary to the end of the track, so
+   there is something on screen for the label to stick to long after the commit
+   it marks has scrolled off the left. Zero height — it exists only to give the
+   sticky label a containing block wide enough to survive. */
+.push-boundary-flag {
+  height: 0;
   pointer-events: none;
   position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 3;
+}
+
+.push-boundary-label {
+  color: var(--accent);
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  left: var(--space-2);
+  letter-spacing: var(--tracking-caps);
+  /* Sticks to the left edge of the scroller while any of the unpushed run is
+     in view, then travels with the boundary once it comes back on screen. */
+  position: sticky;
   text-transform: uppercase;
-  top: calc(var(--space-2) * -1 - 1px);
+  top: 0;
   white-space: nowrap;
-  z-index: 2;
 }
 
 /* Uncommitted work waiting — a brighter label makes the node read as a live
