@@ -6396,9 +6396,13 @@ button.context-chip.pullable:disabled {
 .graph-row {
   align-items: center;
   /* Must equal ROW_H in GraphView. The SVG is drawn at a fixed height, so a row
-     that grows taller than it tears the lanes away from their content. */
+     that grows taller than it tears the lanes away from their content.
+
+     The row must NOT clip. Lane strands are drawn past its bottom edge into
+     the next row's band, which is how one commit's line reaches the next, so
+     overflow: hidden here severed every strand at the row boundary and left
+     the graph as disconnected stubs. Each text cell clips itself instead. */
   height: var(--graph-row-h);
-  overflow: hidden;
   background: transparent;
   border: 0;
   color: var(--text-secondary);
