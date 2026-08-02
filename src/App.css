@@ -105,8 +105,15 @@
   /* A fixed height, not a floor: every node reserves the same space including
      the tag band, so nodes never differ in height and the selection frame is
      the same size on all of them. Sized to the real stack — dot 12, hash 16,
-     time 14, subject 17, three 2px gaps, then a 22px tag band. */
-  --timeline-node-height: 88px;
+     time 14, two 2px gaps, then a 22px tag band.
+
+     The commit message used to take a fourth line here. At 132px it clipped to
+     a few characters, often mid-word, which is not enough to recognise a
+     commit by; the inspector carries it in full instead. Dropping it returns
+     19px of height to the diff on every screen. The working-tree node still
+     uses .node-subject for its state word ("no changes"), which is short and
+     always fits — it has no time line, so it sits inside this height. */
+  --timeline-node-height: 69px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);

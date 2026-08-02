@@ -401,7 +401,13 @@ export function HistoryTimeline({
         />
         <span className="node-hash">{commit.shortHash}</span>
         <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
-        <span className="node-subject">{commit.subject}</span>
+        {/* No subject here on purpose. At this node width the message clipped
+            to a few characters, often mid-word and sometimes from both ends,
+            which is not enough to recognise a commit by and cost a whole row
+            of height on every node. The inspector shows it in full the moment
+            a commit is selected, and arrow keys move that selection, so the
+            message is one keypress away rather than permanently illegible.
+            The strip's job is position and state; the message has a home. */}
         {tags.length > 0 ? (
           <span className="node-tags">
             {tags.map((name) => (
