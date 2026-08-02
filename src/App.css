@@ -2428,6 +2428,13 @@ button:focus-visible {
 }
 
 .timeline-scroller {
+  /* Recessed, so the band that scrolls reads as data in a well and everything
+     on the panel surface around it reads as chrome. Without this the commit
+     row, the chips and the pinned Now node were all the same plane and nothing
+     said which parts move. */
+  background: var(--bg-base);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior: none;
@@ -2523,27 +2530,30 @@ button:focus-visible {
   opacity: 0.55;
 }
 
-/* Selection is one neutral treatment on every node, with no hue of its own.
-   It used to be accent blue on commits and success green on the working tree,
-   which meant the colour of "this is selected" changed depending on what was
-   selected. Worse, green was already spoken for on that node: a dirty working
-   tree turns its dot and label green to mean "you have uncommitted work", so
-   selecting it painted a second, unrelated green on top of the first.
+/* Selection is a cursor under the node, not a box around it.
 
-   Keeping selection neutral leaves the colour channel free to carry state —
-   green for uncommitted work, accent for ahead of upstream — while "where am
-   I" is communicated by surface and border, which nothing else uses. */
+   It used to be a filled rectangle covering the whole node, which competed
+   with the node's own content and, on the working tree, stacked a second
+   meaning onto a green that already meant "uncommitted work". A cursor marks
+   position without claiming the space. */
 .timeline-node.active::before {
-  background: var(--bg-hover);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  background: var(--accent);
+  border-radius: 999px;
+  bottom: 2px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
   content: "";
-  /* Sits inside the node. It used to extend 5px above and 3px below, but
-     .timeline-scroller is overflow-y: hidden, so both edges were clipped and
-     the highlight read as a cut-off rectangle. */
-  inset: 0;
+  height: 3px;
+  left: 50%;
   position: absolute;
-  z-index: 0;
+  transform: translateX(-50%);
+  width: 26px;
+  z-index: 1;
+}
+
+/* The present keeps its own colour when it is the selected thing. */
+.timeline-node.working-tree.active::before {
+  background: var(--success);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--success) 55%, transparent);
 }
 
 .timeline-node.active .node-hash {
@@ -2580,9 +2590,14 @@ button:focus-visible {
 /* The present, always within reach: the working-tree node sticks to the right
    edge of the scroller so it stays one click away even at ancient history. The
    left fade lets older commits tuck softly underneath it. */
+/* The present is chrome, not a commit you scroll to. It sits on the panel
+   surface rather than in the recessed band, with a hairline separating it from
+   the history running underneath, so it reads as a fixed edge of the strip
+   instead of a card floating in the stream. */
 .timeline-node.working-tree.pinned {
   background: var(--bg-panel);
-  box-shadow: -18px 0 16px -12px var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 16px -14px rgb(0 0 0 / 0.5);
   position: sticky;
   right: 0;
   z-index: 3;
@@ -6775,4 +6790,82 @@ button.context-chip.pullable:disabled {
    rather than danger: it is not wrong, it is unverified. */
 .chip-sync.unknown {
   color: var(--warning);
+}
+
+/* Commit inspector. Shown when a past commit is selected, where the panel used
+   to be empty: the diff was on screen with nothing saying which commit it
+   belonged to, who wrote it, or why. */
+.commit-inspector {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.commit-inspector-subject {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  margin: 0 0 var(--space-2);
+}
+
+/* The reasoning a diff cannot show. Preserves the author's own line breaks. */
+.commit-inspector-body {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  margin: 0 0 var(--space-3);
+  max-height: 14em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.commit-inspector-meta {
+  column-gap: var(--space-3);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+  row-gap: var(--space-1);
+}
+
+.commit-inspector-meta dt {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.commit-inspector-meta dd {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-inspector-meta code {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.commit-inspector-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.commit-inspector-ref {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  padding: 1px 6px;
 }

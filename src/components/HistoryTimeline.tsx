@@ -448,7 +448,7 @@ export function HistoryTimeline({
             left, which collided with this tag whenever a lane was more than
             MAX_GHOST_DOTS behind and covered the branch name. One label. */}
         <span className="lane-tag" style={{ left: oldestX, top: dotY }}>
-          <span className="chip-kind">Not here</span>
+          <span className="chip-kind">Incoming</span>
           <GitBranch size={10} aria-hidden />
           <span className="chip-ref">{lane.refName}</span>
           <span className="lane-count">{lane.behind}</span>
