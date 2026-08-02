@@ -1298,34 +1298,7 @@ button:focus-visible {
   user-select: none;
 }
 
-/* Segmented Changes | History switch */
-.view-mode-switch {
-  align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 2px;
-  height: 32px;
-  padding: 2px;
-}
 
-.view-mode-segment {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 500;
-  gap: 5px;
-  height: 100%;
-  padding: 0 9px;
-  white-space: nowrap;
-}
 
 .view-mode-segment:hover:not(:disabled):not(.active) {
   background: var(--bg-hover);
@@ -1338,13 +1311,7 @@ button:focus-visible {
   color: var(--accent);
 }
 
-.view-mode-switch:has(.view-mode-segment:disabled) {
-  opacity: 0.5;
-}
 
-.view-mode-segment:disabled {
-  cursor: default;
-}
 
 .sidebar-restore-btn {
   align-items: center;
@@ -1402,29 +1369,9 @@ button:focus-visible {
   flex: 0 1 auto;
 }
 
-.select-wrap {
-  align-items: center;
-  display: inline-flex;
-  position: relative;
-}
 
-.top-select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  font-weight: 600;
-  min-height: 32px;
-  padding: 0 22px 0 8px;
-}
 
-.repo-select {
-  font-size: var(--text-sm);
-}
 
-.branch-select-top {
-  color: var(--accent);
-  font-size: var(--text-sm);
-}
 
 .select-chevron {
   color: var(--text-muted);
@@ -1443,14 +1390,6 @@ button:focus-visible {
   font-size: var(--text-xs);
 }
 
-.working-badge {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 6px;
-}
 
 .working-dot {
   background: var(--success);
@@ -1460,37 +1399,8 @@ button:focus-visible {
   width: 8px;
 }
 
-.working-badge em {
-  background: var(--success-soft);
-  border-radius: 999px;
-  color: var(--success);
-  font-size: var(--text-2xs);
-  font-style: normal;
-  font-weight: 700;
-  padding: 1px 6px;
-}
 
-.working-tree-picker {
-  position: relative;
-}
 
-.working-tree-trigger {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 6px;
-  max-width: min(320px, 30vw);
-  min-height: 32px;
-  min-width: 0;
-  padding: 0 6px;
-  transition: background 0.15s ease;
-}
 
 .working-tree-trigger:hover,
 .working-tree-picker.open .working-tree-trigger {
@@ -1502,31 +1412,8 @@ button:focus-visible {
   color: var(--success);
 }
 
-.working-tree-trigger code {
-  background: var(--bg-hover);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
-.working-tree-trigger .trigger-subject {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.working-tree-trigger em {
-  background: var(--success-soft);
-  border-radius: 999px;
-  color: var(--success);
-  font-size: var(--text-2xs);
-  font-style: normal;
-  font-weight: 700;
-  padding: 1px 6px;
-}
 
 .picker-chevron {
   color: var(--text-muted);
@@ -1538,62 +1425,16 @@ button:focus-visible {
   transform: rotate(180deg);
 }
 
-.working-tree-menu {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  left: 0;
-  max-height: min(420px, 60vh);
-  overflow: hidden;
-  position: absolute;
-  top: calc(100% + 4px);
-  width: min(300px, calc(100vw - 32px));
-  z-index: 50;
-}
 
-.working-tree-commit-list {
-  max-height: min(360px, 52vh);
-  overflow: auto;
-}
 
-.working-tree-menu-divider {
-  background: var(--border);
-  height: 1px;
-  margin: 4px 0;
-}
 
-.working-tree-option {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  font-size: var(--text-xs);
-  gap: 12px;
-  justify-content: space-between;
-  min-height: 36px;
-  padding: 8px 12px;
-  text-align: left;
-  width: 100%;
-}
 
-.working-tree-option:hover {
-  background: var(--bg-hover);
-}
 
 .working-tree-option.active {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--text);
 }
 
-.working-tree-option .option-leading {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  min-width: 0;
-}
 
 .working-tree-option.commit {
   align-items: start;
@@ -1602,265 +1443,43 @@ button:focus-visible {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.working-tree-option .option-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
 
-.working-tree-option .option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.working-tree-option code {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  line-height: 1.4;
-  padding-top: 1px;
-}
 
-.working-tree-option .option-meta {
-  color: var(--text-muted);
-  flex-shrink: 0;
-  font-size: var(--text-xs);
-  line-height: 1.3;
-  white-space: nowrap;
-}
 
-.working-tree-menu-section {
-  padding: 8px 10px 4px;
-}
 
-.working-tree-menu-heading {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  font-size: var(--text-xs);
-  gap: 8px;
-  justify-content: space-between;
-}
 
-.working-tree-resume-btn {
-  background: transparent;
-  border: 0;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 0;
-}
 
-.working-tree-resume-btn:hover {
-  text-decoration: underline;
-}
 
 .working-tree-option.commit.ahead code,
 .working-tree-option.commit.ahead .option-label {
   color: var(--accent);
 }
 
-/* Current-branch divergence line at the top of the picker. */
-.wt-branch-current {
-  align-items: center;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-muted);
-  display: flex;
-  font-size: var(--text-xs);
-  gap: 6px;
-  padding: 8px 12px;
-}
 
-.wt-branch-current-name {
-  color: var(--text);
-  font-weight: 600;
-}
 
-.wt-branch-vs {
-  margin-left: auto;
-  opacity: 0.8;
-}
 
-/* "Other branches" rows: a wide switch button plus a merge affordance. */
-.wt-branches {
-  display: flex;
-  flex-direction: column;
-}
 
-.wt-branch-row {
-  align-items: stretch;
-  display: flex;
-  gap: 2px;
-}
 
-.wt-branch-main {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  flex: 1;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 8px;
-  text-align: left;
-}
 
-.wt-branch-main:hover {
-  background: var(--bg-hover);
-}
 
-.wt-branch-main svg {
-  color: var(--text-muted);
-  flex: 0 0 auto;
-}
 
-.wt-branch-main svg.wt-branch-remote {
-  opacity: 0.6;
-}
 
-.wt-branch-name {
-  flex: 1;
-  font-size: var(--text-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.wt-branch-counts {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  gap: 6px;
-}
 
-.wt-ahead {
-  color: var(--success);
-}
 
-.wt-behind {
-  color: var(--warning);
-}
 
-.wt-even {
-  color: var(--text-muted);
-  font-family: var(--font-ui);
-  opacity: 0.7;
-}
 
-.wt-branch-merge {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  flex: 0 0 auto;
-  padding: 0 8px;
-}
 
-.wt-branch-merge:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
 
-.option-ahead-badge {
-  background: color-mix(in srgb, var(--accent-soft) 80%, transparent);
-  border-radius: 999px;
-  color: var(--accent);
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  margin-left: 6px;
-  padding: 1px 6px;
-  text-transform: uppercase;
-  vertical-align: middle;
-}
 
-.resume-branch-btn {
-  align-items: center;
-  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: var(--radius-sm);
-  color: var(--accent);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 6px;
-  padding: 6px 10px;
-}
 
-.resume-branch-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-soft) 90%, transparent);
-}
 
-.resume-branch-btn em {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-radius: 999px;
-  font-size: var(--text-xs);
-  font-style: normal;
-  font-weight: 700;
-  min-width: 18px;
-  padding: 1px 6px;
-  text-align: center;
-}
 
-.commit-crumb {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 8px;
-  max-width: min(320px, 30vw);
-  min-width: 0;
-}
 
-.commit-crumb code {
-  background: var(--bg-hover);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
-.commit-crumb span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .preview-banner,
-.time-travel-banner {
-  align-items: center;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  font-size: var(--text-xs);
-  gap: 6px;
-  max-width: min(420px, 40vw);
-  min-height: 32px;
-  padding: 0 10px;
-  /* Shrinkable. Its content is nowrap, so without this the banner could not go
-     below its own text and simply overflowed the bar instead — the top row is
-     overflow: visible, so it painted straight over the Push button rather than
-     being clipped. A banner that quietly covers the primary action is worse
-     than a truncated one. */
-  min-width: 0;
-  overflow: hidden;
-}
 
 .preview-banner {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -1869,10 +1488,6 @@ button:focus-visible {
 }
 
 .preview-label,
-.time-travel-label {
-  color: var(--text-muted);
-  font-weight: 600;
-}
 
 .preview-meta {
   color: var(--text-muted);
@@ -1885,48 +1500,12 @@ button:focus-visible {
 }
 
 .preview-banner code,
-.time-travel-banner code {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: 700;
-}
 
-.time-travel-banner {
-  background: color-mix(in srgb, var(--warning, #d97706) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 28%, transparent);
-}
 
-.time-travel-label {
-  color: color-mix(in srgb, var(--warning, #d97706) 85%, var(--text));
-}
 
-.return-to-latest-btn {
-  align-items: center;
-  background: color-mix(in srgb, var(--warning, #d97706) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 35%, transparent);
-  border-radius: var(--radius-sm);
-  color: color-mix(in srgb, var(--warning, #d97706) 90%, var(--text));
-  display: inline-flex;
-  font-size: var(--text-sm);
-  font-weight: 700;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 14px;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
 
-.return-to-latest-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning, #d97706) 22%, transparent);
-}
 
-.return-to-latest-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
 
-.visit-commit-actions {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 
 .top-bar.time-travel-mode {
   border-bottom-color: color-mix(in srgb, var(--warning, #d97706) 30%, var(--border));
@@ -3217,21 +2796,7 @@ button.context-chip.pullable.busy,
   font-variant-numeric: tabular-nums;
 }
 
-.chip-update {
-  background: var(--warning);
-  border: 0;
-  border-radius: 999px;
-  color: #1b1206;
-  cursor: pointer;
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 2px 9px;
-}
 
-.chip-update:hover {
-  filter: brightness(1.07);
-}
 
 /* ── Branch-context lanes (ghost commits above the working tree) ── */
 .timeline-track-wrap {
@@ -3324,16 +2889,6 @@ button.context-chip.pullable.busy,
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-secondary) 18%, transparent);
 }
 
-.lane-overflow {
-  background: var(--bg-panel);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  padding: 0 3px;
-  position: absolute;
-  transform: translate(-50%, -50%);
-}
 
 
 /* ── Workspace grid ── */
@@ -3853,21 +3408,7 @@ button.context-chip.pullable.busy,
   color: var(--syn-cmt);
 }
 
-.diff-footer {
-  align-items: center;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 10px;
-}
 
-.diff-nav {
-  display: flex;
-  gap: 4px;
-  margin-left: auto;
-}
 
 .diff-empty {
   align-items: center;
@@ -4288,17 +3829,7 @@ button.context-chip.pullable.busy,
   opacity: 0.5;
 }
 
-/* History full view */
-.history-full {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
 
-.history-full .history-table-wrap {
-  flex: 1;
-}
 
 /* Split pane */
 .split-pane {
@@ -4308,13 +3839,7 @@ button.context-chip.pullable.busy,
   min-width: 0;
 }
 
-.split-pane-vertical {
-  flex-direction: column;
-}
 
-.split-pane-horizontal {
-  flex-direction: row;
-}
 
 .split-pane-primary,
 .split-pane-secondary {
@@ -4402,93 +3927,19 @@ button.context-chip.pullable.busy,
   bottom: 12px;
 }
 
-/* Reuse history table styles */
-.history-table-wrap {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
 
-.history-table {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
 
 .history-header,
-.history-row {
-  align-items: center;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: auto 120px minmax(180px, 1fr) 72px 110px 80px 100px;
-  padding: 0 12px;
-}
 
-.history-header {
-  background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  flex: 0 0 34px;
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  text-transform: uppercase;
-}
 
-.history-body {
-  flex: 1;
-  overflow: auto;
-}
 
-.history-load-more {
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: center;
-  padding: 10px 12px;
-  position: sticky;
-  bottom: 0;
-}
 
-.history-load-more-btn {
-  font-size: var(--text-xs);
-  gap: 8px;
-}
 
-.history-row {
-  background: var(--bg-panel);
-  border: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  /* Fixed height (not min-height): the graph SVG is drawn at exactly this
-     height, so each row's strands meet its neighbours' centre-to-centre. If a
-     row could grow taller, the SVG would float centred and the lane line would
-     break into dashes. Keep this in sync with ROW_H in HistoryTable.tsx. */
-  height: 36px;
-  width: 100%;
-}
 
-/* The graph cell stretches the full row height and never clips the lane line. */
-.history-row .col-graph {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-}
 
 /* One ref per row, on a single line — extra refs must not grow the row and
    break the lane line. They stay reachable via the commit's full ref list. */
-.history-row .ref-badges {
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
 
-.history-row .branch-badge {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .history-row:hover,
 .history-row.active {
@@ -4499,32 +3950,11 @@ button.context-chip.pullable.busy,
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.col-message {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.col-hash {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
 
 .col-date,
 .col-time,
-.col-author {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
 
-.branch-badge {
-  border: 1px solid;
-  border-radius: 999px;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 2px 8px;
-}
 
 /* The checked-out branch — "you are here". Filled, not tinted, so the branch
    you're on reads instantly against every other ref pill. */
@@ -4545,12 +3975,6 @@ button.context-chip.pullable.busy,
   width: 6px;
 }
 
-.ref-badges {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
 
 .tag-badge {
   align-items: center;
@@ -4643,17 +4067,6 @@ button.context-chip.pullable.busy,
   overflow: hidden;
 }
 
-.author-avatar {
-  align-items: center;
-  background: var(--bg-hover);
-  border-radius: 50%;
-  display: inline-flex;
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  height: 22px;
-  justify-content: center;
-  width: 22px;
-}
 
 /* Settings + empty + toast */
 .settings-overlay {
@@ -5472,14 +4885,6 @@ button.context-chip.pullable.busy,
   outline: none;
 }
 
-.link-btn {
-  background: transparent;
-  border: 0;
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  padding: 0;
-}
 
 .link-btn.danger {
   color: var(--danger);
@@ -5809,25 +5214,7 @@ button.context-chip.pullable.busy,
 /* Superseded by the layout tokens in the responsive section at the end of this
    file, which drive .workspace-grid's columns directly. */
 
-/* ───────────────────────── Merge mode ───────────────────────── */
 
-/* Top-bar relationship strip */
-.merge-strip-arrow {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.merge-strip {
-  align-items: center;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-  padding: 2px 8px 2px 7px;
-}
 
 .merge-strip.active {
   background: var(--accent-soft);
@@ -5844,61 +5231,14 @@ button.context-chip.pullable.busy,
   padding: 1px 15px 1px 2px;
 }
 
-.merge-strip-icon {
-  color: var(--accent);
-}
 
-.merge-strip-into {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
 
-.merge-strip-base {
-  font-weight: 600;
-}
 
-.merge-strip-select-wrap {
-  align-items: center;
-  display: inline-flex;
-  position: relative;
-}
 
-.merge-strip-select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  font-weight: 600;
-  outline: none;
-  padding: 1px 16px 1px 4px;
-}
 
-.merge-strip-select:hover {
-  background: var(--bg-active);
-}
 
-.merge-strip-select:focus-visible {
-  outline: 2px solid var(--accent-soft);
-}
 
-.merge-strip-chevron {
-  color: var(--text-muted);
-  pointer-events: none;
-  position: absolute;
-  right: 3px;
-}
 
-.merge-chip {
-  border-radius: 999px;
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  padding: 1px 7px;
-  white-space: nowrap;
-}
 
 .merge-chip.ahead {
   background: var(--accent-soft);
@@ -5925,45 +5265,10 @@ button.context-chip.pullable.busy,
   color: var(--text-muted);
 }
 
-.merge-strip-clear {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  flex-shrink: 0;
-  justify-content: center;
-  padding: 2px;
-}
 
-.merge-strip-clear:hover {
-  background: var(--bg-active);
-  color: var(--text);
-}
 
-.merge-strip-clear:focus-visible {
-  outline: 2px solid var(--accent-soft);
-}
 
-/* Top-bar Merge button */
-.merge-action-btn {
-  align-items: center;
-  background: var(--accent);
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: #fff;
-  display: flex;
-  font-weight: 600;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-}
 
-.merge-action-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
 
 .merge-action-btn.active {
   background: var(--accent-hover);
@@ -6017,12 +5322,6 @@ button.context-chip.pullable.busy,
   gap: 12px;
 }
 
-.merge-panel-title {
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
 
 .merge-branch-name.source {
   color: var(--accent);
@@ -6032,38 +5331,9 @@ button.context-chip.pullable.busy,
   color: var(--text);
 }
 
-.merge-arrow {
-  margin: 0 2px;
-  vertical-align: -1px;
-  color: var(--text-muted);
-}
 
-.merge-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.merge-step {
-  align-items: flex-start;
-  display: flex;
-  gap: 9px;
-  padding: 4px 0;
-}
 
-.merge-step-icon {
-  align-items: center;
-  border-radius: 50%;
-  display: flex;
-  flex-shrink: 0;
-  height: 20px;
-  justify-content: center;
-  margin-top: 1px;
-  width: 20px;
-}
 
 .merge-step.done .merge-step-icon {
   background: var(--success-soft);
@@ -6085,29 +5355,13 @@ button.context-chip.pullable.busy,
   color: var(--text-muted);
 }
 
-.merge-step-num {
-  font-size: var(--text-xs);
-  font-weight: 700;
-}
 
-.merge-step-body {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-}
 
-.merge-step-label {
-  font-weight: 600;
-}
 
 .merge-step.pending .merge-step-label {
   color: var(--text-muted);
 }
 
-.merge-step-detail {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
 
 .merge-step.active .merge-step-detail {
   color: var(--accent);
@@ -6117,127 +5371,23 @@ button.context-chip.pullable.busy,
   color: var(--danger);
 }
 
-/* Cards */
-.merge-card {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-}
 
-.merge-card-muted {
-  align-items: center;
-  color: var(--text-muted);
-  flex-direction: row;
-  gap: 8px;
-}
 
-.merge-card-success {
-  background: var(--success-soft);
-  border-color: color-mix(in srgb, var(--success) 30%, transparent);
-}
 
-.merge-card-head {
-  align-items: center;
-  display: flex;
-  font-weight: 600;
-  gap: 6px;
-}
 
-.merge-card-success .merge-card-head {
-  color: var(--success);
-}
 
-.merge-card-sub {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  margin: 0;
-}
 
-.merge-count {
-  background: var(--accent);
-  border-radius: 6px;
-  color: #fff;
-  font-size: var(--text-xs);
-  font-weight: 700;
-  min-width: 18px;
-  padding: 1px 6px;
-  text-align: center;
-}
 
-.merge-commit-list {
-  color: var(--text-secondary);
-  display: flex;
-  flex-direction: column;
-  font-size: var(--text-xs);
-  gap: 3px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.merge-commit-list li {
-  overflow: hidden;
-  padding-left: 12px;
-  position: relative;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.merge-commit-list li::before {
-  color: var(--text-muted);
-  content: "•";
-  left: 2px;
-  position: absolute;
-}
 
-.merge-card-foot {
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-}
 
-/* Safety card */
-.merge-safety {
-  align-items: flex-start;
-  border-radius: var(--radius-sm);
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-}
 
-.merge-safety p {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  margin: 2px 0 0;
-}
 
-.merge-safety strong {
-  font-size: var(--text-xs);
-}
 
-.merge-safety-ok {
-  background: var(--success-soft);
-  color: var(--success);
-}
 
-.merge-safety-warn {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
 
-/* Buttons */
-.merge-primary {
-  background: var(--accent);
-  color: #fff;
-}
 
-.merge-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  filter: none;
-}
 
 .merge-secondary {
   background: var(--bg-elevated);
@@ -6258,35 +5408,10 @@ button.context-chip.pullable.busy,
   border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
-.merge-link {
-  background: none;
-  border: 0;
-  color: var(--accent);
-  font-size: var(--text-xs);
-  padding: 4px 0;
-  text-align: center;
-  width: 100%;
-}
 
-.merge-link:hover:not(:disabled) {
-  text-decoration: underline;
-}
 
-.merge-link:disabled {
-  color: var(--text-muted);
-}
 
-.merge-commands {
-  align-items: center;
-  color: var(--text-muted);
-  display: flex;
-  gap: 5px;
-  justify-content: center;
-}
 
-.spin-slow {
-  animation: spin 2s linear infinite;
-}
 
 /* ── Conflict layout ── */
 .merge-conflict-grid {
