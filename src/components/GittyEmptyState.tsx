@@ -16,7 +16,7 @@ export function GittyEmptyState({ projectName }: GittyEmptyStateProps) {
         />
         <div className="gitty-speech-bubble">
           <p>
-            There&apos;s no changes in <strong>{projectName}</strong>.
+            There are no changes in <strong>{projectName}</strong>.
           </p>
         </div>
       </div>
