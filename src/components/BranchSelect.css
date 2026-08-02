@@ -12,6 +12,10 @@
    read as one long name. */
 .branch-picker {
   position: relative;
+  /* Shrinkable, so a long branch name gives ground before the row overflows.
+     This sits in a bar whose overflow is visible, so anything that refuses to
+     shrink does not get clipped — it paints over the buttons to its right. */
+  min-width: 0;
 }
 
 .branch-picker-trigger {
@@ -25,6 +29,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   gap: var(--space-1-5);
+  min-width: 0;
   padding: var(--space-1) var(--space-2);
 }
 
@@ -39,6 +44,7 @@
 
 .branch-picker-name {
   max-width: 22ch;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1818,6 +1818,13 @@ button:focus-visible {
   max-width: min(420px, 40vw);
   min-height: 32px;
   padding: 0 10px;
+  /* Shrinkable. Its content is nowrap, so without this the banner could not go
+     below its own text and simply overflowed the bar instead — the top row is
+     overflow: visible, so it painted straight over the Push button rather than
+     being clipped. A banner that quietly covers the primary action is worse
+     than a truncated one. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .preview-banner {
@@ -1834,6 +1841,9 @@ button:focus-visible {
 
 .preview-meta {
   color: var(--text-muted);
+  /* Already clipped itself, but a flex item will not go below its content
+     without this, so the clipping never got the chance to happen. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2703,13 +2713,23 @@ button:focus-visible {
   z-index: 3;
 }
 
+/* A pill, not bare text. Sticking bare text to the left edge dropped it on top
+   of whichever commit hash happened to be scrolled there, and two strings in
+   the same place read as a rendering fault rather than a label. Its own
+   background makes it chrome floating over the strip, which is what it is. */
 .push-boundary-label {
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
   color: var(--accent);
-  display: inline-block;
+  display: inline-flex;
   font-family: var(--font-ui);
   font-size: var(--text-2xs);
   left: var(--space-2);
   letter-spacing: var(--tracking-caps);
+  line-height: 1;
+  padding: 3px var(--space-2);
   /* Sticks to the left edge of the scroller while any of the unpushed run is
      in view, then travels with the boundary once it comes back on screen. */
   position: sticky;
