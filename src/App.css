@@ -224,7 +224,15 @@ select:focus,
 textarea:focus,
 button:focus-visible {
   border-color: var(--accent);
-  outline: 2px solid var(--accent-soft);
+  /* Solid accent, offset. The ring used --accent-soft, which composites to
+     1.15:1 against a light surface and 1.23:1 against a dark one -- against a
+     3:1 requirement, so the visible half of this indicator was the
+     `border-color` line. That half is a no-op on anything declaring `border:
+     0`, which includes the push menu's items and the Timeline/Branches switch:
+     those controls had no focus indicator at all. The offset keeps the ring
+     clear of the control's own border rather than sitting on top of it. */
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Shell ── */
@@ -2271,26 +2279,6 @@ button:focus-visible {
   position: relative;
 }
 
-.pull-btn-badge {
-  align-items: center;
-  background: var(--accent);
-  border: 2px solid var(--bg-panel);
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
-  color: #fff;
-  display: inline-flex;
-  font-size: var(--text-2xs);
-  font-weight: 800;
-  justify-content: center;
-  left: -7px;
-  line-height: 1;
-  min-width: 18px;
-  padding: 2px 5px;
-  pointer-events: none;
-  position: absolute;
-  top: -7px;
-  z-index: 2;
-}
 
 /* Tonal, not filled.
    Pull and Push sat side by side as two fully saturated fills of equal weight,
@@ -2934,13 +2922,33 @@ button:focus-visible {
   padding-left: 0;
 }
 
+/* Re-asserted, because `:not(button)` carries a type selector and so outranks
+   the plain `.context-chip.here` / `.context-chip.behind` rules further down
+   this file. Flattening the chips silently took the accent border off "where
+   you are" and the warning tint off a chip that is behind -- the two states in
+   this row that colour exists to carry -- and left them identical to an
+   in-sync chip. Specificity, not order, decides this, so matching the flatten
+   rule's shape is what makes these win. */
+.context-chips .context-chip.here:not(button) {
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+
+.context-chips .context-chip.behind:not(button) {
+  background: var(--warning-soft);
+  border-color: color-mix(in oklch, var(--warning) 35%, transparent);
+}
+
 /* Which leaves the two that really are controls looking like controls. */
 .context-chips button.context-chip {
   background: var(--bg-elevated);
   border-color: var(--border-strong);
 }
 
-.context-chips button.context-chip:hover:not(:disabled) {
+/* Specific enough to beat the per-variant hover rules further down rather than
+   tie with them. At equal specificity the winner was whichever block happened
+   to be later, so the two button chips in this row hovered to different
+   colours and moving either block would have swapped them. */
+.context-chips button.context-chip:hover:not(:disabled):not(.busy) {
   border-color: var(--accent);
   color: var(--text);
 }
@@ -3142,23 +3150,9 @@ button.context-chip.sibling:disabled {
 }
 
 /* The "origin/… ↓N" chip, clickable to pull the upstream. */
-button.context-chip.pullable {
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--text-xs);
-  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease;
-}
 
-button.context-chip.pullable:hover:not(:disabled) {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
 
 button.context-chip.pullable.busy,
-button.context-chip.pullable:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
 
 .context-chip .chip-ref {
   font-family: var(--font-mono);
@@ -3793,7 +3787,7 @@ button.context-chip.pullable:disabled {
 }
 
 .diff-edit-input {
-  background: var(--surface, transparent);
+  background: var(--bg-input);
   border: 1px solid var(--accent, var(--text-muted));
   border-radius: 3px;
   color: inherit;
@@ -7224,17 +7218,9 @@ button.context-chip.pullable:disabled {
 
 /* How old the remote information is. Muted because it qualifies a claim rather
    than making one: the point is that "in sync" is aging, not to raise alarm. */
-.chip-age {
-  color: var(--text-muted);
-  font-size: var(--text-2xs);
-  opacity: 0.8;
-}
 
 /* The remote has never been reached, so nothing about it is known. Warning
    rather than danger: it is not wrong, it is unverified. */
-.chip-sync.unknown {
-  color: var(--warning);
-}
 
 /* Commit inspector. Shown when a past commit is selected, where the panel used
    to be empty: the diff was on screen with nothing saying which commit it
