@@ -29,6 +29,12 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   gap: var(--space-1-5);
+  /* Bounded by the wrapper. Giving the wrapper min-width: 0 let it shrink, but
+     the trigger inside kept its natural width and simply hung out of it —
+     205px of button in a 137px box — so a long branch name painted straight
+     over the preview banner beside it. Shrinking a container does nothing if
+     its contents refuse. */
+  max-width: 100%;
   min-width: 0;
   padding: var(--space-1) var(--space-2);
 }
