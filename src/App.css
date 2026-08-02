@@ -2574,8 +2574,9 @@ button:focus-visible {
   box-shadow: 0 0 10px color-mix(in srgb, var(--success) 55%, transparent);
 }
 
+/* Selected goes a step brighter again, so the cursor is not the only signal. */
 .timeline-node.active .node-hash {
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
 .node-dot {
@@ -2613,7 +2614,18 @@ button:focus-visible {
 .timeline-node.working-tree {
   width: auto;
   min-width: var(--timeline-node-width);
-  padding-inline: var(--space-4);
+  padding-inline: var(--space-5);
+  /* "Now" and its state line were 2px apart in the same colour, so they read as
+     one wrapped phrase rather than a label and the thing it reports. */
+  gap: var(--space-1-5);
+}
+
+/* The state line is what "Now" is telling you, so it sits a step back from the
+   label. It takes the accent colour when there is work waiting, which is the
+   rule immediately below and the reason this stays a separate line at all. */
+.timeline-node.working-tree .node-subject {
+  color: var(--text-muted);
+  font-weight: var(--weight-normal);
 }
 
 /* The present, always within reach: the working-tree node sticks to the right
@@ -2643,11 +2655,16 @@ button:focus-visible {
    way: the hash was the boldest thing on the strip at weight 600 while the
    subject, the only part that says what actually happened, was unemphasised.
    Rank now comes from size, so weight is free to stay quiet. */
+/* The hash is what you scan for; the time is context under it. They used to be
+   the same size, weight and colour, separated only by typeface, so the pair
+   read as one grey block and neither led. The hash takes the brighter step and
+   medium weight, the time stays muted — rank by colour and weight rather than
+   by size, since 11px is already the floor and neither can shrink. */
 .node-hash {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  font-weight: var(--weight-normal);
+  font-weight: var(--weight-medium);
   position: relative;
   z-index: 1;
 }
