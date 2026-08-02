@@ -90,6 +90,16 @@
      it holds file names, not repository names, and shouldn't grow with it. */
   --conflict-list-width: 220px;
 
+  /* ---- Commit timeline --------------------------------------------------
+     The rail's position is computed from the dot size, so the two can never
+     drift apart. --timeline-rail-gap is the clearance between a dot's edge
+     and where its rail begins. */
+  --timeline-dot-size: 12px;
+  --timeline-rail-thickness: 2px;
+  --timeline-rail-gap: 8px;
+  --timeline-node-width: 132px;
+  --timeline-node-min-height: 62px;
+
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
@@ -2449,6 +2459,10 @@ button:focus-visible {
   min-width: min-content;
 }
 
+/* Every node is the same width so the dots fall on an even rhythm. Previously
+   `min-width: 100px` combined with a 120px subject cap meant nodes were 100px
+   or ~144px depending on how long the commit subject happened to be, and the
+   spacing between dots varied with it. */
 .timeline-node {
   align-items: center;
   background: transparent;
@@ -2457,21 +2471,48 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 4px;
-  min-width: 100px;
-  padding: 0 12px;
+  gap: var(--space-1);
+  /* Reserves the tag row so a tagged commit doesn't stand taller than its
+     neighbours and leave the strip with a ragged bottom edge. */
+  min-height: var(--timeline-node-min-height);
+  padding: 0 var(--space-3);
   position: relative;
   text-align: center;
+  width: var(--timeline-node-width);
 }
 
+/* The rail joining one dot to the next.
+   Geometry is derived from the dot size rather than hardcoded, so the line
+   stays centred on the dots if either ever changes. The previous values put
+   the rail's centre at y=10 while the 12px dot's centre is at y=6, so it ran
+   4px low the whole length of the strip.
+
+   This is now the only mechanism drawing the rail. A second, identically
+   positioned `.node-connector` span used to render underneath carrying the
+   lane colour, but `::after` is generated last and paints over it, so the
+   coloured line was never visible. Its one meaningful variant, the dashed
+   ahead bridge, was covered for the same reason and is restored below as a
+   modifier on this rule. */
 .timeline-node:not(:last-child)::after {
   background: var(--border);
   content: "";
-  height: 2px;
-  left: calc(50% + 14px);
+  height: var(--timeline-rail-thickness);
+  left: calc(50% + var(--timeline-dot-size) / 2 + var(--timeline-rail-gap));
   position: absolute;
-  top: 9px;
-  width: calc(100% - 28px);
+  top: calc((var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2);
+  width: calc(100% - var(--timeline-dot-size) - var(--timeline-rail-gap) * 2);
+}
+
+/* Between the present and commits that exist locally but aren't pushed yet. */
+.timeline-node.ahead-bridge:not(:last-child)::after {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--accent) 0,
+    var(--accent) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  opacity: 0.55;
 }
 
 .timeline-node.active::before {
@@ -2493,9 +2534,9 @@ button:focus-visible {
 
 .node-dot {
   border-radius: 50%;
-  height: 12px;
+  height: var(--timeline-dot-size);
   position: relative;
-  width: 12px;
+  width: var(--timeline-dot-size);
   z-index: 1;
 }
 
@@ -2507,6 +2548,15 @@ button:focus-visible {
 
 .timeline-node.working-tree.active .node-dot.working {
   background: var(--success-soft);
+}
+
+/* The present carries the most important message on the strip ("3 unsaved
+   changes"), so it sizes to its content instead of being clipped to the fixed
+   commit-node width. The even rhythm only matters across the commits. */
+.timeline-node.working-tree {
+  width: auto;
+  min-width: var(--timeline-node-width);
+  padding-inline: var(--space-4);
 }
 
 /* The present, always within reach: the working-tree node sticks to the right
@@ -2532,31 +2582,43 @@ button:focus-visible {
   font-weight: 600;
 }
 
+/* Hierarchy within a node runs subject > hash > time. It used to run the other
+   way: the hash was the boldest thing on the strip at weight 600 while the
+   subject, the only part that says what actually happened, was unemphasised.
+   Rank now comes from size, so weight is free to stay quiet. */
 .node-hash {
+  color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
   position: relative;
   z-index: 1;
 }
 
 .node-time {
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.2;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-tight);
   opacity: 0.85;
   position: relative;
   z-index: 1;
 }
 
 .node-subject {
-  font-size: 11px;
-  max-width: 120px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
+  max-width: 100%;
   overflow: hidden;
   position: relative;
   text-overflow: ellipsis;
   white-space: nowrap;
   z-index: 1;
+}
+
+.timeline-node.active .node-subject {
+  color: var(--text);
 }
 
 .timeline-node.ahead .node-hash,
@@ -2575,26 +2637,9 @@ button:focus-visible {
   text-transform: uppercase;
 }
 
-.node-connector {
-  background: var(--border);
-  height: 2px;
-  left: calc(50% + 14px);
-  position: absolute;
-  top: 9px;
-  width: calc(100% - 28px);
-  z-index: 0;
-}
-
-.node-connector.ahead-bridge {
-  background: repeating-linear-gradient(
-    90deg,
-    var(--accent) 0,
-    var(--accent) 4px,
-    transparent 4px,
-    transparent 8px
-  );
-  opacity: 0.55;
-}
+/* `.node-connector` removed: it drew a second rail directly underneath
+   `.timeline-node::after`, which paints over it, so it was never visible.
+   Its dashed ahead-bridge variant now lives on that rule as a modifier. */
 
 /* ── Branch-context chips (above the timeline) ── */
 .timeline-context-bar {

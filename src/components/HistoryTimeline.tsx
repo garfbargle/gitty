@@ -331,7 +331,6 @@ export function HistoryTimeline({
   function renderCommitNode(
     commit: CommitEntry,
     index: number,
-    showConnector: boolean,
     isAhead: boolean,
   ) {
     const color = laneColor(index % 6);
@@ -371,12 +370,9 @@ export function HistoryTimeline({
           </span>
         ) : null}
         {isAhead ? <span className="node-ahead-label">ahead</span> : null}
-        {showConnector ? <span className="node-connector" style={{ background: color }} /> : null}
       </button>
     );
   }
-
-  const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
 
   // Pin the working-tree node to the right edge while history scrolls under it,
   // but only when it's the last node on the track — once you have ahead commits
@@ -566,17 +562,10 @@ export function HistoryTimeline({
             </div>
           ) : null}
           <div className="timeline-track">
-          {ancestry.map((commit, index) =>
-            renderCommitNode(
-              commit,
-              index,
-              index < ancestry.length - 1 || hasMoreAfterAncestry,
-              false,
-            ),
-          )}
+          {ancestry.map((commit, index) => renderCommitNode(commit, index, false))}
 
           <button
-            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""}`}
+            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""} ${ahead.length > 0 ? "ahead-bridge" : ""}`}
             type="button"
             ref={(node) => {
               if (node) nodeRefs.current.set("working-tree", node);
@@ -591,16 +580,10 @@ export function HistoryTimeline({
                 ? "no changes"
                 : `${changeCount} unsaved change${changeCount === 1 ? "" : "s"}`}
             </span>
-            {ahead.length > 0 ? <span className="node-connector ahead-bridge" /> : null}
           </button>
 
           {ahead.map((commit, index) =>
-            renderCommitNode(
-              commit,
-              ancestry.length + index,
-              index < ahead.length - 1 || !!integrationPreview,
-              true,
-            ),
+            renderCommitNode(commit, ancestry.length + index, true),
           )}
 
           {integrationPreview ? (
