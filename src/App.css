@@ -2929,13 +2929,20 @@ button:focus-visible {
    this row that colour exists to carry -- and left them identical to an
    in-sync chip. Specificity, not order, decides this, so matching the flatten
    rule's shape is what makes these win. */
+/* Padding follows the border. Dropping the left padding is right for a chip
+   set flat on the row -- it lets the caption line up with everything else --
+   but these two keep a visible edge, and at padding-left: 0 the caption sat
+   1px off it while the buttons beside them had 10px. A border with nothing
+   behind it reads as a mistake rather than as a state. */
 .context-chips .context-chip.here:not(button) {
   border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  padding-left: 9px;
 }
 
 .context-chips .context-chip.behind:not(button) {
   background: var(--warning-soft);
   border-color: color-mix(in oklch, var(--warning) 35%, transparent);
+  padding-left: 9px;
 }
 
 /* Which leaves the two that really are controls looking like controls. */
