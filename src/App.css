@@ -2863,17 +2863,43 @@ button:focus-visible {
    Its dashed ahead-bridge variant now lives on that rule as a modifier. */
 
 /* ── Branch-context chips (above the timeline) ── */
+/* Two rows, because they are two different kinds of thing.
+
+   This was one line carrying a view switch, four state readouts and the row's
+   verbs -- chrome, data, chrome -- all at the same 8px gap, so nothing said
+   which was which and they competed for the same pixels. At a 1280px window
+   the line wanted 1270px in a 1028px bar, and the rationing rules that
+   followed were all attempts to decide which of three unrelated things should
+   lose. Giving the data its own line ends the competition rather than
+   arbitrating it: the chips get the full width, and the row above is purely
+   controls.
+
+   Done with `order` and a full-width basis rather than by moving markup, so
+   the wrap point is a layout decision in one place instead of a nesting
+   structure that has to be kept in sync. */
 .timeline-context-bar {
   align-items: center;
   display: flex;
-  /* One line, always. A wrapping flex row wraps *before* it shrinks — shrinking
-     only happens within a line — so giving the chips min-width: 0 did nothing
-     while this said wrap: the row simply pushed the actions onto a second line
-     and moved the timeline down. Holding one line is what lets the branch name
-     truncate instead. */
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 0 2px 10px;
+  padding: 0 2px 8px;
+  row-gap: 6px;
+}
+
+/* Row one: the controls. */
+.timeline-context-bar > .view-switch {
+  order: 1;
+}
+
+.timeline-context-bar > .timeline-actions {
+  order: 2;
+}
+
+/* Row two: the state. flex-basis: 100% is what forces the break, and with the
+   whole width to itself the group has room it never had on the shared line. */
+.timeline-context-bar > .context-chips {
+  order: 3;
+  flex-basis: 100%;
 }
 
 /* Never wraps and never shrinks, for the same reason the top bar's right half
@@ -2892,6 +2918,31 @@ button:focus-visible {
   gap: 8px;
   min-width: 0;
   overflow: hidden;
+}
+
+/* On their own row, the inert chips stop dressing as controls.
+
+   Every chip wore a pill border and a raised fill, which is the vocabulary the
+   actions beside them used, so a status readout and a button were the same
+   object to the eye -- the whole reason a label could turn out to run a pull.
+   Now the readouts are set on the row's own surface with only their caption to
+   separate them, and a border means what it says everywhere else in the app:
+   you can click this. */
+.context-chips .context-chip:not(button) {
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+/* Which leaves the two that really are controls looking like controls. */
+.context-chips button.context-chip {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+
+.context-chips button.context-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .timeline-actions {
