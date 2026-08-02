@@ -1944,6 +1944,15 @@ fn commit_diff(path: String, commit: String) -> Result<String, String> {
         vec![
             "--no-pager".to_string(),
             "show".to_string(),
+            // A merge commit defaults to a combined diff ("diff --cc"), which
+            // the frontend's parser does not understand, so it fell back to
+            // dumping the raw text as wrapped prose. These two flags ask for
+            // the merge's changes against its first parent in ordinary
+            // "diff --git" form, which is both parseable and the comparison a
+            // reader of a merge actually wants: what this merge brought in.
+            // They are no-ops on an ordinary commit.
+            "-m".to_string(),
+            "--first-parent".to_string(),
             "--stat".to_string(),
             "--patch".to_string(),
             "--find-renames".to_string(),
