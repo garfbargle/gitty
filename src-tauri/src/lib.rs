@@ -24,7 +24,7 @@ use std::{
 
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
 const SNAPSHOT_SUPERSEDED: &str = "__superseded__";
-const NETWORK_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const NETWORK_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn network_operation_is_idle(elapsed: Duration, last_activity_ms: u64) -> bool {
     elapsed
@@ -439,18 +439,15 @@ fn git_output_result(
 }
 
 /// Network Git actions must not strand the entire app if a remote stops
-/// responding. Git's low-speed knobs make HTTPS fail quickly during an idle
-/// transfer, and this activity guard covers servers that never start one.
-/// It deliberately does not impose a total runtime limit: a large backup may
-/// take longer than 45 seconds while still making steady progress.
+/// responding. This activity guard covers servers that never start a
+/// transfer, without overriding Git's own (or the repository's) HTTP
+/// configuration. It deliberately does not impose a total runtime limit: a
+/// large backup may take longer than two minutes while still making steady
+/// progress.
 fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
     let mut child = Command::new("git")
         .arg("-C")
         .arg(repo_path)
-        .arg("-c")
-        .arg("http.lowSpeedLimit=1")
-        .arg("-c")
-        .arg("http.lowSpeedTime=30")
         .args(&args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
@@ -562,10 +559,6 @@ fn git_network_owned_with_progress(
     let mut child = Command::new("git")
         .arg("-C")
         .arg(repo_path)
-        .arg("-c")
-        .arg("http.lowSpeedLimit=1")
-        .arg("-c")
-        .arg("http.lowSpeedTime=30")
         .args(&command_args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
@@ -5284,6 +5277,6 @@ mod tests {
             Duration::from_secs(90),
             Duration::from_secs(89).as_millis() as u64,
         ));
-        assert!(network_operation_is_idle(Duration::from_secs(45), 0));
+        assert!(network_operation_is_idle(Duration::from_secs(120), 0));
     }
 }
