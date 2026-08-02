@@ -2292,15 +2292,23 @@ button:focus-visible {
   z-index: 2;
 }
 
+/* Tonal, not filled.
+   Pull and Push sat side by side as two fully saturated fills of equal weight,
+   eight pixels apart, so the bar had no primary action at all -- and up to four
+   such fills could coexist here. Push keeps the fill: it owns the keybinding
+   and it is the irreversible one. Pull states the same thing in the accent's
+   quiet register, which still reads as the accent action without competing.
+   Its count moves inline (see .pull-btn-main), which is what retires the
+   floating badge. */
 .pull-btn-main,
 .pull-btn-chevron {
   align-items: center;
-  background: var(--accent);
-  border: 1px solid var(--accent-hover);
-  color: #fff;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 34%, transparent);
+  color: var(--accent);
   display: inline-flex;
   font-size: var(--text-xs);
-  font-weight: 700;
+  font-weight: var(--weight-strong);
   gap: 6px;
   min-height: 32px;
   transition: filter 0.15s ease, transform 0.15s ease;
@@ -2479,6 +2487,10 @@ button:focus-visible {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   padding: 14px 16px 6px;
+  /* The query target for the context row's sacrifice ladder. Named, so the
+     rules below cannot accidentally resolve against some future container
+     that happens to sit closer. */
+  container: timeline / inline-size;
 }
 
 .timeline-scroller {
@@ -2791,10 +2803,14 @@ button:focus-visible {
    read as one grey block and neither led. The hash takes the brighter step and
    medium weight, the time stays muted — rank by colour and weight rather than
    by size, since 11px is already the floor and neither can shrink. */
+/* The hash names the commit; the time only qualifies it. They sat at the same
+   size and were told apart by colour alone, which is the pattern this scale
+   exists to end -- so the hash takes the step above and colour is left to say
+   which of them is the brighter. */
 .node-hash {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   position: relative;
   z-index: 1;
@@ -2965,12 +2981,49 @@ button:focus-visible {
 }
 
 /* The part that actually gives: the kind label and any count stay whole, the
-   ref name truncates. */
+   ref name truncates -- but never to nothing.
+
+   With only `min-width: 0` the name was the sole thing in either bar that
+   could shrink, so it absorbed every pixel the window lost. At 1060px "main"
+   was already cut in half; at 900px the chip you stand on had no name at all;
+   at 640px it was a 29px empty pill still holding its border and caption. The
+   floor keeps enough characters to recognise a branch, and the ladder below
+   spends the cheaper things first. */
 .context-chip .chip-ref {
-  min-width: 0;
+  min-width: 7ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The sacrifice ladder.
+
+   Queried against the container rather than the viewport, because the sidebar
+   collapses independently: the same window is two different widths for this
+   row depending on it, and a viewport media query gets that wrong in both
+   directions. Order is cheapest first -- decoration, then redundancy, then
+   context -- and branch identity is never on the list. */
+@container timeline (max-width: 900px) {
+  /* Captions are scaffolding for reading the row the first few times. Losing
+     them costs recognition; losing the name costs the answer. */
+  .context-chip .chip-kind {
+    display: none;
+  }
+}
+
+@container timeline (max-width: 780px) {
+  /* Other checkouts are context about elsewhere, not about where you are. */
+  .context-chip.elsewhere {
+    display: none;
+  }
+}
+
+@container timeline (max-width: 660px) {
+  /* The trunk's relationship to you is the last thing to go, and it goes as a
+     whole chip rather than as an empty pill. */
+  .context-chip:not(.here) {
+    display: none;
+  }
 }
 
 .context-chip .chip-kind,

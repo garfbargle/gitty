@@ -3277,7 +3277,6 @@ function App() {
                 <HistoryTimeline
                   historyView={historyView}
                   onHistoryViewChange={setHistoryView}
-                  lastFetchedAt={displaySnapshot.lastFetchedAt}
                   currentBranch={displaySnapshot.branch}
                   worktrees={worktrees}
                   unpushedCommits={displaySnapshot.unpushedCommits}
@@ -3297,8 +3296,6 @@ function App() {
                   integrationBusy={integrationRunning}
                   onUpdateFromMain={() => void updateFromMain()}
                   onMergeIntoMain={() => void mergeIntoMain()}
-                  onPullUpstream={!integrationOp ? () => void pull(false) : undefined}
-                  pullBusy={pullPhase !== "idle"}
                   inPreview={!!viewingCommit}
                   onOpenVersion={() => void openCommitInFolder()}
                   onReturnToWorkingTree={() => void selectWorkingTree()}

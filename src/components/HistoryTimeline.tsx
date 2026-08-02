@@ -13,7 +13,6 @@ import {
   formatRelativeTime,
   folderName,
   relativeTimeRefreshMs,
-  remoteFreshness,
   tagName,
   tagRefs,
 } from "../lib/git";
@@ -63,13 +62,10 @@ type HistoryTimelineProps = {
   onMergeIntoMain?: () => void;
   /// Pull the branch's upstream (the "origin/… ↓N" lane) — the same action as
   /// the toolbar Pull button, offered where the user is looking at the gap.
-  onPullUpstream?: () => void;
-  pullBusy?: boolean;
   /// Which density of history is showing. The switch lives in this component
   /// because it heads the context row that both densities sit under.
   /// When the remote was last actually reached. Only the remote chip is
   /// affected: a trunk branch is local, so it is never stale.
-  lastFetchedAt?: number | null;
   /// The branch checked out in this folder, so the row can say where you are.
   currentBranch?: string;
   /// Other checkouts of this repository. Nothing else on this screen mentions
@@ -122,9 +118,6 @@ export function HistoryTimeline({
   integrationBusy,
   onUpdateFromMain,
   onMergeIntoMain,
-  onPullUpstream,
-  pullBusy,
-  lastFetchedAt,
   currentBranch,
   worktrees = [],
   onOpenCheckout,
@@ -621,63 +614,50 @@ export function HistoryTimeline({
           </div>
         ) : null}
         {renderSiblingChip()}
-        {contextLanes.map((lane) => {
+        {/* The upstream lane is deliberately absent.
+
+            It stated the same fact as the strip's "Incoming" tag twenty pixels
+            below it -- same ref, same count, two encodings -- and the strip's
+            version is anchored to the commits it is describing, so it is the
+            one that earns the space. Removing the chip also removes the row's
+            widest item, which is most of the room the narrow-window ladder
+            below needs.
+
+            Its click-to-pull behaviour is gone with it. The chip was pixel
+            identical to the inert chips beside it, differing only in `cursor`,
+            so a status label ran a network operation that rewrites the working
+            tree, while a button labelled Pull sat forty pixels above doing the
+            same thing. One verb, one owner: the Pull button. */}
+        {contextLanes.filter((lane) => lane.kind !== "upstream").map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
-          // A trunk lane is a local branch and cannot go stale; only what we
-          // learned from the network can.
-          const freshness =
-            lane.kind === "upstream" ? remoteFreshness(lastFetchedAt, now) : { state: "fresh" as const };
-          // The upstream lane, when behind, doubles as a Pull affordance: click
-          // the "origin/… ↓N" chip to catch up, right where the gap is shown.
-          const pullable = lane.kind === "upstream" && lane.behind > 0 && !!onPullUpstream;
+          // Only local branches reach here now. A local branch cannot go stale
+          // -- staleness is a property of what we last learned from the
+          // network -- so the unknown/stale states went with the upstream chip.
           const chipBody = (
             <>
-              <span className="chip-kind">
-                {lane.kind === "upstream" ? "Remote" : "Base"}
-              </span>
+              <span className="chip-kind">Base</span>
               <GitBranch size={12} aria-hidden />
               <span className="chip-ref">{lane.refName}</span>
-              {freshness.state === "unknown" ? (
-                // Never reached, so "in sync" would be a guess presented as a
-                // fact. Say what is actually known.
-                <span className="chip-sync unknown">not checked</span>
-              ) : inSync ? (
+              {/* Counts say what they would cost you, in the words the buttons
+                  use. A bare up/down arrow beside a number is ahead/behind
+                  notation, which is the vocabulary this interface is supposed
+                  not to have; "2 to update" matches "Update from main" and
+                  needs nothing explained. */}
+              {inSync ? (
                 <span className="chip-sync">in sync</span>
               ) : (
                 <>
                   {lane.behind > 0 ? (
-                    <span className="chip-count behind">
-                      <ArrowDown size={11} aria-hidden />
-                      {lane.behind}
-                    </span>
+                    <span className="chip-count behind">{lane.behind} to update</span>
                   ) : null}
                   {lane.ahead > 0 ? (
-                    <span className="chip-count ahead">
-                      <ArrowUp size={11} aria-hidden />
-                      {lane.ahead}
-                    </span>
+                    <span className="chip-count ahead">{lane.ahead} to merge</span>
                   ) : null}
                 </>
               )}
-              {freshness.state === "stale" ? (
-                <span className="chip-age" title="Time since the remote was last reached">
-                  {freshness.age}
-                </span>
-              ) : null}
             </>
           );
-          return pullable ? (
-            <button
-              type="button"
-              className={`context-chip behind pullable${pullBusy ? " busy" : ""}`}
-              key={`chip-${lane.kind}-${lane.refName}`}
-              title={`Pull ${lane.behind} commit${lane.behind === 1 ? "" : "s"} from ${lane.refName}`}
-              disabled={pullBusy}
-              onClick={onPullUpstream}
-            >
-              {chipBody}
-            </button>
-          ) : (
+          return (
             <div
               className={`context-chip${lane.behind > 0 ? " behind" : ""}`}
               key={`chip-${lane.kind}-${lane.refName}`}

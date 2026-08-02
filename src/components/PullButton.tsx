@@ -97,11 +97,6 @@ export function PullButton({
       ref={rootRef}
       aria-live="polite"
     >
-      {showBadge ? (
-        <span className="pull-btn-badge" aria-hidden="true">
-          {badgeCount}
-        </span>
-      ) : null}
       <button
         type="button"
         className="pull-btn-main"
@@ -122,8 +117,13 @@ export function PullButton({
           </>
         ) : (
           <>
+            {/* The count sits in the label rather than on a floating badge
+                pinned to the button's corner. A notification badge is a phone
+                pattern: it overlapped the refresh button beside it, and it made
+                the number look like an alert rather than the size of the thing
+                the button is about to do. "Pull 2" needs no decoding. */}
             <Download size={15} />
-            Pull
+            {showBadge ? `Pull ${badgeCount}` : "Pull"}
           </>
         )}
       </button>
