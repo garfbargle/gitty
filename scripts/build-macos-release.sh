@@ -45,10 +45,25 @@ fi
 
 cd "$ROOT"
 echo "Building signed + notarized macOS bundle..."
-npm run tauri build -- --bundles dmg
+# Bundling only the DMG deletes Gitty.app, which the verification commands
+# below need. Asking for both keeps the .app in place.
+npm run tauri build -- --bundles app,dmg
 
 APP="$ROOT/src-tauri/target/release/bundle/macos/Gitty.app"
-DMG="$ROOT/src-tauri/target/release/bundle/dmg/Gitty_0.1.0_aarch64.dmg"
+# Resolve the DMG rather than reconstructing its name: Tauri encodes the
+# version and architecture into it (Gitty_<version>_<arch>.dmg), so any
+# hardcoded name goes stale on the next release or on a different host.
+DMG=$(find "$ROOT/src-tauri/target/release/bundle/dmg" -maxdepth 1 -name '*.dmg' | head -n 1)
+
+if [[ ! -d "$APP" ]]; then
+  echo "Expected app bundle not found: $APP" >&2
+  exit 1
+fi
+
+if [[ -z "$DMG" ]]; then
+  echo "No DMG found under $ROOT/src-tauri/target/release/bundle/dmg" >&2
+  exit 1
+fi
 
 echo
 echo "Build finished."

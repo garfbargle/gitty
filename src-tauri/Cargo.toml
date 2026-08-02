@@ -1,6 +1,6 @@
 [package]
 name = "gitty"
-version = "0.1.0"
+version = "0.26.0"
 description = "A streamlined Git desktop client"
 authors = ["you"]
 edition = "2021"

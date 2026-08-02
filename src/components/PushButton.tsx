@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
+import { SHORTCUT } from "../lib/platform";
 
 export type PushPhase = "idle" | "pushing" | "done";
 
@@ -164,7 +165,7 @@ export function PushButton({
           <>
             <Upload size={15} />
             Push
-            <kbd>⌘⇧↵</kbd>
+            <kbd>{SHORTCUT.push}</kbd>
           </>
         )}
       </button>

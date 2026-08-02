@@ -70,6 +70,8 @@ import {
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
+import { SHORTCUT } from "./lib/platform";
+import { sortRepos } from "./lib/repoSort";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -207,23 +209,6 @@ function readRepoSortMode(): RepoSortMode {
   } catch {
     return "manual";
   }
-}
-
-function sortRepos(repos: RepoEntry[], mode: RepoSortMode): RepoEntry[] {
-  if (mode === "manual") return repos;
-
-  const byName = (left: RepoEntry, right: RepoEntry) =>
-    left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) ||
-    left.path.localeCompare(right.path, undefined, { numeric: true, sensitivity: "base" });
-
-  return [...repos].sort((left, right) => {
-    if (mode === "name-asc") return byName(left, right);
-    if (mode === "name-desc") return byName(right, left);
-    if (mode === "recent") {
-      return (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0) || byName(left, right);
-    }
-    return Number(Boolean(right.hasUncommittedChanges)) - Number(Boolean(left.hasUncommittedChanges)) || byName(left, right);
-  });
 }
 
 function isSupersededSnapshotError(err: unknown): boolean {
@@ -598,6 +583,10 @@ function App() {
   const canMergeIntoMain = canIntegrate && aheadOfMain > 0;
 
   const sortedRepos = useMemo(() => sortRepos(repos, repoSortMode), [repos, repoSortMode]);
+  const sortedDiscoveredRepos = useMemo(
+    () => sortRepos(discoveredRepos, repoSortMode),
+    [discoveredRepos, repoSortMode],
+  );
   const savedPaths = useMemo(() => repos.map((repo) => repo.path), [repos]);
   const contentPath = snapshot?.repo.path ?? "";
   const displaySnapshot =
@@ -3065,7 +3054,7 @@ function App() {
     <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
       <RepoSidebar
         repos={sortedRepos}
-        discoveredRepos={discoveredRepos}
+        discoveredRepos={sortedDiscoveredRepos}
         discovering={discovering}
         selectedPath={selectedPath}
         contentPath={contentPath}
@@ -3107,14 +3096,12 @@ function App() {
               selectedPath={selectedPath}
               branch="…"
               branches={["…"]}
-              changeCount={0}
               loading
               repoSwitching
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={() => {}}
-              onReturnToWorkingTree={() => {}}
               onRefresh={() => {}}
             />
             <div className="repo-loading-state" aria-busy="true" aria-live="polite">
@@ -3131,7 +3118,6 @@ function App() {
               selectedPath={selectedPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
-              changeCount={displaySnapshot.changes.length}
               loading={loading}
               pushPhase={pushPhase}
               pullPhase={pullPhase}
@@ -3153,8 +3139,6 @@ function App() {
               onRepoChange={(path) => void selectRepo(path)}
               onBranchChange={(branch) => void checkoutBranch(branch)}
               viewingCommit={viewingCommit}
-              onOpenVersion={() => void openCommitInFolder()}
-              onReturnToWorkingTree={() => void selectWorkingTree()}
               onRefresh={() => void refreshRepo()}
               onPush={() => push(false)}
               onForcePush={() => push(true)}
@@ -3195,6 +3179,9 @@ function App() {
                   onMergeIntoMain={() => void mergeIntoMain()}
                   onPullUpstream={!integrationOp ? () => void pull(false) : undefined}
                   pullBusy={pullPhase !== "idle"}
+                  inPreview={!!viewingCommit}
+                  onOpenVersion={() => void openCommitInFolder()}
+                  onReturnToWorkingTree={() => void selectWorkingTree()}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
@@ -3314,7 +3301,7 @@ function App() {
                           : integrationOp.kind === "subtree"
                             ? "Finish update"
                             : "Continue update"}
-                        <kbd>⌘↵</kbd>
+                        <kbd>{SHORTCUT.commit}</kbd>
                       </button>
                       <button
                         type="button"

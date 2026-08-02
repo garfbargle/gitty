@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { BranchEntry, CommitEntry } from "../types";
+import { SHORTCUT } from "../lib/platform";
 
 const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 
@@ -348,7 +349,7 @@ export function CommitPanel({
                     <>
                       <p className="change-summary-body change-summary-use">{changeSummary}</p>
                       <p className="change-summary-hint muted">
-                        <kbd>⌘↵</kbd> to commit
+                        <kbd>{SHORTCUT.commit}</kbd> to commit
                       </p>
                       {showResummarizeStaged ? (
                         <button
@@ -412,7 +413,7 @@ export function CommitPanel({
             onClick={onCommit}
           >
             Commit
-            <kbd>⌘↵</kbd>
+            <kbd>{SHORTCUT.commit}</kbd>
           </button>
 
           {hasRemotes ? (
