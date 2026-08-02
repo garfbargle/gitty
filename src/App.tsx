@@ -2614,7 +2614,10 @@ function App() {
     return () => window.clearInterval(timer);
   }, [selectedPath, snapshot?.repo.path, snapshot?.remotes.length]);
 
-  async function push(force: boolean, hard = false): Promise<boolean> {
+  // `tags` is opt-in. Ordinary Push ships commits only; tags go out through the
+  // push menu, because a fork's tags usually came from upstream and pushing
+  // them republishes someone else's releases under your name.
+  async function push(force: boolean, hard = false, tags = false): Promise<boolean> {
     const path = selectedPath;
     if (
       !path ||
@@ -2643,14 +2646,17 @@ function App() {
     await waitForPaint();
 
     try {
-      const result = await invoke<ActionResult>("push_repo", { path, force, hard });
+      const result = await invoke<ActionResult>("push_repo", { path, force, hard, tags });
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
         return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       if (selectedPath === path) setPushRejected(false);
       const snap = await refreshRepoQuiet(path);
-      const remaining = (snap?.ahead ?? 0) + (snap?.unpushedTags?.length ?? 0);
+      // Only count what this push actually tried to ship. Tags left behind by a
+      // commits-only push are not "remaining work" — counting them held the
+      // button in its post-push state forever on any fork carrying upstream tags.
+      const remaining = (snap?.ahead ?? 0) + (tags ? snap?.unpushedTags?.length ?? 0 : 0);
       if (remaining === 0) {
         const timer = pushDoneTimerRef.current.get(path);
         if (timer !== undefined) {
@@ -3249,6 +3255,7 @@ function App() {
               onPush={() => push(false)}
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
+              onPushTags={() => push(false, false, true)}
               disabled={backupPhase !== "idle"}
               backupSetupAvailable={backupSetupAvailable}
               backupRemoteName={savedBackupRemoteName.trim() || null}

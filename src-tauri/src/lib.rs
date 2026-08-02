@@ -4841,6 +4841,7 @@ fn push_repo_blocking(
     path: String,
     force: bool,
     hard: bool,
+    tags: bool,
 ) -> Result<ActionResult, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -4849,7 +4850,7 @@ fn push_repo_blocking(
     if let Some(remote) = remote.as_deref() {
         emit_git_progress(&app, &repo.path, format!("Checking {remote}"), "Checking tags and remote state…");
     }
-    let tags_to_push = unpushed_tags(repo_path);
+    let tags_to_push = if tags { unpushed_tags(repo_path) } else { Vec::new() };
     let backup_after_push = backup_on_push(repo_path);
     let retrying_backup = backup_push_pending(repo_path) && backup_after_push;
     let mut outputs = Vec::new();
@@ -5064,14 +5065,24 @@ async fn backup_repo(app: AppHandle, path: String) -> Result<ActionResult, Strin
         .map_err(|err| format!("Backup task failed: {err}"))?
 }
 
+/// `tags` is opt-in and defaults to false.
+///
+/// Pushing tags alongside commits was silent and unconditional, which is wrong
+/// whenever the tags did not originate here. A fork typically carries the
+/// upstream's whole release history — tags arrive with a fetch, are never
+/// mirrored to the fork by `git push`, and so read as permanently unpushed.
+/// Pressing Push then published someone else's releases under your name, in a
+/// count the button never said was tags. The caller now has to ask.
 #[tauri::command]
 async fn push_repo(
     app: AppHandle,
     path: String,
     force: bool,
     hard: bool,
+    tags: Option<bool>,
 ) -> Result<ActionResult, String> {
-    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(app, path, force, hard))
+    let tags = tags.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || push_repo_blocking(app, path, force, hard, tags))
         .await
         .map_err(|err| format!("Push task failed: {err}"))?
 }

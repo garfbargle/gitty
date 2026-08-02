@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Tag, Upload } from "lucide-react";
 import { SHORTCUT } from "../lib/shortcuts";
 
 export type PushPhase = "idle" | "pushing" | "done";
@@ -20,6 +20,8 @@ type PushButtonProps = {
   onForcePush: () => Promise<boolean>;
   /** Hard `git push --force` — overwrites the remote unconditionally, for when the lease is stale. */
   onOverwrite: () => Promise<boolean>;
+  /** Push tags as well. Opt-in, from the menu only — see `push` in App.tsx. */
+  onPushTags?: () => Promise<boolean>;
 };
 
 export function PushButton({
@@ -35,16 +37,24 @@ export function PushButton({
   onPush,
   onForcePush,
   onOverwrite,
+  onPushTags,
 }: PushButtonProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const badgeAheadRef = useRef(ahead + unpushedTags);
+  const badgeAheadRef = useRef(ahead);
 
-  const pushCount = ahead + unpushedTags;
+  // The badge counts commits, and only commits. It used to be ahead + tags,
+  // which is two different kinds of thing summed into one number on a button
+  // that says "Push" — so a fork holding 31 upstream release tags and nothing
+  // of its own read as "31 to push" beside a bar reading "in sync". Both were
+  // true; together they were a lie. Tags are reachable from the menu.
+  const pushCount = ahead;
+  const hasTagsToOffer = unpushedTags > 0 && !!onPushTags;
   const suggestsForcePush = behind > 0 || forceSuggested;
   const visible =
     hasRemotes &&
     (pushCount > 0 ||
+      hasTagsToOffer ||
       unpublished ||
       suggestsForcePush ||
       pushPhase === "pushing" ||
@@ -104,16 +114,12 @@ export function PushButton({
     if (pushPhase === "pushing") return "Push in progress…";
     if (pushPhase === "done") return "Push completed";
 
-    const parts: string[] = [];
-    if (ahead > 0) {
-      parts.push(`${ahead} commit${ahead === 1 ? "" : "s"}`);
-    }
-    if (unpushedTags > 0) {
-      parts.push(`${unpushedTags} tag${unpushedTags === 1 ? "" : "s"}`);
-    }
-    const summary = parts.length > 0 ? parts.join(" and ") : "changes";
+    const summary = ahead > 0 ? `${ahead} commit${ahead === 1 ? "" : "s"}` : "changes";
 
     const forceHint = "  •  right-click for push options";
+    if (pushCount === 0 && hasTagsToOffer && !unpublished && !suggestsForcePush) {
+      return `Nothing to push — ${unpushedTags} tag${unpushedTags === 1 ? "" : "s"} available from push options${forceHint}`;
+    }
     if (unpublished && pushCount === 0) {
       return `Publish this branch to the remote${forceHint}`;
     }
@@ -170,7 +176,7 @@ export function PushButton({
         )}
       </button>
 
-      {suggestsForcePush ? (
+      {suggestsForcePush || hasTagsToOffer ? (
         <button
           type="button"
           className="push-btn-chevron"
@@ -199,6 +205,24 @@ export function PushButton({
             <Upload size={14} />
             <span>Push</span>
           </button>
+          {hasTagsToOffer ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="push-btn-menu-item"
+              disabled={isLocked}
+              onClick={() => {
+                setOpen(false);
+                void onPushTags?.();
+              }}
+            >
+              <Tag size={14} />
+              <span>
+                Push {unpushedTags} tag{unpushedTags === 1 ? "" : "s"}
+              </span>
+              <small>also publishes tags fetched from elsewhere</small>
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

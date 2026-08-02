@@ -48,6 +48,7 @@ type TopBarProps = {
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
   onOverwrite?: () => Promise<boolean>;
+  onPushTags?: () => Promise<boolean>;
   backupSetupAvailable?: boolean;
   backupRemoteName?: string | null;
   backupPhase?: PushPhase;
@@ -104,6 +105,7 @@ export function TopBar({
   onPush,
   onForcePush,
   onOverwrite,
+  onPushTags,
   backupSetupAvailable = false,
   backupRemoteName,
   backupPhase = "idle",
@@ -231,6 +233,7 @@ export function TopBar({
             onPush={onPush}
             onForcePush={onForcePush}
             onOverwrite={onOverwrite}
+            onPushTags={onPushTags}
           />
         ) : null}
         {backupSetupAvailable && onSetupBackup && !repoSwitching ? (

@@ -385,7 +385,7 @@ button:focus-visible {
 
 .repo-sort-control option {
   background: var(--bg-panel);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .repo-list {
@@ -475,7 +475,7 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
   font-size: 14px;
@@ -525,7 +525,7 @@ button:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
   gap: 10px;
@@ -865,7 +865,7 @@ button:focus-visible {
 
 .view-mode-toggle:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* IDE / editor split-button chooser */
@@ -905,7 +905,7 @@ button:focus-visible {
 .ide-picker-caret:hover,
 .ide-picker.open .ide-picker-caret {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .ide-picker-main:disabled {
@@ -932,7 +932,7 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
   font-size: 13px;
@@ -977,7 +977,7 @@ button:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: inline-flex;
   justify-content: center;
@@ -1017,7 +1017,7 @@ button:focus-visible {
 .repo-runner-caret:hover,
 .repo-runner.open .repo-runner-caret {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .repo-runner-main:disabled {
@@ -1062,7 +1062,7 @@ button:focus-visible {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   display: flex;
   font-size: 12px;
@@ -1128,14 +1128,14 @@ button:focus-visible {
   background: var(--bg-input, #1e1e1e);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
+  color: var(--text);
   font-size: 12px;
   padding: 4px 8px;
   width: 100%;
 }
 
 .repo-runner-custom-btn {
-  background: var(--primary, #3b82f6);
+  background: var(--accent);
   border: 0;
   border-radius: var(--radius-sm);
   color: #fff;
@@ -1344,7 +1344,7 @@ button:focus-visible {
 
 .sidebar-restore-btn:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* ── Top bar ── */
@@ -1563,7 +1563,7 @@ button:focus-visible {
 
 .working-tree-option.active {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .working-tree-option .option-leading {
@@ -1731,7 +1731,7 @@ button:focus-visible {
 
 .wt-even {
   color: var(--text-muted);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   opacity: 0.7;
 }
 
@@ -2678,6 +2678,16 @@ button:focus-visible {
   position: sticky;
   right: 0;
   z-index: 3;
+  /* Chrome spans the band; a commit node does not. .timeline-track adds
+     padding-block so commits sit in the band rather than against its edges, but
+     this node is the band's fixed right edge, so that padding showed as a strip
+     of the darker scroller above and below it -- a 9px seam that read as a gap
+     under "Now". Cancelling the padding for this one item and re-adding it as
+     the node's own keeps the content box at --timeline-node-height (border-box),
+     so Now still lines up with every commit while its surface runs edge to edge. */
+  margin-block: calc(var(--space-2) * -1);
+  height: calc(var(--timeline-node-height) + var(--space-2) * 2);
+  padding-block: var(--space-2);
 }
 
 /* Not pushed yet.
@@ -4047,7 +4057,7 @@ button.context-chip.pullable:disabled {
 }
 
 .reset-target-message {
-  color: var(--text-primary);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.45;
   max-height: 140px;
@@ -5460,7 +5470,7 @@ button.context-chip.pullable:disabled {
 .activity-feed-tabs > button.active,
 .activity-feed-terminal-tab.active {
   background: var(--bg-hover);
-  border-color: var(--primary);
+  border-color: var(--accent);
   color: var(--text);
 }
 
@@ -5549,7 +5559,7 @@ button.context-chip.pullable:disabled {
   flex: 0 0 auto;
 }
 
-.activity-feed-icon.running { color: var(--primary); }
+.activity-feed-icon.running { color: var(--accent); }
 .activity-feed-icon.success { color: var(--success); }
 .activity-feed-icon.error { color: var(--danger); }
 
