@@ -61,7 +61,14 @@ export function PushButton({
       pushPhase === "done");
   const isBusy = pushPhase !== "idle";
   const isLocked = isBusy || !!disabled || !!loading;
-  const showBadge = pushPhase === "pushing" || (pushPhase === "idle" && pushCount > 0);
+  // Only tags are outstanding, so the primary click has nothing to do: a
+  // commits-only push would return "Nothing to push." as an error. The button
+  // opens the menu instead, which is where the tags live.
+  const tagsOnly = pushCount === 0 && hasTagsToOffer && !unpublished && !suggestsForcePush;
+  // `> 0` matters during a push: the frozen count is commits, so a tags-only
+  // push used to sit next to a badge reading 0.
+  const badgeCountNow = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
+  const showBadge = pushPhase !== "done" && badgeCountNow > 0;
 
   useEffect(() => {
     if (pushPhase === "idle") {
@@ -98,7 +105,6 @@ export function PushButton({
     return null;
   }
 
-  const badgeCount = pushPhase === "pushing" ? badgeAheadRef.current : pushCount;
 
   // Right-click anywhere on the button opens the push menu so force push is
   // always reachable — even when we haven't detected divergence (e.g. the
@@ -146,7 +152,7 @@ export function PushButton({
     >
       {showBadge ? (
         <span className="push-btn-badge" aria-hidden="true">
-          {badgeCount}
+          {badgeCountNow}
         </span>
       ) : null}
       <button
@@ -155,7 +161,7 @@ export function PushButton({
         title={pushTitle()}
         disabled={isLocked}
         aria-busy={pushPhase === "pushing"}
-        onClick={() => void onPush()}
+        onClick={() => (tagsOnly ? setOpen((current) => !current) : void onPush())}
       >
         {pushPhase === "pushing" ? (
           <>
@@ -192,19 +198,24 @@ export function PushButton({
 
       {open ? (
         <div className="push-btn-menu" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            className="push-btn-menu-item"
-            disabled={isLocked}
-            onClick={() => {
-              setOpen(false);
-              void onPush();
-            }}
-          >
-            <Upload size={14} />
-            <span>Push</span>
-          </button>
+          {/* Hidden when only tags are outstanding: this item runs the same
+              commits-only push the primary button does, so offering it there
+              would just be a second way to reach "Nothing to push." */}
+          {tagsOnly ? null : (
+            <button
+              type="button"
+              role="menuitem"
+              className="push-btn-menu-item"
+              disabled={isLocked}
+              onClick={() => {
+                setOpen(false);
+                void onPush();
+              }}
+            >
+              <Upload size={14} />
+              <span>Push</span>
+            </button>
+          )}
           {hasTagsToOffer ? (
             <button
               type="button"

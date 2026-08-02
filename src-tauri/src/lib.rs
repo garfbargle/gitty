@@ -985,6 +985,7 @@ fn unpushed_tags_to_remote(repo_path: &Path, remote: &str) -> Vec<String> {
 fn unpushed_commit_hashes(
     repo_path: &Path,
     upstream: &Option<String>,
+    branch: &str,
     trunk: Option<&str>,
     has_remotes: bool,
 ) -> Vec<String> {
@@ -992,12 +993,34 @@ fn unpushed_commit_hashes(
         return Vec::new();
     }
 
+    // Same ladder `ahead_behind` and `branch_published` use, and for the same
+    // reason: a branch can exist on the remote without a configured upstream
+    // -- fetched from a colleague, or tracking lost in a config edit. Skipping
+    // the `<remote>/<branch>` rung and going straight to the trunk marked every
+    // commit since the fork point as unpushed while the header, which does
+    // check that rung, said the branch was in sync. The strip and the button
+    // must not disagree about what has been pushed.
     let base = match upstream {
         Some(name) if !name.is_empty() => name.clone(),
-        _ => match (default_remote_name(repo_path), trunk) {
-            (Some(remote), Some(trunk)) => format!("{remote}/{trunk}"),
-            _ => return Vec::new(),
-        },
+        _ => {
+            let remote = match default_remote_name(repo_path) {
+                Some(remote) => remote,
+                None => return Vec::new(),
+            };
+            let own = format!("{remote}/{branch}");
+            let own_exists = !is_detached_branch(branch)
+                && git_raw(repo_path, &["rev-parse", "--verify", "--quiet", &own])
+                    .map(|(ok, _, _)| ok)
+                    .unwrap_or(false);
+            if own_exists {
+                own
+            } else {
+                match trunk {
+                    Some(trunk) => format!("{remote}/{trunk}"),
+                    None => return Vec::new(),
+                }
+            }
+        }
     };
 
     // The base can be absent — a brand-new repository, or a trunk that exists
@@ -1034,6 +1057,30 @@ fn unpushed_tags(repo_path: &Path) -> Vec<String> {
     default_remote_name(repo_path)
         .map(|remote| unpushed_tags_to_remote(repo_path, &remote))
         .unwrap_or_default()
+}
+
+/// Which tags a push should carry, given whether the caller opted in.
+///
+/// This is a one-line decision, extracted because it is made twice -- once for
+/// the primary remote and once per backup -- and the two disagreed. The backup
+/// path computed its tags unconditionally, so a commits-only push still copied
+/// every unpushed tag to every backup remote, which on a fork means the
+/// upstream's entire release history published under your name. Having one
+/// function to call is what makes the rule testable rather than restated.
+fn tags_for_push(repo_path: &Path, opt_in: bool) -> Vec<String> {
+    if opt_in {
+        unpushed_tags(repo_path)
+    } else {
+        Vec::new()
+    }
+}
+
+fn backup_tags_for_push(repo_path: &Path, remote: &str, opt_in: bool) -> Vec<String> {
+    if opt_in {
+        unpushed_tags_to_remote(repo_path, remote)
+    } else {
+        Vec::new()
+    }
 }
 
 fn backup_push_pending(repo_path: &Path) -> bool {
@@ -1883,7 +1930,7 @@ fn repo_snapshot_blocking(
 
     let trunk = integration_branch(&branches);
     let unpushed_commits =
-        unpushed_commit_hashes(&repo_path, &upstream, trunk.as_deref(), !remotes.is_empty());
+        unpushed_commit_hashes(&repo_path, &upstream, &branch, trunk.as_deref(), !remotes.is_empty());
     let sibling = sibling_tip(&repo_path, &branch, &branches, &trunk);
 
     let is_clean = changes.is_empty();
@@ -4850,7 +4897,7 @@ fn push_repo_blocking(
     if let Some(remote) = remote.as_deref() {
         emit_git_progress(&app, &repo.path, format!("Checking {remote}"), "Checking tags and remote state…");
     }
-    let tags_to_push = if tags { unpushed_tags(repo_path) } else { Vec::new() };
+    let tags_to_push = tags_for_push(repo_path, tags);
     let backup_after_push = backup_on_push(repo_path);
     let retrying_backup = backup_push_pending(repo_path) && backup_after_push;
     let mut outputs = Vec::new();
@@ -4920,7 +4967,13 @@ fn push_repo_blocking(
         // Compare each backup independently. This repairs tags that reached the
         // primary before a backup failed, and makes a retry complete rather
         // than merely re-sending the branch.
-        let backup_tags = unpushed_tags_to_remote(repo_path, &backup);
+        //
+        // Gated on the same `tags` opt-in as the primary. Without the gate this
+        // computed every unpushed tag regardless, so a commits-only push still
+        // copied the upstream's whole release history to every backup remote --
+        // the exact harm the flag exists to prevent, aimed at a different
+        // remote, and it left the backup holding tags the primary does not.
+        let backup_tags = backup_tags_for_push(repo_path, &backup, tags);
         if backup_branch.is_none() && backup_tags.is_empty() {
             continue;
         }
@@ -5975,6 +6028,59 @@ locked under review
     /// the remote side reports the peeled commit. Comparing the two marked every
     /// annotated tag as unpushed for ever -- 72 of 244 in one real repository,
     /// every one of them already on the remote.
+    /// The push button's headline behaviour, which had no test at all: a
+    /// commits-only push must not carry tags, to the primary *or* to a backup.
+    ///
+    /// A fork carries the upstream's whole release history -- tags arrive with
+    /// a fetch and `git push` never mirrors them -- so "unpushed tags" on a
+    /// fork are usually someone else's releases. Pushing them republishes them
+    /// under the fork's name. The backup path got this wrong while the primary
+    /// path got it right, and nothing failed.
+    #[test]
+    fn a_commits_only_push_carries_no_tags_to_any_remote() {
+        let repo = scratch_repo("tags-optin");
+        let make_remote = |suffix: &str| {
+            let path = repo
+                .parent()
+                .unwrap()
+                .join(format!("gitty-optin-{}-{}.git", suffix, std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("remote dir");
+            run_git(&path, &["init", "-q", "--bare", "."]);
+            path
+        };
+        let origin = make_remote("origin");
+        let backup = make_remote("backup");
+        run_git(&repo, &["remote", "add", "origin", &origin.to_string_lossy()]);
+        run_git(&repo, &["remote", "add", "backup", &backup.to_string_lossy()]);
+        run_git(&repo, &["push", "-q", "origin", "main"]);
+        run_git(&repo, &["tag", "-a", "v9.9.9", "-m", "someone else's release"]);
+
+        assert!(
+            tags_for_push(&repo, false).is_empty(),
+            "a commits-only push must not select any tag for the primary remote"
+        );
+        assert!(
+            backup_tags_for_push(&repo, "backup", false).is_empty(),
+            "a commits-only push must not select any tag for a backup remote either -- \
+             this is the case that shipped broken"
+        );
+
+        // And the opt-in still works, or the flag would be a way to never push
+        // a tag at all.
+        assert!(
+            tags_for_push(&repo, true).contains(&"v9.9.9".to_string()),
+            "opting in must still select the unpushed tag"
+        );
+        assert!(
+            backup_tags_for_push(&repo, "backup", true).contains(&"v9.9.9".to_string()),
+            "opting in must still select the tag for the backup remote"
+        );
+
+        let _ = fs::remove_dir_all(&origin);
+        let _ = fs::remove_dir_all(&backup);
+    }
+
     #[test]
     fn a_pushed_annotated_tag_is_not_reported_as_unpushed() {
         let repo = scratch_repo("tags");

@@ -3022,10 +3022,14 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [workingTreeActive]);
 
+  // Unpushed tags deliberately do not arm this. The keyboard shortcut and the
+  // primary button both run a commits-only push, so counting tags here armed
+  // an action that had nothing to do and returned "Nothing to push." as an
+  // error -- on a shortcut the button itself advertises. Tags are reachable
+  // from the push menu, which is where the count now lives.
   const canPush =
     hasRemotes &&
     ((snapshot?.ahead ?? 0) > 0 ||
-      (snapshot?.unpushedTags?.length ?? 0) > 0 ||
       (snapshot?.branchUnpublished ?? false) ||
       (snapshot?.backupPushPending ?? false));
   const unpushedTagSet = useMemo(
