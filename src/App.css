@@ -6437,6 +6437,16 @@ button.context-chip.pullable:disabled {
   width: 100%;
 }
 
+/* The global button focus ring is 2px of --accent-soft, which is the accent at
+   14% alpha: legible on a small control, not legible as "which of these forty
+   rows am I on". Keyboard is the point of this list, so the cursor is drawn at
+   full strength. Inset, because the row deliberately does not clip and an
+   outset ring would sit over the neighbouring row's lane strands. */
+.graph-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .graph-row:hover {
   background: var(--bg-hover);
 }

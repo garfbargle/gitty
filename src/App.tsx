@@ -3107,6 +3107,10 @@ function App() {
       if (shouldIgnoreKeyboardNavigation(event)) return;
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
       if (navZone !== "timeline") return;
+      // The strip isn't on screen in the graph, and navZone stays "timeline"
+      // across the switch, so without this arrows kept moving a selection the
+      // user could no longer see. The graph owns its own keys while it's up.
+      if (historyView === "graph") return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -3146,6 +3150,7 @@ function App() {
   }, [
     snapshot,
     navZone,
+    historyView,
     timelineItems,
     selectedCommit?.hash,
     workingTreeActive,

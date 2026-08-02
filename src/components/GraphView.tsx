@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CommitEntry, WorktreeEntry } from "../types";
 import { buildGraphRows, laneColor } from "../lib/graph";
 import {
@@ -115,6 +115,45 @@ export function GraphView({
   const laneCount = rows[0]?.laneCount ?? 1;
   const gutter = Math.max(laneCount * LANE_W + LANE_W, LANE_W * 3);
 
+  // Which row currently holds the list's single tab stop.
+  //
+  // Roving tabindex, not 40 tab stops: the timeline this view sits beside is
+  // fully keyboard-driven, and a list you can only cross with forty presses is
+  // not the same commitment. One stop to enter, arrows to move, Enter to open
+  // -- which is what the rows already do, being real buttons.
+  const cursor = Math.max(
+    0,
+    rows.findIndex((row) => row.commit.hash === selectedHash),
+  );
+
+  function moveFocus(from: number, delta: number, list: HTMLElement | null) {
+    if (!list) return;
+    const next = Math.min(rows.length - 1, Math.max(0, from + delta));
+    const buttons = list.querySelectorAll<HTMLButtonElement>(".graph-row");
+    buttons[next]?.focus();
+  }
+
+  function onRowKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    const list = event.currentTarget.closest<HTMLElement>(".graph-rows");
+    const jump: Record<string, number | "home" | "end"> = {
+      ArrowDown: 1,
+      ArrowUp: -1,
+      PageDown: 10,
+      PageUp: -10,
+      Home: "home",
+      End: "end",
+    };
+    const move = jump[event.key];
+    if (move === undefined) return;
+    // Claimed here so the window-level timeline handler, which listens in the
+    // capture phase, cannot also act on the same press.
+    event.preventDefault();
+    event.stopPropagation();
+    if (move === "home") moveFocus(0, 0, list);
+    else if (move === "end") moveFocus(rows.length - 1, 0, list);
+    else moveFocus(index, move, list);
+  }
+
   if (rows.length === 0) {
     return <div className="graph-empty">No history to draw.</div>;
   }
@@ -142,7 +181,7 @@ export function GraphView({
           ["--graph-row-h" as string]: `${ROW_H}px`,
         }}
       >
-        {rows.map((row) => {
+        {rows.map((row, index) => {
           const tags = tagRefs(row.commit.refs).map(tagName);
           const active = row.commit.hash === selectedHash;
           return (
@@ -151,6 +190,8 @@ export function GraphView({
                 type="button"
                 className={`graph-row${active ? " active" : ""}${row.onHead ? " on-head" : ""}`}
                 onClick={() => onSelect(row.commit)}
+                onKeyDown={(event) => onRowKeyDown(event, index)}
+                tabIndex={index === cursor ? 0 : -1}
                 title={`${row.commit.shortHash} · ${row.commit.subject}`}
               >
                 <svg
