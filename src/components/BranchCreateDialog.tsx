@@ -3,6 +3,7 @@ import { GitBranch } from "lucide-react";
 import type { CommitEntry, FileChange } from "../types";
 import { suggestBranchName } from "../lib/branches";
 import { SettingsModal } from "./SettingsModal";
+import { SHORTCUT } from "../lib/platform";
 
 type BranchCreateDialogProps = {
   open: boolean;
@@ -76,7 +77,7 @@ export function BranchCreateDialog({
           >
             <GitBranch size={14} />
             Create branch
-            <kbd>↵</kbd>
+            <kbd>{SHORTCUT.confirm}</kbd>
           </button>
         </div>
       }

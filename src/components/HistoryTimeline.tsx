@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, GitBranch } from "lucide-react";
+import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
 import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
@@ -54,6 +54,13 @@ type HistoryTimelineProps = {
   /// the toolbar Pull button, offered where the user is looking at the gap.
   onPullUpstream?: () => void;
   pullBusy?: boolean;
+  /// Viewing a past commit rather than the working tree. The actions for
+  /// leaving that state live here rather than in the top bar: they only exist
+  /// while a commit is selected, and the top bar has no spare room to gain and
+  /// lose a pair of buttons every time the selection changes.
+  inPreview?: boolean;
+  onOpenVersion?: () => void;
+  onReturnToWorkingTree?: () => void;
   /// A live integration op, drawn as a preview node on the track.
   integrationPreview?: {
     kind: "update" | "merge";
@@ -89,6 +96,9 @@ export function HistoryTimeline({
   onMergeIntoMain,
   onPullUpstream,
   pullBusy,
+  inPreview,
+  onOpenVersion,
+  onReturnToWorkingTree,
   integrationPreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -331,7 +341,6 @@ export function HistoryTimeline({
   function renderCommitNode(
     commit: CommitEntry,
     index: number,
-    showConnector: boolean,
     isAhead: boolean,
   ) {
     const color = laneColor(index % 6);
@@ -371,12 +380,9 @@ export function HistoryTimeline({
           </span>
         ) : null}
         {isAhead ? <span className="node-ahead-label">ahead</span> : null}
-        {showConnector ? <span className="node-connector" style={{ background: color }} /> : null}
       </button>
     );
   }
-
-  const hasMoreAfterAncestry = changeCount > 0 || ahead.length > 0;
 
   // Pin the working-tree node to the right edge while history scrolls under it,
   // but only when it's the last node on the track — once you have ahead commits
@@ -464,8 +470,12 @@ export function HistoryTimeline({
     );
   }
 
+  const showPreviewActions = !!inPreview && !!onReturnToWorkingTree;
+
   const showActions =
-    (canUpdateFromMain && !!onUpdateFromMain) || (canMergeIntoMain && !!onMergeIntoMain);
+    (canUpdateFromMain && !!onUpdateFromMain) ||
+    (canMergeIntoMain && !!onMergeIntoMain) ||
+    showPreviewActions;
 
   function renderContextChips() {
     if (contextLanes.length === 0 && !siblingTip && !showActions) return null;
@@ -545,6 +555,29 @@ export function HistoryTimeline({
                 Merge into main
               </button>
             ) : null}
+            {showPreviewActions && onOpenVersion ? (
+              <button
+                type="button"
+                className="timeline-action"
+                title="Open this version's files in a folder"
+                onClick={onOpenVersion}
+              >
+                <FolderOpen size={13} aria-hidden />
+                Open in folder
+              </button>
+            ) : null}
+            {showPreviewActions ? (
+              <button
+                type="button"
+                className="timeline-action return-to-now"
+                title="Back to your current work"
+                onClick={onReturnToWorkingTree}
+              >
+                <span className="working-dot" />
+                Back to now
+                {changeCount > 0 ? <em>{changeCount}</em> : null}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -566,17 +599,10 @@ export function HistoryTimeline({
             </div>
           ) : null}
           <div className="timeline-track">
-          {ancestry.map((commit, index) =>
-            renderCommitNode(
-              commit,
-              index,
-              index < ancestry.length - 1 || hasMoreAfterAncestry,
-              false,
-            ),
-          )}
+          {ancestry.map((commit, index) => renderCommitNode(commit, index, false))}
 
           <button
-            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""}`}
+            className={`timeline-node working-tree ${workingTreeActive ? "active" : ""} ${pinWorkingTree ? "pinned" : ""} ${changeCount > 0 ? "has-changes" : ""} ${ahead.length > 0 ? "ahead-bridge" : ""}`}
             type="button"
             ref={(node) => {
               if (node) nodeRefs.current.set("working-tree", node);
@@ -591,16 +617,10 @@ export function HistoryTimeline({
                 ? "no changes"
                 : `${changeCount} unsaved change${changeCount === 1 ? "" : "s"}`}
             </span>
-            {ahead.length > 0 ? <span className="node-connector ahead-bridge" /> : null}
           </button>
 
           {ahead.map((commit, index) =>
-            renderCommitNode(
-              commit,
-              ancestry.length + index,
-              index < ahead.length - 1 || !!integrationPreview,
-              true,
-            ),
+            renderCommitNode(commit, ancestry.length + index, true),
           )}
 
           {integrationPreview ? (

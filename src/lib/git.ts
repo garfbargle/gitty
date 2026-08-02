@@ -226,12 +226,37 @@ export function authorInitials(name: string) {
     .join("");
 }
 
+/// Home directories live in a different place on every platform, and the
+/// sidebar column is narrow, so failing to abbreviate costs the most on the
+/// platforms this used to miss:
+///   macOS    /Users/<name>/…
+///   Linux    /home/<name>/…      (also /root)
+///   Windows  C:\Users\<name>\…
+/// Matching on the container directory rather than a single hardcoded prefix
+/// keeps one code path for all three.
+const HOME_CONTAINERS = ["users", "home"];
+
 export function shortenPath(path: string, home = "~") {
-  if (path.startsWith("/Users/")) {
-    const parts = path.split("/");
-    if (parts.length >= 3) {
-      return `${home}/${parts.slice(3).join("/")}`;
+  const separator = path.includes("\\") && !path.startsWith("/") ? "\\" : "/";
+  const parts = path.split(/[\\/]/);
+
+  // A leading "/" or drive letter ("C:") produces an empty or drive-shaped
+  // first segment; the home container is whatever follows it.
+  const rootOffset = parts[0] === "" || /^[a-z]:$/i.test(parts[0] ?? "") ? 1 : 0;
+  const container = parts[rootOffset]?.toLowerCase();
+
+  if (container && HOME_CONTAINERS.includes(container)) {
+    // Need the container, a user name, and at least one segment beneath it.
+    const rest = parts.slice(rootOffset + 2);
+    if (parts.length > rootOffset + 2 && rest.length > 0) {
+      return [home, ...rest].join(separator);
     }
   }
+
+  // Linux root accounts have no container directory above them.
+  if (container === "root" && parts.length > rootOffset + 1) {
+    return [home, ...parts.slice(rootOffset + 1)].join(separator);
+  }
+
   return path;
 }

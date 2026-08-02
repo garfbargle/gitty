@@ -16,6 +16,17 @@ import { revealInFinder } from "../lib/finder";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { RepoIcon } from "./RepoIcon";
 
+/// Shown in the picker's options and in the control's tooltip. The header
+/// itself renders the icon only, so these are the single source of the
+/// human-readable names.
+const REPO_SORT_LABELS: Record<RepoSortMode, string> = {
+  manual: "Manual",
+  "name-asc": "Name A–Z",
+  "name-desc": "Name Z–A",
+  recent: "Recent activity",
+  changes: "Changes first",
+};
+
 type RepoSidebarProps = {
   repos: RepoEntry[];
   discoveredRepos: DiscoveredRepoEntry[];
@@ -126,23 +137,27 @@ export const RepoSidebar = memo(function RepoSidebar({
       <header className="sidebar-header">
         <span>Repositories</span>
         <div className="sidebar-header-actions">
-          <label className="repo-sort-control" title="Sort repositories">
+          <label
+            className={`repo-sort-control${sortMode === "manual" ? "" : " is-sorted"}`}
+            title={`Sort repositories · ${REPO_SORT_LABELS[sortMode]}`}
+          >
             <SlidersHorizontal size={14} aria-hidden="true" />
             <select
               aria-label="Sort repositories"
               value={sortMode}
               onChange={(event) => onSortModeChange(event.target.value as RepoSortMode)}
             >
-              <option value="manual">Manual</option>
-              <option value="name-asc">Name A–Z</option>
-              <option value="name-desc">Name Z–A</option>
-              <option value="recent">Recent activity</option>
-              <option value="changes">Changes first</option>
+              {(Object.keys(REPO_SORT_LABELS) as RepoSortMode[]).map((mode) => (
+                <option key={mode} value={mode}>
+                  {REPO_SORT_LABELS[mode]}
+                </option>
+              ))}
             </select>
           </label>
-          <button type="button" className="icon-btn sm" title="Add repository" onClick={onAddExisting}>
-            <Plus size={16} />
-          </button>
+          {/* The "+" that sat here called the same onAddExisting as the
+              footer's "Add Repository" button, which is always visible. Two
+              controls for one action inside a 220px row that already
+              overflowed; the footer keeps the labelled one. */}
           {onHide ? (
             <button
               type="button"
