@@ -190,15 +190,20 @@ export function WorktreeSection({
                   Open
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="settings-inline-link"
-                disabled={controlsDisabled}
-                title="Reveal in Finder"
-                onClick={() => void revealInFinder(entry.path)}
-              >
-                <FolderOpen size={12} />
-              </button>
+              {/* A prunable entry is one git still remembers but whose folder
+                  is gone, so revealing it would open nothing and say nothing
+                  about why. "Clean up" is the action that applies to it. */}
+              {!entry.prunable ? (
+                <button
+                  type="button"
+                  className="settings-inline-link"
+                  disabled={controlsDisabled}
+                  title="Reveal in Finder"
+                  onClick={() => void revealInFinder(entry.path)}
+                >
+                  <FolderOpen size={12} />
+                </button>
+              ) : null}
               {!entry.isMain && !entry.isCurrent ? (
                 <button
                   type="button"

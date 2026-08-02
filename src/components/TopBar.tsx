@@ -135,11 +135,14 @@ export function TopBar({
   const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
 
-  // branch name -> folder it's already checked out in, excluding this one.
+  // branch name -> the folder it's already checked out in, excluding this one.
+  // Prunable entries are kept: git still refuses to check the branch out here
+  // while the registration exists, so dropping them would leave the option
+  // looking available and fail on click. They're marked, not hidden.
   const openElsewhere = new Map(
     worktrees
       .filter((entry) => !entry.isCurrent && entry.branch)
-      .map((entry) => [entry.branch as string, entry.path]),
+      .map((entry) => [entry.branch as string, entry]),
   );
 
   return (
@@ -197,12 +200,18 @@ export function TopBar({
               // a choice: picking it opens that folder instead. The folder's
               // name, not its path: the path is long enough to read as a
               // statement about where you are rather than where you'd go.
+              // A folder deleted outside Gitty is still registered, so the
+              // branch is still held — but there is nothing to open. Saying
+              // "open <name>" would send the user to a folder that is gone.
               const elsewhere = openElsewhere.get(name);
+              const label = !elsewhere
+                ? name
+                : elsewhere.prunable
+                  ? `${name}  ·  folder missing`
+                  : `${name}  →  open ${folderName(elsewhere.path)}`;
               return (
                 <option key={name} value={name}>
-                  {elsewhere
-                    ? `${name}  →  open ${folderName(elsewhere)}`
-                    : name}
+                  {label}
                 </option>
               );
             })}

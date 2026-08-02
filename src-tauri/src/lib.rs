@@ -694,6 +694,44 @@ fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Check that a folder we are about to create can actually be created.
+///
+/// Without this, `git worktree add` into an unwritable location fails with its
+/// own text and the whole command echoed back — accurate, and useless to
+/// anyone who isn't reading git's source. Walks up to the nearest ancestor
+/// that exists and probes it, because that is the directory git will write in.
+fn writable_ancestor(directory: &Path) -> Result<(), String> {
+    let mut ancestor = directory;
+    while !ancestor.exists() {
+        match ancestor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => ancestor = parent,
+            _ => return Err(format!("{} is not a path this computer has.", directory.display())),
+        }
+    }
+
+    if !ancestor.is_dir() {
+        return Err(format!(
+            "{} is a file, so a folder can't be created inside it.",
+            ancestor.display()
+        ));
+    }
+
+    // Permission bits alone don't answer this: ownership, ACLs and read-only
+    // mounts all decide it too. Creating something is the only honest test.
+    let probe = ancestor.join(format!(".gitty-write-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&probe);
+    match fs::create_dir(&probe) {
+        Ok(()) => {
+            let _ = fs::remove_dir_all(&probe);
+            Ok(())
+        }
+        Err(err) => Err(format!(
+            "Gitty can't create a folder in {} ({err}). Choose somewhere you can write to.",
+            ancestor.display()
+        )),
+    }
+}
+
 /// When this repository last successfully reached its remote.
 ///
 /// Read from `FETCH_HEAD`'s modification time rather than anything Gitty
@@ -703,6 +741,12 @@ fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
 ///
 /// `--git-common-dir` rather than `--git-dir`: a linked worktree has its own
 /// git dir, but FETCH_HEAD lives in the shared one.
+///
+/// A *failed* fetch still rewrites FETCH_HEAD, so mtime alone would report a
+/// remote we could not reach as freshly contacted — the exact "in sync about a
+/// remote we never talked to" claim the unknown state exists to prevent. Git
+/// truncates the file to nothing when the fetch fails and writes one line per
+/// ref when it succeeds, so an empty file means the last attempt did not land.
 fn last_fetched_at(repo_path: &Path) -> Option<u64> {
     let common = git(repo_path, &["rev-parse", "--git-common-dir"]).ok()?;
     let common = PathBuf::from(common.trim());
@@ -711,8 +755,12 @@ fn last_fetched_at(repo_path: &Path) -> Option<u64> {
     } else {
         repo_path.join(common)
     };
-    let modified = fs::metadata(common.join("FETCH_HEAD")).ok()?.modified().ok()?;
-    modified
+    let meta = fs::metadata(common.join("FETCH_HEAD")).ok()?;
+    if meta.len() == 0 {
+        return None;
+    }
+    meta.modified()
+        .ok()?
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|since| since.as_millis() as u64)
@@ -4352,6 +4400,7 @@ fn add_worktree(
     if PathBuf::from(&directory).exists() {
         return Err(format!("{directory} already exists. Choose a folder that doesn't exist yet."));
     }
+    writable_ancestor(&PathBuf::from(&directory))?;
 
     // Clear git's memory of folders deleted from underneath it, so a reused name
     // doesn't fail with a stale registration.
@@ -5782,6 +5831,56 @@ locked under review
         );
 
         let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// A fetch that could not reach the remote still rewrites FETCH_HEAD, so
+    /// its mtime moves forward on failure just as it does on success. Only the
+    /// file's contents tell the two apart, and reporting a failed fetch as
+    /// fresh is the "in sync with a remote we never reached" claim the unknown
+    /// state was added to prevent.
+    #[test]
+    fn a_failed_fetch_does_not_count_as_reaching_the_remote() {
+        let repo = scratch_repo("fetchfail");
+        let remote = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-remote-{}.git", std::process::id()));
+        let _ = fs::remove_dir_all(&remote);
+        fs::create_dir_all(&remote).expect("remote dir");
+        run_git(&remote, &["init", "-q", "--bare", "."]);
+
+        // Never fetched: no FETCH_HEAD at all.
+        assert_eq!(last_fetched_at(&repo), None, "never fetched is unknown");
+
+        run_git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+        run_git(&repo, &["push", "-q", "origin", "main"]);
+        run_git(&repo, &["fetch", "-q", "origin"]);
+        assert!(
+            last_fetched_at(&repo).is_some(),
+            "a fetch that reached the remote is a real timestamp"
+        );
+
+        // Point the remote somewhere that cannot answer. Git empties
+        // FETCH_HEAD but still updates its mtime.
+        run_git(
+            &repo,
+            &["remote", "set-url", "origin", "/nonexistent/nope.git"],
+        );
+        let _ = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["fetch", "origin"])
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output();
+
+        assert_eq!(
+            last_fetched_at(&repo),
+            None,
+            "a failed fetch must read as unknown, not fresh"
+        );
+
+        let _ = fs::remove_dir_all(&remote);
         let _ = fs::remove_dir_all(&repo);
     }
 }
