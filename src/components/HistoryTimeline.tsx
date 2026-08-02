@@ -727,34 +727,34 @@ export function HistoryTimeline({
         </div>
         {showActions ? (
           <div className="timeline-actions">
-            {/* Icons, with the wording moved into the tooltip and the
-                accessible name. These three are always-available verbs, and
-                spelled out they took 274px -- a quarter of the row -- to say
-                things their icons already say once you have used them twice.
-                The name still exists for screen readers and on hover; it just
-                stops charging the branch name for the privilege. */}
+            {/* Spelled out. These were briefly icon-only, back when they
+                shared a line with four state readouts and 274px of labels was
+                a quarter of the row. The readouts have their own row now, so
+                the verbs are no longer competing with anything and there is no
+                reason to make the user recall what an arrow means. Titles stay
+                for the longer explanation. */}
             {canUpdateFromMain && onUpdateFromMain ? (
               <button
                 type="button"
-                className="timeline-action update icon-only"
-                title="Update from main"
-                aria-label="Update from main"
+                className="timeline-action update"
+                title="Rebase this branch onto the latest main"
                 disabled={integrationBusy}
                 onClick={onUpdateFromMain}
               >
-                <ArrowDown size={14} aria-hidden />
+                <ArrowDown size={13} aria-hidden />
+                Update from main
               </button>
             ) : null}
             {canMergeIntoMain && onMergeIntoMain ? (
               <button
                 type="button"
-                className="timeline-action merge icon-only"
-                title="Merge into main"
-                aria-label="Merge into main"
+                className="timeline-action merge"
+                title="Bring this branch's commits into main"
                 disabled={integrationBusy}
                 onClick={onMergeIntoMain}
               >
-                <ArrowUp size={14} aria-hidden />
+                <ArrowUp size={13} aria-hidden />
+                Merge into main
               </button>
             ) : null}
             {/* Not gated on the preview. Opening the repository on disk is
@@ -765,20 +765,16 @@ export function HistoryTimeline({
             {onOpenVersion ? (
               <button
                 type="button"
-                className="timeline-action open-folder icon-only"
+                className="timeline-action open-folder"
                 title={
-                  inPreview
-                    ? "Open this version's files in a folder"
-                    : "Open this repository's folder"
-                }
-                aria-label={
                   inPreview
                     ? "Open this version's files in a folder"
                     : "Open this repository's folder"
                 }
                 onClick={onOpenVersion}
               >
-                <FolderOpen size={14} aria-hidden />
+                <FolderOpen size={13} aria-hidden />
+                Open in folder
               </button>
             ) : null}
             {showPreviewActions ? (

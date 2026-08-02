@@ -3107,13 +3107,6 @@ button:focus-visible {
 
 }
 
-/* Square, so an icon action reads as one target rather than as a pill that
-   lost its text. The label lives in `title` and `aria-label`. */
-.timeline-action.icon-only {
-  padding: 0;
-  width: 27px;
-  justify-content: center;
-}
 
 /* These are the parts that must stay whole, so they neither shrink nor wrap.
    Spelling the counts out as words ("13 to merge" rather than an arrow and a
