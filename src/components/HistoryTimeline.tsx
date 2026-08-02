@@ -16,7 +16,6 @@ import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
 
 const SCROLL_END_THRESHOLD = 24;
-const SCROLLBAR_HIDE_DELAY_MS = 800;
 
 // Branch-context lane geometry. Ghost commits cluster near the right edge (most
 // recent) above the working tree, so "the base has moved ahead of you" stays
@@ -168,7 +167,6 @@ export function HistoryTimeline({
   const pinnedToEndRef = useRef(true);
   const programmaticScrollDepthRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
-  const scrollbarTimeoutRef = useRef<number | null>(null);
   const headHash = commits[0]?.hash ?? "";
 
   // Only lanes that are actually behind get drawn — a base you're level with or
@@ -208,19 +206,6 @@ export function HistoryTimeline({
       return same ? prev : { rightX, forks };
     });
   }, [lanes]);
-
-  const revealScrollbar = useCallback(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    container.classList.add("is-scrolling");
-    if (scrollbarTimeoutRef.current !== null) {
-      window.clearTimeout(scrollbarTimeoutRef.current);
-    }
-    scrollbarTimeoutRef.current = window.setTimeout(() => {
-      container.classList.remove("is-scrolling");
-      scrollbarTimeoutRef.current = null;
-    }, SCROLLBAR_HIDE_DELAY_MS);
-  }, []);
 
   const withProgrammaticScroll = useCallback((update: () => void) => {
     programmaticScrollDepthRef.current += 1;
@@ -284,35 +269,28 @@ export function HistoryTimeline({
 
   const handleScroll = useCallback(() => {
     pinnedToEndRef.current = isScrolledToEnd();
-    if (programmaticScrollDepthRef.current > 0) return;
-    revealScrollbar();
-  }, [isScrolledToEnd, revealScrollbar]);
+  }, [isScrolledToEnd]);
 
   useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
 
+    // Vertical wheel scrolls the strip horizontally; a genuinely horizontal
+    // gesture is left to the browser.
     const onWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
-        revealScrollbar();
-        return;
-      }
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
       event.preventDefault();
       container.scrollLeft += event.deltaY;
-      revealScrollbar();
     };
 
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       container.removeEventListener("wheel", onWheel);
-      if (scrollbarTimeoutRef.current !== null) {
-        window.clearTimeout(scrollbarTimeoutRef.current);
-      }
       if (scrollFrameRef.current !== null) {
         cancelAnimationFrame(scrollFrameRef.current);
       }
     };
-  }, [revealScrollbar]);
+  }, []);
 
   useLayoutEffect(() => {
     scheduleApplyScrollPosition();
@@ -748,8 +726,11 @@ export function HistoryTimeline({
             }}
             onClick={selectWorkingTree}
           >
-            <span className="node-dot working" />
-            <span className="node-hash">Now</span>
+            {/* No dot. Every other node's dot marks a commit on the rail;
+                the working tree is not a commit, so a dot here claimed a
+                place on the line that this node does not occupy. The word
+                carries it instead. */}
+            <span className="node-hash node-now">Now</span>
             <span className="node-subject">
               {changeCount === 0
                 ? "no changes"

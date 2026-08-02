@@ -2446,30 +2446,24 @@ button:focus-visible {
   overflow-y: hidden;
   overscroll-behavior: none;
   scroll-behavior: auto;
-  scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
   touch-action: pan-x;
+  /* No reserved scrollbar gutter.
+
+     With one, this band was 84px tall around 69px of content: 13px of it was
+     space held for a scrollbar that is transparent unless you are mid-scroll,
+     plus 2px of border. The pinned Now panel could not cover that strip --
+     the gutter sits outside the content box -- so the well showed through
+     underneath it, and the commits read as pinned to the top of the band
+     rather than centred in it. Both symptoms, one cause.
+
+     The tradeoff, stated plainly: the thin thumb that used to appear while
+     scrolling is gone with it. Position is still legible from the commits
+     themselves, and the strip is drag, wheel and arrow-key navigable. */
+  scrollbar-width: none;
 }
 
 .timeline-scroller::-webkit-scrollbar {
-  height: 6px;
-}
-
-.timeline-scroller::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.timeline-scroller::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 999px;
-}
-
-.timeline-scroller.is-scrolling {
-  scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
-}
-
-.timeline-scroller.is-scrolling::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  display: none;
 }
 
 .timeline-track {
@@ -2575,14 +2569,20 @@ button:focus-visible {
   z-index: 1;
 }
 
-.node-dot.working {
-  background: transparent;
-  border: 2px dashed var(--success);
-  box-shadow: none;
+/* The working tree has no dot. Every other dot marks a commit sitting on the
+   rail; the present is not a commit, so a dot here claimed a position on the
+   line this node does not hold. The word "Now" carries the node instead, and
+   state is told by its colour and the line beneath it. */
+.node-now {
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  letter-spacing: -0.01em;
 }
 
-.timeline-node.working-tree.active .node-dot.working {
-  background: var(--success-soft);
+.timeline-node.working-tree.has-changes .node-now {
+  color: var(--success);
 }
 
 /* The present carries the most important message on the strip ("3 unsaved
@@ -2610,13 +2610,8 @@ button:focus-visible {
   z-index: 3;
 }
 
-/* Uncommitted work waiting — solid dot and a brighter label make the node read
-   as a live call-to-action rather than just an anchor. */
-.timeline-node.working-tree.has-changes .node-dot.working {
-  background: var(--success);
-  border-style: solid;
-}
-
+/* Uncommitted work waiting — a brighter label makes the node read as a live
+   call-to-action rather than just an anchor. */
 .timeline-node.working-tree.has-changes .node-subject {
   color: var(--success);
   font-weight: 600;
