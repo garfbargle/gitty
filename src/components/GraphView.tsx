@@ -5,7 +5,6 @@ import {
   authorInitials,
   branchRefs,
   formatRelativeTime,
-  shortenPath,
   tagName,
   tagRefs,
 } from "../lib/git";
@@ -67,7 +66,13 @@ export function GraphView({
 
   return (
     <div className="graph-view">
-      <ol className="graph-rows" style={{ ["--graph-gutter" as string]: `${gutter}px` }}>
+      <ol
+        className="graph-rows"
+        style={{
+          ["--graph-gutter" as string]: `${gutter}px`,
+          ["--graph-row-h" as string]: `${ROW_H}px`,
+        }}
+      >
         {rows.map((row) => {
           const tags = tagRefs(row.commit.refs).map(tagName);
           const active = row.commit.hash === selectedHash;
@@ -156,7 +161,7 @@ export function GraphView({
                       title={`${entry.branch ?? "detached"} is checked out in ${entry.path}`}
                     >
                       <SquareArrowOutUpRight size={11} aria-hidden />
-                      {shortenPath(entry.path)}
+                      {entry.path.split("/").filter(Boolean).pop()}
                     </span>
                   ))}
                   {tags.map((name) => (

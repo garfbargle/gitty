@@ -3206,6 +3206,9 @@ function App() {
                 <HistoryTimeline
                   historyView={historyView}
                   onHistoryViewChange={setHistoryView}
+                  currentBranch={displaySnapshot.branch}
+                  worktrees={worktrees}
+                  onOpenCheckout={(path) => void addRepo(path)}
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
                   aheadCommits={displaySnapshot.aheadCommits ?? []}

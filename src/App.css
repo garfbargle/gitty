@@ -2867,19 +2867,35 @@ button.context-chip.pullable:disabled {
   position: static;
 }
 
+/* Reads as a member of the chip family above it, rather than its own
+   miniature vocabulary. Says what it is ("not here"), which branch, and how
+   many commits are missing. */
 .lane-tag {
   align-items: center;
-  background: var(--bg-panel);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-secondary);
   display: flex;
-  font-size: 10px;
-  font-weight: 600;
-  gap: 3px;
-  padding: 1px 7px 1px 5px;
+  font-size: var(--text-2xs);
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
   position: absolute;
   transform: translate(calc(-100% - 8px), -50%);
   white-space: nowrap;
+}
+
+.lane-tag .chip-kind {
+  border-right-color: var(--border-strong);
+}
+
+.lane-count {
+  background: var(--bg-hover);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  padding: 0 5px;
 }
 
 .lane-strand {
@@ -6379,6 +6395,10 @@ button.context-chip.pullable:disabled {
 
 .graph-row {
   align-items: center;
+  /* Must equal ROW_H in GraphView. The SVG is drawn at a fixed height, so a row
+     that grows taller than it tears the lanes away from their content. */
+  height: var(--graph-row-h);
+  overflow: hidden;
   background: transparent;
   border: 0;
   color: var(--text-secondary);
@@ -6403,6 +6423,7 @@ button.context-chip.pullable:disabled {
 }
 
 .graph-lanes {
+  flex-shrink: 0;
   overflow: visible;
 }
 
@@ -6673,7 +6694,8 @@ button.context-chip.pullable:disabled {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   gap: 4px;
-  max-width: 180px;
+  max-width: 200px;
+  min-width: 0;
   overflow: hidden;
   padding: 1px 6px;
   text-overflow: ellipsis;
@@ -6700,6 +6722,9 @@ button.context-chip.pullable:disabled {
   display: inline-flex;
   flex-shrink: 0;
   gap: var(--space-1);
+  /* A row is one line high; a wrapping ref would push it taller. */
+  max-width: 40%;
+  overflow: hidden;
 }
 
 /* Exactly four cells, always: lanes, branch labels, subject, trailing meta.
@@ -6712,5 +6737,44 @@ button.context-chip.pullable:disabled {
   align-items: center;
   display: inline-flex;
   flex-shrink: 0;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Every chip states what kind of thing it is. Without this the row is a run of
+   similar pills: your branch, your upstream, an unrelated branch and another
+   folder all looked identical, so the row couldn't be read left to right. */
+.chip-kind {
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  margin-right: var(--space-1);
+  padding-right: var(--space-1-5);
+  text-transform: uppercase;
+}
+
+/* The branch checked out in this folder: where you are. */
+.context-chip.here {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.context-chip.here .chip-ref {
+  color: var(--accent);
+}
+
+/* Another folder of this repository. Clickable: it takes you there. */
+.context-chip.elsewhere {
+  cursor: pointer;
+}
+
+.context-chip.elsewhere:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.context-chip.elsewhere:disabled {
+  cursor: default;
 }

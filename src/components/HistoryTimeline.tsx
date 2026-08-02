@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
-import type { BranchDivergence, CommitEntry, SiblingTip } from "../types";
+import type { BranchDivergence, CommitEntry, SiblingTip, WorktreeEntry } from "../types";
 import { aheadTimelineCommits, ancestryTimelineCommits } from "../lib/commitDisplay";
 import { buildCommitTagMenuItems } from "../lib/commitTags";
-import { formatDate, formatRelativeTime, relativeTimeRefreshMs, tagName, tagRefs } from "../lib/git";
+import {
+  formatDate,
+  formatRelativeTime,
+  relativeTimeRefreshMs,
+  tagName,
+  tagRefs,
+} from "../lib/git";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
+
+/// A checkout's folder name. Paths are too long for a chip and the name is
+/// what tells one checkout from another.
+function folderName(path: string) {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
 
 const SCROLL_END_THRESHOLD = 24;
 const SCROLLBAR_HIDE_DELAY_MS = 800;
@@ -55,6 +67,12 @@ type HistoryTimelineProps = {
   pullBusy?: boolean;
   /// Which density of history is showing. The switch lives in this component
   /// because it heads the context row that both densities sit under.
+  /// The branch checked out in this folder, so the row can say where you are.
+  currentBranch?: string;
+  /// Other checkouts of this repository. Nothing else on this screen mentions
+  /// them, so without these the row cannot answer "is this the only folder".
+  worktrees?: WorktreeEntry[];
+  onOpenCheckout?: (path: string) => void;
   historyView?: "strip" | "graph";
   onHistoryViewChange?: (view: "strip" | "graph") => void;
   /// Viewing a past commit rather than the working tree. The actions for
@@ -99,6 +117,9 @@ export function HistoryTimeline({
   onMergeIntoMain,
   onPullUpstream,
   pullBusy,
+  currentBranch,
+  worktrees = [],
+  onOpenCheckout,
   historyView = "strip",
   onHistoryViewChange,
   inPreview,
@@ -410,19 +431,22 @@ export function HistoryTimeline({
     const bandTop = LANE_TOP_PAD + index * LANE_BAND_H;
     const dotY = bandTop + Math.round(LANE_BAND_H / 2);
     const visible = Math.min(lane.behind, MAX_GHOST_DOTS);
-    const overflow = lane.behind - visible;
     // j = 0 is the reference tip (newest), pinned above the working tree.
     const dotX = (j: number) => rightX - GHOST_SPACING * j;
     const oldestX = dotX(visible - 1);
-    const overflowX = dotX(visible);
     const forkX = geom.forks[index];
     const ghost = "var(--text-secondary)";
 
     return (
       <div className="context-lane" key={`${lane.kind}-${lane.refName}`}>
+        {/* The count used to be a separate element positioned one step further
+            left, which collided with this tag whenever a lane was more than
+            MAX_GHOST_DOTS behind and covered the branch name. One label. */}
         <span className="lane-tag" style={{ left: oldestX, top: dotY }}>
+          <span className="chip-kind">Not here</span>
           <GitBranch size={10} aria-hidden />
-          {lane.refName}
+          <span className="chip-ref">{lane.refName}</span>
+          <span className="lane-count">{lane.behind}</span>
         </span>
         {forkX !== null && forkX < oldestX - 2 ? (
           <span
@@ -440,11 +464,6 @@ export function HistoryTimeline({
           className="lane-strand"
           style={{ left: oldestX, width: Math.max(rightX - oldestX, 0), top: dotY, background: ghost }}
         />
-        {overflow > 0 ? (
-          <span className="lane-overflow" style={{ left: overflowX, top: dotY }}>
-            +{overflow}
-          </span>
-        ) : null}
         {lane.commits.slice(0, visible).map((commit, j) => (
           <span
             key={commit.hash}
@@ -467,6 +486,7 @@ export function HistoryTimeline({
         onClick={() => onSwitchSibling?.(siblingTip.name)}
         disabled={!onSwitchSibling}
       >
+        <span className="chip-kind">Branch</span>
         <GitBranch size={12} aria-hidden />
         <span className="chip-ref">{siblingTip.name}</span>
         {siblingTip.ahead > 0 ? (
@@ -480,6 +500,8 @@ export function HistoryTimeline({
   }
 
   const showPreviewActions = !!inPreview && !!onReturnToWorkingTree;
+
+  const otherCheckouts = worktrees.filter((entry) => !entry.isCurrent && !entry.internal);
 
   const showActions =
     (canUpdateFromMain && !!onUpdateFromMain) ||
@@ -513,6 +535,18 @@ export function HistoryTimeline({
             </button>
           </div>
         ) : null}
+        {/* Where you are. The row used to open with whichever other branch
+            happened to be interesting, so nothing said which line was yours. */}
+        {currentBranch ? (
+          <div
+            className="context-chip here"
+            title={`${currentBranch} is checked out in this folder`}
+          >
+            <span className="chip-kind">Here</span>
+            <GitBranch size={12} aria-hidden />
+            <span className="chip-ref">{currentBranch}</span>
+          </div>
+        ) : null}
         {renderSiblingChip()}
         {contextLanes.map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
@@ -521,6 +555,9 @@ export function HistoryTimeline({
           const pullable = lane.kind === "upstream" && lane.behind > 0 && !!onPullUpstream;
           const chipBody = (
             <>
+              <span className="chip-kind">
+                {lane.kind === "upstream" ? "Remote" : "Base"}
+              </span>
               <GitBranch size={12} aria-hidden />
               <span className="chip-ref">{lane.refName}</span>
               {inSync ? (
@@ -563,6 +600,53 @@ export function HistoryTimeline({
             </div>
           );
         })}
+        {/* Other folders of this repository.
+
+            One chip, not one per folder. A repository with a couple of
+            checkouts and one running twenty agent worktrees are both normal,
+            and enumerating them turned the row into seven wrapped lines that
+            buried the timeline. The count answers "how many folders" at a
+            glance; the list is one click away. */}
+        {otherCheckouts.length > 0 ? (
+          otherCheckouts.length === 1 ? (
+            <button
+              type="button"
+              className="context-chip elsewhere"
+              title={`${otherCheckouts[0].branch ?? "detached"} is checked out in ${otherCheckouts[0].path}`}
+              onClick={() => onOpenCheckout?.(otherCheckouts[0].path)}
+              disabled={!onOpenCheckout}
+            >
+              <span className="chip-kind">Folder</span>
+              <FolderOpen size={12} aria-hidden />
+              <span className="chip-ref">{folderName(otherCheckouts[0].path)}</span>
+              {otherCheckouts[0].branch ? (
+                <span className="chip-sync">{otherCheckouts[0].branch}</span>
+              ) : null}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="context-chip elsewhere"
+              title="Other folders this repository is checked out in"
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setContextMenu({
+                  x: rect.left,
+                  y: rect.bottom + 4,
+                  items: otherCheckouts.map((entry) => ({
+                    label: `${folderName(entry.path)}  ·  ${entry.branch ?? "detached"}`,
+                    onClick: () => onOpenCheckout?.(entry.path),
+                  })),
+                });
+              }}
+              disabled={!onOpenCheckout}
+            >
+              <span className="chip-kind">Folders</span>
+              <FolderOpen size={12} aria-hidden />
+              <span className="chip-ref">{otherCheckouts.length}</span>
+            </button>
+          )
+        ) : null}
         {showActions ? (
           <div className="timeline-actions">
             {canUpdateFromMain && onUpdateFromMain ? (
