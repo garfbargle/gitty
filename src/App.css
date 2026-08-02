@@ -102,7 +102,11 @@
   --timeline-rail-thickness: 2px;
   --timeline-rail-gap: 8px;
   --timeline-node-width: 132px;
-  --timeline-node-min-height: 62px;
+  /* A fixed height, not a floor: every node reserves the same space including
+     the tag band, so nodes never differ in height and the selection frame is
+     the same size on all of them. Sized to the real stack — dot 12, hash 16,
+     time 14, subject 17, three 2px gaps, then a 22px tag band. */
+  --timeline-node-height: 88px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -2422,10 +2426,11 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: var(--space-1);
-  /* Reserves the tag row so a tagged commit doesn't stand taller than its
-     neighbours and leave the strip with a ragged bottom edge. */
-  min-height: var(--timeline-node-min-height);
+  gap: var(--space-0-5);
+  /* Fixed, so a tag, a long subject, or the absence of a timestamp can never
+     make one node taller than another. Selection draws into this same box on
+     every node. */
+  height: var(--timeline-node-height);
   padding: 0 var(--space-3);
   position: relative;
   text-align: center;
@@ -2481,7 +2486,10 @@ button:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   content: "";
-  inset: -5px 0 -3px;
+  /* Sits inside the node. It used to extend 5px above and 3px below, but
+     .timeline-scroller is overflow-y: hidden, so both edges were clipped and
+     the highlight read as a cut-off rectangle. */
+  inset: 0;
   position: absolute;
   z-index: 0;
 }
@@ -4145,13 +4153,26 @@ button.context-chip.pullable:disabled {
   font-size: 11px;
 }
 
+/* Tags sit in a band reserved on every node by --timeline-node-height, rather
+   than adding their own height to whichever commit happens to carry one.
+   Previously a tagged node stood taller than its neighbours, which left the
+   strip with a ragged bottom edge and made that node's selection frame taller
+   than every other node's. Taking them out of flow keeps all nodes, and so all
+   selection frames, identical. */
 .node-tags {
   align-items: center;
+  bottom: var(--space-0-5);
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 2px;
-  max-width: 100%;
+  gap: var(--space-1);
+  justify-content: center;
+  left: 0;
+  position: absolute;
+  right: 0;
+  /* A commit with several tags must not reflow the node; the row scrolls
+     nowhere and simply clips past the node's width. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 0 var(--space-1);
 }
 
 .author-avatar {
