@@ -136,8 +136,8 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
     }
 
     // Route the parents downward. The first parent continues this lane (and its
-    // colour — the mainline). Extra parents (a merge) each take a lane and a
-    // fresh colour for the side being brought in.
+    // colour — the mainline). Extra parents (a merge) take a lane for the side
+    // being brought in.
     const [firstParent, ...otherParents] = commit.parents;
     if (firstParent) {
       lanes[myLane] = firstParent;
@@ -146,6 +146,15 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
       laneColorIdx[myLane] = -1;
     }
     for (const parent of otherParents) {
+      // If a lane is already heading for this commit, the incoming side of the
+      // merge *is* that branch, and it takes that branch's colour.
+      //
+      // A fresh colour every time is what turned a two-branch history into
+      // seven: merging main into a branch repeatedly gave each merge's
+      // incoming side its own hue, each surviving only the two or three rows
+      // until the commit arrived. Colour is supposed to answer "which branch",
+      // and it was answering "which merge".
+      const alreadyRouted = lanes.findIndex((hash) => hash === parent);
       let nl = lanes.findIndex((hash) => hash === null);
       if (nl === -1) {
         nl = lanes.length;
@@ -153,7 +162,7 @@ export function buildGraphRows(commits: CommitEntry[], headHash?: string): Graph
         laneColorIdx.push(-1);
       }
       lanes[nl] = parent;
-      laneColorIdx[nl] = nextColor++;
+      laneColorIdx[nl] = alreadyRouted === -1 ? nextColor++ : laneColorIdx[alreadyRouted];
     }
 
     // Trim trailing free lanes so the width reflects what's actually in use.
