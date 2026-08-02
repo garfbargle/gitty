@@ -6450,6 +6450,10 @@ button.context-chip.pullable:disabled {
 
 .graph-subject {
   color: var(--text-secondary);
+  /* Starts where its column starts. It was drifting to the right edge, leaving
+     a dead band between the branch labels and the message. */
+  justify-self: start;
+  text-align: left;
   font-size: var(--text-sm);
 /* ───────────────────── Workspaces (git worktrees) ───────────────────── */
 
@@ -6720,10 +6724,13 @@ button.context-chip.pullable:disabled {
    every other row. */
 .graph-refs {
   display: inline-flex;
-  flex-shrink: 0;
+  /* A row is one line high. Without an explicit nowrap and a min-width of 0,
+     a commit carrying two long refs wraps the pills and blows the row past the
+     height the lane graphic is drawn at. */
+  flex-wrap: nowrap;
   gap: var(--space-1);
-  /* A row is one line high; a wrapping ref would push it taller. */
-  max-width: 40%;
+  min-width: 0;
+  max-width: 34ch;
   overflow: hidden;
 }
 
