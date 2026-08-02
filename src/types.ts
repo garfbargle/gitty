@@ -155,6 +155,9 @@ export type RepoSnapshot = {
   backupPushPending?: boolean;
   /** This repository copies successful primary pushes to its backup remotes. */
   backupOnPush?: boolean;
+  /** When the remote was last actually reached, epoch ms, or absent if never.
+   *  Everything shown about the remote is only as true as this. */
+  lastFetchedAt?: number | null;
 };
 
 /// The most recently active branch other than the current one and the trunk,

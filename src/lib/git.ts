@@ -260,3 +260,27 @@ export function shortenPath(path: string, home = "~") {
 
   return path;
 }
+
+/// How long a remote claim stays believable before the interface should show
+/// its age. Codi's auto-fetch runs on focus and every 5 minutes, so anything
+/// older than that means fetching is not currently working.
+const REMOTE_FRESH_MS = 5 * MINUTE_MS;
+
+export type RemoteFreshness =
+  | { state: "fresh" }
+  | { state: "stale"; age: string }
+  | { state: "unknown" };
+
+/// Everything the interface says about a remote (in sync, ahead, behind) is
+/// only as true as the last successful fetch. This turns that timestamp into
+/// how much the claim should be trusted, so a repository that has never been
+/// fetched stops looking identical to one checked a second ago.
+export function remoteFreshness(
+  lastFetchedAt: number | null | undefined,
+  now = Date.now(),
+): RemoteFreshness {
+  if (!lastFetchedAt) return { state: "unknown" };
+  const age = now - lastFetchedAt;
+  if (age < REMOTE_FRESH_MS) return { state: "fresh" };
+  return { state: "stale", age: formatRelativeTime(new Date(lastFetchedAt).toISOString(), now) };
+}

@@ -164,6 +164,17 @@ struct RepoSnapshot {
     /// configured backup remotes. Backup setup enables this by default; users
     /// can change it later in repository settings.
     backup_on_push: bool,
+    /// When the remote was last actually reached, as milliseconds since the
+    /// epoch, or `None` if it never has been.
+    ///
+    /// Everything the interface says about the remote (in sync, ahead, behind,
+    /// the ghost lane) is only as true as the last successful fetch, and until
+    /// now those claims were stated flat. A repository that has never been
+    /// fetched, or whose fetches have been failing quietly, looked exactly like
+    /// one checked a second ago. This lets the interface age its own claims
+    /// instead of asserting them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_fetched_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -681,6 +692,30 @@ fn ensure_git_repo(repo_path: &Path) -> Result<(), String> {
     }
     git(repo_path, &["init"])?;
     Ok(())
+}
+
+/// When this repository last successfully reached its remote.
+///
+/// Read from `FETCH_HEAD`'s modification time rather than anything Gitty
+/// stores. Git rewrites that file on every fetch, including one that brings
+/// nothing back, so the answer survives restarts, needs no cache to keep in
+/// sync, and stays correct when the user fetches from a terminal instead.
+///
+/// `--git-common-dir` rather than `--git-dir`: a linked worktree has its own
+/// git dir, but FETCH_HEAD lives in the shared one.
+fn last_fetched_at(repo_path: &Path) -> Option<u64> {
+    let common = git(repo_path, &["rev-parse", "--git-common-dir"]).ok()?;
+    let common = PathBuf::from(common.trim());
+    let common = if common.is_absolute() {
+        common
+    } else {
+        repo_path.join(common)
+    };
+    let modified = fs::metadata(common.join("FETCH_HEAD")).ok()?.modified().ok()?;
+    modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|since| since.as_millis() as u64)
 }
 
 fn normalize_repo(path: &str) -> Result<RepoEntry, String> {
@@ -1740,6 +1775,7 @@ fn repo_snapshot_blocking(
         branch_unpublished,
         backup_push_pending: backup_push_pending(&repo_path),
         backup_on_push: backup_on_push(&repo_path),
+        last_fetched_at: last_fetched_at(&repo_path),
     })
 }
 

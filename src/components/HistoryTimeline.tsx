@@ -7,6 +7,7 @@ import {
   formatDate,
   formatRelativeTime,
   relativeTimeRefreshMs,
+  remoteFreshness,
   tagName,
   tagRefs,
 } from "../lib/git";
@@ -67,6 +68,9 @@ type HistoryTimelineProps = {
   pullBusy?: boolean;
   /// Which density of history is showing. The switch lives in this component
   /// because it heads the context row that both densities sit under.
+  /// When the remote was last actually reached. Only the remote chip is
+  /// affected: a trunk branch is local, so it is never stale.
+  lastFetchedAt?: number | null;
   /// The branch checked out in this folder, so the row can say where you are.
   currentBranch?: string;
   /// Other checkouts of this repository. Nothing else on this screen mentions
@@ -117,6 +121,7 @@ export function HistoryTimeline({
   onMergeIntoMain,
   onPullUpstream,
   pullBusy,
+  lastFetchedAt,
   currentBranch,
   worktrees = [],
   onOpenCheckout,
@@ -550,6 +555,10 @@ export function HistoryTimeline({
         {renderSiblingChip()}
         {contextLanes.map((lane) => {
           const inSync = lane.behind === 0 && lane.ahead === 0;
+          // A trunk lane is a local branch and cannot go stale; only what we
+          // learned from the network can.
+          const freshness =
+            lane.kind === "upstream" ? remoteFreshness(lastFetchedAt, now) : { state: "fresh" as const };
           // The upstream lane, when behind, doubles as a Pull affordance: click
           // the "origin/… ↓N" chip to catch up, right where the gap is shown.
           const pullable = lane.kind === "upstream" && lane.behind > 0 && !!onPullUpstream;
@@ -560,7 +569,11 @@ export function HistoryTimeline({
               </span>
               <GitBranch size={12} aria-hidden />
               <span className="chip-ref">{lane.refName}</span>
-              {inSync ? (
+              {freshness.state === "unknown" ? (
+                // Never reached, so "in sync" would be a guess presented as a
+                // fact. Say what is actually known.
+                <span className="chip-sync unknown">not checked</span>
+              ) : inSync ? (
                 <span className="chip-sync">in sync</span>
               ) : (
                 <>
@@ -578,6 +591,11 @@ export function HistoryTimeline({
                   ) : null}
                 </>
               )}
+              {freshness.state === "stale" ? (
+                <span className="chip-age" title="Time since the remote was last reached">
+                  {freshness.age}
+                </span>
+              ) : null}
             </>
           );
           return pullable ? (

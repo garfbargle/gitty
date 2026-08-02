@@ -6455,6 +6455,11 @@ button.context-chip.pullable:disabled {
   justify-self: start;
   text-align: left;
   font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ───────────────────── Workspaces (git worktrees) ───────────────────── */
 
 .worktree-list {
@@ -6548,37 +6553,6 @@ button.context-chip.pullable:disabled {
 }
 
 /* View toggle */
-.history-view-toggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 2px;
-}
-
-.history-view-toggle button {
-  background: transparent;
-  border: 0;
-  border-radius: 999px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-strong);
-  letter-spacing: var(--tracking-caps);
-  padding: var(--space-1) var(--space-2);
-  text-transform: uppercase;
-}
-
-.history-view-toggle button.active {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.history-view-bar {
-  display: flex;
-  justify-content: flex-end;
-  padding: var(--space-2) var(--space-4) 0;
 .worktree-badge {
   align-items: center;
   background: var(--bg-elevated);
@@ -6625,44 +6599,46 @@ button.context-chip.pullable:disabled {
 
 /* Segmented control heading the history region.
 
-   Matches .timeline-action exactly (pill, same border, height, type), because
-   it shares the row with those buttons and the branch chips, and it was the
-   only element there with square corners and a different radius. It stays one
-   track with a divider rather than two buttons, so it still reads as a switch
-   between two states and not as two separate actions. */
+   A recessed track with the selected half raised inside it. Earlier versions
+   rounded the outside but painted the selected half --bg-hover on a
+   --bg-elevated track, two tones a few points apart in dark theme, so nothing
+   showed which half was active. It read as a plain rounded box with two words
+   in it, or worse, as two separate buttons. */
 .view-switch {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   border-radius: 999px;
   display: inline-flex;
   flex-shrink: 0;
+  gap: 2px;
   margin-right: var(--space-2);
-  overflow: hidden;
+  padding: 2px;
 }
 
 .view-switch button {
   background: transparent;
   border: 0;
+  border-radius: 999px;
   color: var(--text-muted);
   cursor: pointer;
   font-size: var(--text-xs);
   font-weight: var(--weight-strong);
   padding: var(--space-1) var(--space-3);
   transition: background 150ms ease, color 150ms ease;
-}
-
-/* A divider rather than a gap: the two halves are one control. */
-.view-switch button + button {
-  border-left: 1px solid var(--border-strong);
+  white-space: nowrap;
 }
 
 .view-switch button:hover:not(.active) {
-  background: var(--bg-hover);
   color: var(--text-secondary);
 }
 
+/* The raised half: lifted off the track by tone and a hairline, so which view
+   you are in reads at a glance rather than by reading the labels. */
 .view-switch button.active {
-  background: var(--bg-hover);
+  background: var(--bg-elevated);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.25),
+    inset 0 0 0 1px var(--border-strong);
   color: var(--text);
 }
 
@@ -6781,4 +6757,18 @@ button.context-chip.pullable:disabled {
 
 .context-chip.elsewhere:disabled {
   cursor: default;
+}
+
+/* How old the remote information is. Muted because it qualifies a claim rather
+   than making one: the point is that "in sync" is aging, not to raise alarm. */
+.chip-age {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  opacity: 0.8;
+}
+
+/* The remote has never been reached, so nothing about it is known. Warning
+   rather than danger: it is not wrong, it is unverified. */
+.chip-sync.unknown {
+  color: var(--warning);
 }

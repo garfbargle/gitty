@@ -3282,6 +3282,7 @@ function App() {
                 <HistoryTimeline
                   historyView={historyView}
                   onHistoryViewChange={setHistoryView}
+                  lastFetchedAt={displaySnapshot.lastFetchedAt}
                   currentBranch={displaySnapshot.branch}
                   worktrees={worktrees}
                   onOpenCheckout={(path) => void addRepo(path)}
