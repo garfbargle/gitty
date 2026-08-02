@@ -17,6 +17,7 @@ import {
   tagName,
   tagRefs,
 } from "../lib/git";
+import { usePriorityPlus } from "../lib/usePriorityPlus";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
 
@@ -567,6 +568,17 @@ export function HistoryTimeline({
 
   const otherCheckouts = worktrees.filter((entry) => !entry.isCurrent && !entry.internal);
 
+  // What does not fit collapses into a trailing "+N" rather than vanishing at a
+  // fixed width. The signature is what the row actually says, so the cached
+  // natural widths are thrown away exactly when the content changes.
+  const chipSignature = [
+    currentBranch ?? "",
+    siblingTip?.name ?? "",
+    contextLanes.map((lane) => `${lane.kind}:${lane.refName}:${lane.behind}:${lane.ahead}`).join(),
+    otherCheckouts.length,
+  ].join("|");
+  const { ref: chipsRef, hidden: hiddenChips } = usePriorityPlus(chipSignature);
+
   const showActions =
     (canUpdateFromMain && !!onUpdateFromMain) ||
     (canMergeIntoMain && !!onMergeIntoMain) ||
@@ -610,7 +622,7 @@ export function HistoryTimeline({
             -- the actions keep their width, and the chips give ground inside
             their own box, worst case losing the tail of the least important
             chip rather than a button. */}
-        <div className="context-chips">
+        <div className="context-chips" ref={chipsRef as React.RefObject<HTMLDivElement>}>
         {/* Where you are. The row used to open with whichever other branch
             happened to be interesting, so nothing said which line was yours. */}
         {currentBranch ? (
@@ -737,6 +749,30 @@ export function HistoryTimeline({
               <span className="chip-ref">{otherCheckouts.length}</span>
             </button>
           )
+        ) : null}
+        {/* What did not fit. Marked as the anchor so the measuring hook does
+            not count it as one of the items competing for room, and rendered
+            last so it reads as the tail of the row. Its menu is the full text
+            of each hidden chip, which is why the chips keep their captions in
+            the markup even when the row is too narrow to show them. */}
+        {hiddenChips.length > 0 ? (
+          <button
+            type="button"
+            className="context-chip chip-overflow"
+            data-overflow-anchor="true"
+            title={hiddenChips.join("  •  ")}
+            aria-label={`${hiddenChips.length} more: ${hiddenChips.join(", ")}`}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setContextMenu({
+                x: rect.left,
+                y: rect.bottom + 4,
+                items: hiddenChips.map((label) => ({ label, onClick: () => {} })),
+              });
+            }}
+          >
+            +{hiddenChips.length}
+          </button>
         ) : null}
         </div>
         {showActions ? (

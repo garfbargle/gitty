@@ -3106,20 +3106,29 @@ button:focus-visible {
   }
 }
 
-@container timeline (max-width: 780px) {
-  /* Other checkouts are context about elsewhere, not about where you are. */
-  .context-chip.elsewhere {
-    display: none;
-  }
+/* Hidden by the priority+ hook, which measures rather than guessing from a
+   breakpoint. The two container queries that used to live here dropped the
+   folders chip at 780px and every non-`here` chip at 660px -- both of which
+   are buttons, so narrowing the window quietly removed the only way to reach
+   another checkout. What does not fit now goes into the "+N" menu instead of
+   going away. */
+.context-chips .context-chip.is-overflowed {
+  display: none;
 }
 
-@container timeline (max-width: 660px) {
-  /* The trunk's relationship to you is the last thing to go, and it goes as a
-     whole chip rather than as an empty pill. */
-  .context-chip:not(.here) {
-    display: none;
-  }
+.context-chips .chip-overflow {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  padding-left: 9px;
+}
 
+.context-chips .chip-overflow:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 
