@@ -254,13 +254,17 @@ export function HistoryTimeline({
     const container = scrollRef.current;
     if (!container) return;
 
-    if (workingTreeActive || pinnedToEndRef.current) {
+    // A selected commit wins over staying pinned to the present. This used to
+    // test pinnedToEnd first, so selecting a commit while parked at the right
+    // edge -- the default, and where you are after every refresh -- snapped
+    // back to the end instead of going to what you had just chosen. The pin
+    // exists to keep Now in view as commits arrive, not to override the
+    // selection.
+    if (workingTreeActive || !selectedHash) {
       pinnedToEndRef.current = true;
       container.scrollLeft = container.scrollWidth - container.clientWidth;
       return;
     }
-
-    if (!selectedHash) return;
 
     pinnedToEndRef.current = false;
     scrollNodeIntoView(nodeRefs.current.get(selectedHash));
