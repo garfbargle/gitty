@@ -2826,7 +2826,12 @@ button:focus-visible {
 .timeline-context-bar {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  /* One line, always. A wrapping flex row wraps *before* it shrinks — shrinking
+     only happens within a line — so giving the chips min-width: 0 did nothing
+     while this said wrap: the row simply pushed the actions onto a second line
+     and moved the timeline down. Holding one line is what lets the branch name
+     truncate instead. */
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 0 2px 10px;
 }
