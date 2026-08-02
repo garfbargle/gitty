@@ -15,7 +15,6 @@ import type {
   RepoEntry,
   WorktreeEntry,
 } from "../types";
-import { shortenPath } from "../lib/git";
 import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
@@ -184,14 +183,25 @@ export function TopBar({
             disabled={repoSwitching || loading || fetching}
             onChange={(event) => onBranchChange(event.currentTarget.value)}
           >
+            {/* A detached checkout has no branch, so nothing here matches the
+                select's value, and an unmatched <select> displays its first
+                option instead: the bar claimed you were on whatever branch
+                happened to sort first. State it plainly instead. */}
+            {branches.includes(branch) ? null : (
+              <option value={branch}>{branch}</option>
+            )}
             {branches.map((name) => {
               // A branch checked out in another folder can't be checked out
               // here — git refuses. Saying so in the list turns a failure into
-              // a choice: picking it opens that folder instead.
+              // a choice: picking it opens that folder instead. The folder's
+              // name, not its path: the path is long enough to read as a
+              // statement about where you are rather than where you'd go.
               const elsewhere = openElsewhere.get(name);
               return (
                 <option key={name} value={name}>
-                  {elsewhere ? `${name}  ⧉ open in ${shortenPath(elsewhere)}` : name}
+                  {elsewhere
+                    ? `${name}  →  open ${elsewhere.split("/").filter(Boolean).pop()}`
+                    : name}
                 </option>
               );
             })}
