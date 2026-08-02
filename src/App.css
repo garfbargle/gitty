@@ -6424,7 +6424,12 @@ button.context-chip.pullable:disabled {
   cursor: pointer;
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: var(--graph-gutter) minmax(0, 1fr) auto auto auto auto;
+  /* Exactly four cells, always: lanes, branch labels, subject, trailing meta.
+     A fixed column count is what keeps a tagged row aligned with an untagged
+     one. This used to be declared twice -- six columns here, four in a later
+     rule that quietly won -- which made the real layout invisible to anyone
+     reading this block. */
+  grid-template-columns: var(--graph-gutter) auto minmax(0, 1fr) auto;
   padding: 0 var(--space-4) 0 var(--space-3);
   text-align: left;
   width: 100%;
@@ -6469,9 +6474,14 @@ button.context-chip.pullable:disabled {
 
 .graph-subject {
   color: var(--text-secondary);
-  /* Starts where its column starts. It was drifting to the right edge, leaving
-     a dead band between the branch labels and the message. */
-  justify-self: start;
+  /* Fill the column and align the text inside it, rather than shrink-wrapping
+     the box. justify-self: start sized this to max-content, so a long subject
+     grew past its own track and ran underneath the hash and time instead of
+     ending in an ellipsis -- the clip happened at the box's edge, and the box
+     was wider than the column. Stretching is what makes the ellipsis land at
+     the column boundary. text-align keeps the left edge that start was for. */
+  justify-self: stretch;
+  min-width: 0;
   text-align: left;
   font-size: var(--text-sm);
   overflow: hidden;
@@ -6719,12 +6729,6 @@ button.context-chip.pullable:disabled {
   min-width: 0;
   max-width: 34ch;
   overflow: hidden;
-}
-
-/* Exactly four cells, always: lanes, branch labels, subject, trailing meta.
-   A fixed column count is what keeps a tagged row aligned with an untagged one. */
-.graph-row {
-  grid-template-columns: var(--graph-gutter) auto minmax(0, 1fr) auto;
 }
 
 .graph-meta {
