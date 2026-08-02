@@ -2479,21 +2479,22 @@ button:focus-visible {
   display: none;
 }
 
-/* The band exists so a tagged commit does not stand taller than its
-   neighbours. That only matters when a tag is on screen; reserving it always
-   meant every untagged commit carried 23px of empty space under its timestamp.
-   Applied to the track, so the whole row grows together and the rail stays
-   straight. */
-.timeline-track.has-tags .timeline-node {
-  height: calc(var(--timeline-node-height) + var(--timeline-tag-band));
-}
-
 .timeline-track {
   align-items: flex-start;
   display: flex;
   flex-wrap: nowrap;
   gap: 0;
   min-width: min-content;
+  /* Air above and below the row so it sits in the band rather than against its
+     edges. Every node is now exactly its content, so this is the only vertical
+     space in the strip and it is symmetric. */
+  padding-block: var(--space-2);
+}
+
+/* Room for the tags hanging below the nodes, reserved once on the row instead
+   of on every node, and only when something in view carries one. */
+.timeline-track.has-tags {
+  padding-bottom: calc(var(--space-2) + var(--timeline-tag-band));
 }
 
 /* Every node is the same width so the dots fall on an even rhythm. Previously
@@ -4299,9 +4300,15 @@ button.context-chip.pullable:disabled {
    strip with a ragged bottom edge and made that node's selection frame taller
    than every other node's. Taking them out of flow keeps all nodes, and so all
    selection frames, identical. */
+/* Hangs below the node rather than inside it. Anchored to the node's bottom
+   edge, the node had to be tall enough to hold it, so every untagged commit
+   carried that height as empty space under its timestamp and the row read as
+   pinned to the top of the band. The track reserves the room instead, once,
+   and only when something is actually tagged. */
 .node-tags {
   align-items: center;
-  bottom: var(--space-0-5);
+  bottom: auto;
+  top: calc(100% + var(--space-0-5));
   display: flex;
   gap: var(--space-1);
   justify-content: center;
