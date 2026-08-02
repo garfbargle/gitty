@@ -1,6 +1,6 @@
 import { FolderMinus, Loader2 } from "lucide-react";
 import type { WorktreeEntry } from "../types";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 import { SettingsModal } from "./SettingsModal";
 
 type RemoveWorktreeConfirmDialogProps = {

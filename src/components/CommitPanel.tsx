@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { BranchEntry, CommitEntry } from "../types";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 import { branchRefs, formatDate, formatRelativeTime } from "../lib/git";
 
 const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";

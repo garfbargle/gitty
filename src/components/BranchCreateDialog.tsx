@@ -3,7 +3,7 @@ import { GitBranch } from "lucide-react";
 import type { CommitEntry, FileChange } from "../types";
 import { suggestBranchName } from "../lib/branches";
 import { SettingsModal } from "./SettingsModal";
-import { SHORTCUT } from "../lib/platform";
+import { SHORTCUT } from "../lib/shortcuts";
 
 type BranchCreateDialogProps = {
   open: boolean;

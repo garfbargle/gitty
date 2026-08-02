@@ -26,13 +26,6 @@ export function shortcut(...parts: string[]): string {
   return isApplePlatform ? parts.join("") : parts.join("+");
 }
 
-export const SHORTCUT = {
-  /// Stage all changes.
-  stageAll: shortcut(MOD_KEY, "A"),
-  /// Commit staged changes.
-  commit: shortcut(MOD_KEY, ENTER_KEY),
-  /// Push.
-  push: shortcut(MOD_KEY, SHIFT_KEY, ENTER_KEY),
-  /// Confirm a dialog.
-  confirm: ENTER_KEY,
-} as const;
+/// The SHORTCUT table moved to lib/shortcuts.ts, where the printed form sits
+/// beside the binding the handlers use. Keeping a second copy here is how a
+/// hint and its handler drift apart.

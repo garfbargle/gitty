@@ -71,7 +71,13 @@ import {
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
-import { SHORTCUT } from "./lib/platform";
+import { SHORTCUT } from "./lib/shortcuts";
+import { useShortcut } from "./lib/useShortcut";
+import {
+  shouldIgnoreEnterShortcut,
+  shouldIgnoreKeyboardNavigation,
+} from "./lib/keyboardFocus";
+import { KeyboardSheet } from "./components/KeyboardSheet";
 import { sortRepos } from "./lib/repoSort";
 import { GraphView } from "./components/GraphView";
 import { RemoveWorktreeConfirmDialog } from "./components/RemoveWorktreeConfirmDialog";
@@ -143,22 +149,6 @@ type IntegrationOp = {
   prefix?: string;
 };
 
-function shouldIgnoreKeyboardNavigation(event: KeyboardEvent): boolean {
-  const target = event.target as HTMLElement;
-  const tag = target.tagName;
-  if (tag === "TEXTAREA" || tag === "SELECT") return true;
-  if (tag === "INPUT") {
-    const input = target as HTMLInputElement;
-    if (input.type !== "checkbox") return true;
-  }
-  if (target.isContentEditable) return true;
-  return false;
-}
-
-function shouldIgnoreEnterShortcut(event: KeyboardEvent): boolean {
-  if (shouldIgnoreKeyboardNavigation(event)) return true;
-  return (event.target as HTMLElement).tagName === "BUTTON";
-}
 
 type SummaryScope = "all" | "staged";
 
@@ -357,6 +347,7 @@ function App() {
   }, []);
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+  const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
   /// Preview of the two densities in docs/GRAPH_VISUAL_LANGUAGE.md: the
   /// working-tree strip, or the full branch graph over `graphCommits`.
@@ -551,22 +542,12 @@ function App() {
     [selectedPath],
   );
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "r") return;
-
-      const selectedAction =
-        repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
-      if (!selectedPath || !selectedAction) return;
-
-      event.preventDefault();
-      handleRunAction(selectedAction);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedPath, repoActions, selectedRepoActionId, handleRunAction]);
+  useShortcut("runAction", () => {
+    const selectedAction =
+      repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
+    if (!selectedPath || !selectedAction) return;
+    handleRunAction(selectedAction);
+  });
 
   const toggleSidebar = useCallback(() => {
     setSidebarVisible((current) => {
@@ -3037,67 +3018,28 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!workingTreeActive || loading) return;
+  useShortcut("stageAll", () => void stageAllRef.current(), {
+    enabled: workingTreeActive && !loading,
+  });
 
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "a") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      event.preventDefault();
-      void stageAllRef.current();
-    }
+  useShortcut("toggleSidebar", toggleSidebar);
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [workingTreeActive, loading]);
+  useShortcut("help", () => setKeyboardSheetOpen((was) => !was));
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "b") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      event.preventDefault();
-      toggleSidebar();
-    }
+  // Undo and redo for inline line edits, not general undo. While a line's input
+  // is focused the guard bails so the browser's own text undo runs; once the
+  // edit is committed and focus leaves, these take over.
+  //
+  // Two separate bindings rather than one handler branching on Shift, so the
+  // table can name them separately and the sheet can say plainly that this is
+  // a line edit rather than anything that would bring a commit back.
+  const lineEditsActive = workingTreeActive && !viewingCommit && !loading;
+  useShortcut("undoEdit", () => void undoEdit(), { enabled: lineEditsActive });
+  useShortcut("redoEdit", () => void redoEdit(), { enabled: lineEditsActive });
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggleSidebar]);
-
-  // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z redo for inline line edits. While a line's
-  // input is focused, shouldIgnoreKeyboardNavigation bails so the browser's own
-  // text undo runs; once the edit is committed and focus leaves, this takes over.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-      if (event.key.toLowerCase() !== "z") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!workingTreeActive || viewingCommit || loading) return;
-      event.preventDefault();
-      if (event.shiftKey) void redoEdit();
-      else void undoEdit();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workingTreeActive, viewingCommit, loading, selectedPath]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-      if (event.key.toLowerCase() !== "m") return;
-      if (shouldIgnoreKeyboardNavigation(event)) return;
-      if (!canMergeIntoMain || integrationOp || integrationRunning) return;
-      event.preventDefault();
-      void mergeIntoMain();
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canMergeIntoMain, integrationOp, integrationRunning]);
+  useShortcut("mergeIntoMain", () => void mergeIntoMain(), {
+    enabled: !!canMergeIntoMain && !integrationOp && !integrationRunning,
+  });
 
   useEffect(() => {
     if (!snapshot) return;
@@ -3743,6 +3685,8 @@ function App() {
           />
         </>
       ) : null}
+
+      <KeyboardSheet open={keyboardSheetOpen} onClose={() => setKeyboardSheetOpen(false)} />
 
       <RemoveWorktreeConfirmDialog
         worktree={worktreeToRemove}
