@@ -10,6 +10,10 @@
   --bg-active: #e8efff;
   --border: #dde3ec;
   --border-subtle: #e8edf4;
+  /* Used by .timeline-action and the selected timeline node. Was referenced
+     without ever being defined, which made `border: 1px solid var(--border-strong)`
+     invalid at computed-value time, so those borders silently didn't render. */
+  --border-strong: #c5cfdd;
   --text: #111827;
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
@@ -116,6 +120,7 @@
     --bg-active: #1a2744;
     --border: #252d3d;
     --border-subtle: #1e2533;
+    --border-strong: #39445c;
     --text: #eef2f7;
     --text-secondary: #a8b3c4;
     --text-muted: #7a8699;
@@ -2461,8 +2466,19 @@ button:focus-visible {
   opacity: 0.55;
 }
 
+/* Selection is one neutral treatment on every node, with no hue of its own.
+   It used to be accent blue on commits and success green on the working tree,
+   which meant the colour of "this is selected" changed depending on what was
+   selected. Worse, green was already spoken for on that node: a dirty working
+   tree turns its dot and label green to mean "you have uncommitted work", so
+   selecting it painted a second, unrelated green on top of the first.
+
+   Keeping selection neutral leaves the colour channel free to carry state —
+   green for uncommitted work, accent for ahead of upstream — while "where am
+   I" is communicated by surface and border, which nothing else uses. */
 .timeline-node.active::before {
-  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   content: "";
   inset: -5px 0 -3px;
@@ -2470,12 +2486,8 @@ button:focus-visible {
   z-index: 0;
 }
 
-.timeline-node.working-tree.active::before {
-  background: color-mix(in srgb, var(--success-soft) 70%, transparent);
-}
-
 .timeline-node.active .node-hash {
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 
 .node-dot {
