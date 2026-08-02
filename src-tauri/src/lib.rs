@@ -161,8 +161,8 @@ struct RepoSnapshot {
     /// throwaway commit first.
     backup_push_pending: bool,
     /// Whether this repository should copy a successful primary push to its
-    /// configured backup remotes. Disabled by default: Push and Backup are
-    /// intentionally separate actions unless the user opts in here.
+    /// configured backup remotes. Backup setup enables this by default; users
+    /// can change it later in repository settings.
     backup_on_push: bool,
 }
 

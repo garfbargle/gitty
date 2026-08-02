@@ -1,43 +1,35 @@
-import { Loader2 } from "lucide-react";
+import { Check, Loader2, Settings2 } from "lucide-react";
 import type { PushPhase } from "./PushButton";
 
 type BackupButtonProps = {
-  enabled: boolean;
-  configured: boolean;
   remoteName?: string | null;
   phase?: PushPhase;
   loading?: boolean;
-  onChange: (enabled: boolean) => Promise<boolean>;
+  onSetup: () => Promise<boolean>;
 };
 
 /**
- * Backup is deliberately a push preference rather than a second action to
- * remember. When it is first enabled, the parent sets up and synchronizes the
- * configured backup remote before saving the preference.
+ * This button is shown only while a repository still needs its configured
+ * backup remote. Successful setup also enables backup-after-push by default.
  */
 export function BackupButton({
-  enabled,
-  configured,
   remoteName,
   phase = "idle",
   loading,
-  onChange,
+  onSetup,
 }: BackupButtonProps) {
   const busy = phase !== "idle" || !!loading;
-  const setupHint = configured
-    ? `Copy successful pushes to ${remoteName || "the backup remote"}`
-    : `Set up and sync ${remoteName || "the"} backup remote, then copy successful pushes to it`;
 
   return (
-    <label className={`backup-push-toggle${busy ? " busy" : ""}`} title={setupHint}>
-      {phase === "pushing" ? <Loader2 size={14} className="spin" aria-hidden="true" /> : null}
-      <input
-        type="checkbox"
-        checked={enabled}
-        disabled={busy}
-        onChange={(event) => void onChange(event.currentTarget.checked)}
-      />
-      <span>{phase === "pushing" ? "Setting up backup…" : "Back up after push"}</span>
-    </label>
+    <button
+      type="button"
+      className={`backup-setup-btn${phase !== "idle" ? ` ${phase}` : ""}`}
+      title={`Set up and sync ${remoteName || "the"} backup for this repository`}
+      disabled={busy}
+      onClick={() => void onSetup()}
+    >
+      {phase === "pushing" ? <Loader2 size={15} className="spin" /> : phase === "done" ? <Check size={15} /> : <Settings2 size={15} />}
+      {phase === "pushing" ? "Setting up…" : phase === "done" ? "Backup ready" : "Set up backup"}
+    </button>
   );
 }

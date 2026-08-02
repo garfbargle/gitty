@@ -1824,33 +1824,43 @@ button:focus-visible {
   position: relative;
 }
 
-.backup-push-toggle {
+.backup-setup-btn {
   align-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 700;
   gap: 6px;
   min-height: 32px;
+  padding: 0 12px;
+  transition: filter 0.15s ease, transform 0.15s ease;
   white-space: nowrap;
 }
 
-.backup-push-toggle input {
-  accent-color: var(--success);
-  cursor: inherit;
-  height: 15px;
-  margin: 0;
-  width: 15px;
+.backup-setup-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
-.backup-push-toggle:hover:not(.busy) {
-  color: var(--text);
+.backup-setup-btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
-.backup-push-toggle.busy {
+.backup-setup-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.backup-setup-btn.pushing {
   cursor: wait;
-  opacity: 0.75;
+}
+
+.backup-setup-btn.done {
+  background: color-mix(in srgb, var(--success) 22%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--success) 60%, transparent);
 }
 
 .push-btn-badge {

@@ -860,6 +860,12 @@ function App() {
         remoteName: savedBackupRemoteName,
         urlTemplate: savedBackupUrlTemplate,
       });
+      if (result.synced) {
+        // A completed initial sync establishes the backup as trustworthy, so
+        // turn on the normal push companion without making the user opt in
+        // again in repository settings.
+        await invoke("set_backup_on_push", { path, enabled: true });
+      }
       setGitActivityByPath((current) => {
         const activity = current[path] ?? { message: "", error: "" };
         return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
@@ -898,15 +904,6 @@ function App() {
       setError(String(err));
       return false;
     }
-  }
-
-  async function handleBackupAfterPushChange(enabled: boolean): Promise<boolean> {
-    if (!enabled) return setBackupAfterPush(false);
-    if (!hasBackupRemote) {
-      const configured = await setupBackupForSelectedRepo();
-      if (!configured) return false;
-    }
-    return setBackupAfterPush(true);
   }
 
   function openRepoSettings() {
@@ -2850,13 +2847,15 @@ function App() {
     }
   }, [snapshot?.changes, snapshot?.repo.path]);
   const hasRemotes = (snapshot?.remotes.length ?? 0) > 0;
-  // A backup toggle is useful only once the main Settings screen has a usable
-  // destination profile. Enabling it on a repo without a backup sets up and
-  // syncs the remote before turning on automatic copies after pushes.
-  const backupAvailable =
+  // Offer setup alongside Push once Settings contains a usable default and
+  // this repository lacks that remote. Existing remotes are never repurposed.
+  const backupSetupAvailable =
     hasRemotes &&
     savedBackupRemoteName.trim().length > 0 &&
-    savedBackupUrlTemplate.trim().includes("{repo}");
+    savedBackupUrlTemplate.trim().includes("{repo}") &&
+    !snapshot?.remotes.some((remote) => remote.name === savedBackupRemoteName.trim());
+  const backupAvailable =
+    savedBackupRemoteName.trim().length > 0 && savedBackupUrlTemplate.trim().includes("{repo}");
   const hasBackupRemote = hasRemotes && (snapshot?.remotes.length ?? 0) > 1;
   const showCommitSection = workingTreeActive && !integrationOp;
   const showResetSection = false;
@@ -3161,12 +3160,10 @@ function App() {
               onForcePush={() => push(true)}
               onOverwrite={() => push(true, true)}
               disabled={backupPhase !== "idle"}
-              backupAvailable={backupAvailable}
-              backupOnPush={displaySnapshot.backupOnPush ?? false}
-              hasBackupRemote={hasBackupRemote}
+              backupSetupAvailable={backupSetupAvailable}
               backupRemoteName={savedBackupRemoteName.trim() || null}
               backupPhase={backupPhase}
-              onBackupOnPushChange={handleBackupAfterPushChange}
+              onSetupBackup={backupSetupAvailable ? setupBackupForSelectedRepo : undefined}
               onPull={() => pull(false)}
               onPullMerge={() => pull(true)}
               onSetupRemote={() => openRepoSettings()}
@@ -3589,6 +3586,10 @@ function App() {
             onFetch={() => void fetchRepo()}
             onRemoveRepo={() => void removeSelectedRepo()}
             onUpdateFolder={runLinkedFolderUpdate}
+            backupAvailable={backupAvailable}
+            backupOnPush={snapshot.backupOnPush ?? false}
+            hasBackupRemote={hasBackupRemote}
+            onBackupOnPushChange={setBackupAfterPush}
             disabled={loading}
           />
         </>
