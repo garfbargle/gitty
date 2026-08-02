@@ -10,6 +10,7 @@ import { joinRepoPath, revealInFinder } from "../lib/finder";
 import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FilePathLabel } from "./FilePathLabel";
+import { SHORTCUT } from "../lib/platform";
 
 export type { ChangeSelectionEntry } from "../types";
 
@@ -384,10 +385,10 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
                   className="badge stage-all"
                   disabled={disabled}
                   onClick={() => (onStageAll ? onStageAll() : onStage(unstaged.map((file) => file.path)))}
-                  title="Stage all changes (⌘A)"
+                  title={`Stage all changes (${SHORTCUT.stageAll})`}
                 >
                   Stage all
-                  <kbd>⌘A</kbd>
+                  <kbd>{SHORTCUT.stageAll}</kbd>
                 </button>
               ) : null}
             </div>

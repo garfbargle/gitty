@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import type { FileChange } from "../types";
 import { isUntracked } from "../lib/git";
+import { SHORTCUT } from "../lib/platform";
 
 type DiscardFilesConfirmDialogProps = {
   open: boolean;
@@ -114,7 +115,7 @@ export function DiscardFilesConfirmDialog({
             onClick={onConfirm}
           >
             Discard changes
-            <kbd>↵</kbd>
+            <kbd>{SHORTCUT.confirm}</kbd>
           </button>
         </footer>
       </div>

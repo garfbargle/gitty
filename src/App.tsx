@@ -70,6 +70,7 @@ import {
   moveTimelineSelection,
   timelineSelectionIndex,
 } from "./lib/timelineNavigation";
+import { SHORTCUT } from "./lib/platform";
 import "./App.css";
 
 const emptyDiff = "Select a file or commit to view its diff.";
@@ -3314,7 +3315,7 @@ function App() {
                           : integrationOp.kind === "subtree"
                             ? "Finish update"
                             : "Continue update"}
-                        <kbd>⌘↵</kbd>
+                        <kbd>{SHORTCUT.commit}</kbd>
                       </button>
                       <button
                         type="button"
