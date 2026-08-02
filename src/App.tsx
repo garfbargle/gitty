@@ -3255,6 +3255,7 @@ function App() {
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
+              onOpenWorktree={(path) => void addRepo(path)}
               onBranchChange={(branch) => {
                 // Git can't check out a branch that's open in another folder.
                 // Rather than let it fail, go to that folder — which is what

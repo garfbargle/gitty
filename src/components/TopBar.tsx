@@ -1,12 +1,4 @@
-import {
-  ChevronDown,
-  GitBranch,
-  Link2,
-  PanelLeft,
-  PanelLeftClose,
-  RefreshCw,
-  Settings,
-} from "lucide-react";
+import { Link2, PanelLeft, PanelLeftClose, RefreshCw, Settings } from "lucide-react";
 import type {
   ActionExecutionState,
   CommitEntry,
@@ -15,7 +7,7 @@ import type {
   RepoEntry,
   WorktreeEntry,
 } from "../types";
-import { folderName } from "../lib/git";
+import { BranchSelect } from "./BranchSelect";
 import { IdePicker } from "./IdePicker";
 import { RepoRunner } from "./RepoRunner";
 import { PullButton, type PullPhase } from "./PullButton";
@@ -49,6 +41,9 @@ type TopBarProps = {
   disabled?: boolean;
   onRepoChange: (path: string) => void;
   onBranchChange: (branch: string) => void;
+  /// Open another checkout of this repository, so a branch held by a worktree
+  /// offers a way there instead of only explaining why it can't be switched to.
+  onOpenWorktree?: (path: string) => void;
   onRefresh: () => void;
   onPush?: () => Promise<boolean>;
   onForcePush?: () => Promise<boolean>;
@@ -104,6 +99,7 @@ export function TopBar({
   disabled = false,
   onRepoChange,
   onBranchChange,
+  onOpenWorktree,
   onRefresh,
   onPush,
   onForcePush,
@@ -134,16 +130,6 @@ export function TopBar({
 }: TopBarProps) {
   const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
-
-  // branch name -> the folder it's already checked out in, excluding this one.
-  // Prunable entries are kept: git still refuses to check the branch out here
-  // while the registration exists, so dropping them would leave the option
-  // looking available and fail on click. They're marked, not hidden.
-  const openElsewhere = new Map(
-    worktrees
-      .filter((entry) => !entry.isCurrent && entry.branch)
-      .map((entry) => [entry.branch as string, entry]),
-  );
 
   return (
     <header className={`top-bar${inPreview ? " preview-mode" : ""}`}>
@@ -179,45 +165,18 @@ export function TopBar({
 
         <span className="breadcrumb-sep">›</span>
 
-        <div className="select-wrap">
-          <GitBranch size={14} className="branch-icon" />
-          <select
-            className="top-select branch-select-top"
-            value={branch}
-            disabled={repoSwitching || loading || fetching}
-            onChange={(event) => onBranchChange(event.currentTarget.value)}
-          >
-            {/* A detached checkout has no branch, so nothing here matches the
-                select's value, and an unmatched <select> displays its first
-                option instead: the bar claimed you were on whatever branch
-                happened to sort first. State it plainly instead. */}
-            {branches.includes(branch) ? null : (
-              <option value={branch}>{branch}</option>
-            )}
-            {branches.map((name) => {
-              // A branch checked out in another folder can't be checked out
-              // here — git refuses. Saying so in the list turns a failure into
-              // a choice: picking it opens that folder instead. The folder's
-              // name, not its path: the path is long enough to read as a
-              // statement about where you are rather than where you'd go.
-              // A folder deleted outside Gitty is still registered, so the
-              // branch is still held — but there is nothing to open. Saying
-              // "open <name>" would send the user to a folder that is gone.
-              const elsewhere = openElsewhere.get(name);
-              const label = !elsewhere
-                ? name
-                : elsewhere.prunable
-                  ? `${name}  ·  folder missing`
-                  : `${name}  →  open ${folderName(elsewhere.path)}`;
-              return (
-                <option key={name} value={name}>
-                  {label}
-                </option>
-              );
-            })}
-          </select>
-          <ChevronDown size={14} className="select-chevron" />
-        </div>
+        {/* Not a <select>. A worktree is a branch *and* a place, and a native
+            option is one string with no room to say which half is which: it
+            read "dev/mcp-bridge  →  open gitty-mcp", two kinds of thing joined
+            by an arrow. The listbox draws the pairing. */}
+        <BranchSelect
+          branch={branch}
+          branches={branches}
+          worktrees={worktrees}
+          disabled={repoSwitching || loading || fetching}
+          onBranchChange={onBranchChange}
+          onOpenWorktree={onOpenWorktree}
+        />
 
         {inPreview && viewingCommit ? (
           <>
