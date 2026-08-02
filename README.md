@@ -142,6 +142,34 @@ Build for your current platform:
 npm run tauri build
 ```
 
+### Building for yourself on macOS
+
+You do **not** need an Apple Developer account, a certificate, or notarization
+to run Gitty on your own Mac. Signing exists to solve distribution: macOS
+attaches a quarantine flag to files downloaded from the internet, and Gatekeeper
+blocks those. An app you compile locally is never quarantined, so it just runs.
+
+```bash
+npm install
+npm run tauri build -- --bundles app
+open src-tauri/target/release/bundle/macos/Gitty.app
+```
+
+Drag `Gitty.app` into `/Applications` to keep it. Requires Rust and Xcode
+command line tools; nothing else.
+
+Use the signed and notarized flow below only when distributing builds to other
+people.
+
+### App version in local builds
+
+`package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` carry
+the most recent released version. CI overwrites all three from the git tag
+(`scripts/sync-version-from-tag.mjs`) before building, so published installers
+always match their release. A local build reports whatever is currently checked
+in — expect it to read as the last release, not as the unreleased work on top of
+it.
+
 Tauri writes bundles under `src-tauri/target/release/bundle/` — for example `.app` / `.dmg` on macOS, `.msi` / `.exe` on Windows, and `.deb` / `.AppImage` on Linux (exact formats depend on your OS and Tauri config).
 
 ### Windows release
