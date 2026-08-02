@@ -14,6 +14,27 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_DEPTH: usize = 12;
 
+/// Development-oriented locations worth searching automatically.  Do not add
+/// the home directory or macOS protected folders (such as Desktop or
+/// Documents) here: probing them can prompt for access while providing little
+/// value for repository discovery.
+const STANDARD_DISCOVERY_DIRS: &[&str] = &[
+    "Developer",
+    "dev",
+    "Projects",
+    "Code",
+    "Sites",
+    "Work",
+    "src",
+    "repos",
+    "Repositories",
+    "github",
+    "GitHub",
+    "workspace",
+    "workspaces",
+    "go",
+];
+
 const SKIP_DIR_NAMES: &[&str] = &[
     "node_modules",
     "target",
@@ -108,36 +129,58 @@ fn quick_repo_entry(path: &Path) -> Option<RepoEntry> {
 }
 
 fn discovery_roots(home: &Path, saved_paths: &[String]) -> Vec<PathBuf> {
-    let mut roots = vec![
-        home.join("Developer"),
-        home.join("Projects"),
-        home.join("Code"),
-        home.join("Sites"),
-        home.join("Work"),
-        home.join("src"),
-        home.join("repos"),
-        home.join("github"),
-        home.join("GitHub"),
-        home.join("workspace"),
-        home.join("workspaces"),
-        home.join("Desktop"),
-        home.join("go"),
-        home.join("Documents"),
-        home.to_path_buf(),
-    ];
+    let mut roots: Vec<PathBuf> = STANDARD_DISCOVERY_DIRS
+        .iter()
+        .map(|directory| home.join(directory))
+        .collect();
 
+    // A repository the person explicitly saved is already in scope, but its
+    // parent is not. Scanning parents could pull discovery back into arbitrary
+    // personal folders.
     for saved in saved_paths {
-        let path = PathBuf::from(saved);
-        if let Some(parent) = path.parent() {
-            roots.push(parent.to_path_buf());
-        }
-        roots.push(path);
+        roots.push(PathBuf::from(saved));
     }
 
     roots.sort();
     roots.dedup();
     roots.retain(|root| root.is_dir());
     roots
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        env,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn discovery_is_limited_to_development_directories_and_saved_repositories() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = env::temp_dir().join(format!("gitty-discovery-{unique}"));
+        let developer = home.join("Developer");
+        let documents = home.join("Documents");
+        let desktop = home.join("Desktop");
+        let saved = documents.join("explicitly-saved-repo");
+
+        fs::create_dir_all(&developer).unwrap();
+        fs::create_dir_all(&desktop).unwrap();
+        fs::create_dir_all(&saved).unwrap();
+
+        let roots = discovery_roots(&home, &[saved.to_string_lossy().into_owned()]);
+
+        assert!(roots.contains(&developer));
+        assert!(roots.contains(&saved));
+        assert!(!roots.contains(&documents));
+        assert!(!roots.contains(&desktop));
+        assert!(!roots.contains(&home));
+
+        fs::remove_dir_all(home).unwrap();
+    }
 }
 
 fn resolve_scan_dir(dir: &Path) -> Option<PathBuf> {
