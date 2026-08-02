@@ -1,7 +1,14 @@
 import { useMemo } from "react";
 import type { CommitEntry, WorktreeEntry } from "../types";
 import { buildGraphRows } from "../lib/graph";
-import { formatRelativeTime, authorInitials, branchRefs, tagName, tagRefs } from "../lib/git";
+import {
+  authorInitials,
+  branchRefs,
+  formatRelativeTime,
+  shortenPath,
+  tagName,
+  tagRefs,
+} from "../lib/git";
 import { GitBranch, SquareArrowOutUpRight } from "lucide-react";
 import { TagBadge } from "./TagBadge";
 
@@ -134,31 +141,33 @@ export function GraphView({
                 })}
                 </span>
                 <span className="graph-subject">{row.commit.subject}</span>
-                {/* A checkout in another folder is its own kind of fact, not a
-                    degree of "is this mine", so it gets its own marker rather
-                    than bending fill or weight to mean a third thing. */}
-                {openElsewhere.get(row.commit.hash)?.map((entry) => (
-                  <span
-                    key={entry.path}
-                    className="graph-elsewhere"
-                    title={`${entry.branch ?? "detached"} is open in ${entry.path}`}
-                  >
-                    <SquareArrowOutUpRight size={11} aria-hidden />
-                    {entry.branch ?? "detached"}
+                {/* Every trailing item shares one cell. They used to be direct
+                    children of the grid, so a row with a tag or a second
+                    checkout had more items than the grid had columns and every
+                    cell after it shifted, collapsing the subject to a sliver. */}
+                <span className="graph-meta">
+                  {/* A checkout in another folder is its own kind of fact, not a
+                      degree of "is this mine", so it gets its own marker rather
+                      than bending fill or weight to mean a third thing. */}
+                  {openElsewhere.get(row.commit.hash)?.map((entry) => (
+                    <span
+                      key={entry.path}
+                      className="graph-elsewhere"
+                      title={`${entry.branch ?? "detached"} is checked out in ${entry.path}`}
+                    >
+                      <SquareArrowOutUpRight size={11} aria-hidden />
+                      {shortenPath(entry.path)}
+                    </span>
+                  ))}
+                  {tags.map((name) => (
+                    <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
+                  ))}
+                  <span className="graph-author" title={row.commit.author}>
+                    {authorInitials(row.commit.author)}
                   </span>
-                ))}
-                {tags.length > 0 ? (
-                  <span className="graph-tags">
-                    {tags.map((name) => (
-                      <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
-                    ))}
-                  </span>
-                ) : null}
-                <span className="graph-author" title={row.commit.author}>
-                  {authorInitials(row.commit.author)}
+                  <span className="graph-hash">{row.commit.shortHash}</span>
+                  <span className="graph-time">{formatRelativeTime(row.commit.date)}</span>
                 </span>
-                <span className="graph-hash">{row.commit.shortHash}</span>
-                <span className="graph-time">{formatRelativeTime(row.commit.date)}</span>
               </button>
             </li>
           );

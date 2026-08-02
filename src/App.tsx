@@ -1435,22 +1435,6 @@ function App() {
     await inspectCommitFile(files[0], commit, path);
   }
 
-  /// Selecting a commit in the branch graph shows the whole commit, not one
-  /// file: the graph is the file list's replacement in that view, so there's
-  /// nowhere to pick a file from.
-  async function inspectCommitWhole(commit: CommitEntry, path = selectedPath) {
-    if (!path) return;
-    setNavZone("timeline");
-    setViewingCommit(commit);
-    setFocus(null);
-    const [files, whole] = await Promise.all([
-      run(() => invoke<FileChange[]>("commit_files_command", { path, commit: commit.hash })),
-      run(() => invoke<string>("commit_diff", { path, commit: commit.hash })),
-    ]);
-    if (files !== null) setCommitFiles(files);
-    if (whole !== null) setDiff(whole || "This commit has no patch output.");
-  }
-
   async function inspectCommitFile(
     file: FileChange,
     commit: CommitEntry = viewingCommit!,
@@ -3372,7 +3356,23 @@ function App() {
                       </button>
                     </aside>
                   </div>
-                ) : showGittyEmptyState && !integrationOp && historyView !== "graph" ? (
+                ) : historyView === "graph" ? (
+                  <GraphView
+                    commits={displaySnapshot.graphCommits ?? []}
+                    headHash={displaySnapshot.commits[0]?.hash}
+                    headBranch={displaySnapshot.branch}
+                    selectedHash={selectedCommit?.hash}
+                    unpushedTags={unpushedTagSet}
+                    worktrees={worktrees}
+                    onSelect={(commit) => {
+                      // Picking a commit here is picking it in the app, not just
+                      // in this view: land on it in the normal view, the same
+                      // state as selecting it on the timeline.
+                      setHistoryView("strip");
+                      void inspectCommit(commit);
+                    }}
+                  />
+                ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
                   <div className="workspace-grid">
@@ -3385,17 +3385,6 @@ function App() {
                       minSplit={0.15}
                       maxSplit={0.65}
                       primary={
-                        historyView === "graph" ? (
-                        <GraphView
-                          commits={displaySnapshot.graphCommits ?? []}
-                          headHash={displaySnapshot.commits[0]?.hash}
-                          headBranch={displaySnapshot.branch}
-                          selectedHash={selectedCommit?.hash}
-                          unpushedTags={unpushedTagSet}
-                          worktrees={worktrees}
-                          onSelect={(commit) => void inspectCommitWhole(commit)}
-                        />
-                        ) : (
                         <ChangesList
                           ref={changesListRef}
                           changes={viewingCommit ? commitFiles : displaySnapshot.changes}
@@ -3431,7 +3420,6 @@ function App() {
                           }
                           disabled={loading}
                         />
-                        )
                       }
                       secondary={
                         <DiffViewer
