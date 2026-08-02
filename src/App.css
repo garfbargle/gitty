@@ -2831,8 +2831,14 @@ button:focus-visible {
   padding: 0 2px 10px;
 }
 
+/* Never wraps and never shrinks, for the same reason the top bar's right half
+   does not: these are the actions, and a row that pushes them onto a second
+   line moves the whole timeline down every time you select a commit. The chips
+   beside them truncate instead — a branch name is the thing that can afford to
+   lose characters. */
 .timeline-actions {
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 8px;
   margin-left: auto;
 }
@@ -2921,7 +2927,26 @@ button:focus-visible {
   display: inline-flex;
   font-size: 11px;
   gap: 5px;
+  /* Gives ground before the row wraps. flex-shrink was already 1, but a flex
+     item will not go below its own content without this, so a 41-character
+     branch name held the chip at 367px and pushed the actions onto a second
+     line. */
+  min-width: 0;
   padding: 3px 5px 3px 9px;
+}
+
+/* The part that actually gives: the kind label and any count stay whole, the
+   ref name truncates. */
+.context-chip .chip-ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-chip .chip-kind,
+.context-chip .chip-sync {
+  flex: 0 0 auto;
 }
 
 .context-chip.behind {
