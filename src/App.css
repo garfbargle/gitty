@@ -101,6 +101,11 @@
   --timeline-dot-size: 12px;
   --timeline-rail-thickness: 2px;
   --timeline-rail-gap: 8px;
+  /* The stack above the dot, so the rail can be placed from the same numbers
+     the node is built from rather than a constant that silently stops matching
+     when the stack changes. hash 16 + one 2px gap puts the dot's centre at 24. */
+  --timeline-hash-h: 16px;
+  --timeline-stack-gap: 2px;
   --timeline-node-width: 132px;
   /* One height for every node, so they never differ and the selection frame is
      the same size on all of them. Sized to the real stack — dot 12, hash 16,
@@ -2503,7 +2508,7 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: var(--space-0-5);
+  gap: var(--timeline-stack-gap);
   /* Fixed, so a tag, a long subject, or the absence of a timestamp can never
      make one node taller than another. Selection draws into this same box on
      every node. */
@@ -2532,7 +2537,14 @@ button:focus-visible {
   height: var(--timeline-rail-thickness);
   left: calc(50% + var(--timeline-dot-size) / 2 + var(--timeline-rail-gap));
   position: absolute;
-  top: calc((var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2);
+  /* The dot is no longer the first child: the hash sits above it and the time
+     below, so the rail runs through the middle of the row. Derived from the
+     stack rather than hard-coded, so moving a line does not leave the rail
+     4px off the dots the way a constant did before. */
+  top: calc(
+    var(--timeline-hash-h) + var(--timeline-stack-gap) +
+      (var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2
+  );
   width: calc(100% - var(--timeline-dot-size) - var(--timeline-rail-gap) * 2);
 }
 
@@ -2623,7 +2635,11 @@ button:focus-visible {
 /* The state line is what "Now" is telling you, so it sits a step back from the
    label. It takes the accent colour when there is work waiting, which is the
    rule immediately below and the reason this stays a separate line at all. */
-.timeline-node.working-tree .node-subject {
+/* :not(.has-changes) says what this means -- a quiet line when there is
+   nothing to report -- and also outranks .timeline-node.active .node-subject,
+   which ties on specificity and is declared later. The working tree is always
+   active while you are at the present, so without that this never applied. */
+.timeline-node.working-tree:not(.has-changes) .node-subject {
   color: var(--text-muted);
   font-weight: var(--weight-normal);
 }

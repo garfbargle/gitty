@@ -375,6 +375,10 @@ export function HistoryTimeline({
         onContextMenu={(event) => openTagContextMenu(event, commit)}
         title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}`}
       >
+        {/* Hash above the dot, time below it, so the rail runs through the
+            middle of the row instead of along its top edge and each commit
+            reads as an identity sitting on the line with its age underneath. */}
+        <span className="node-hash">{commit.shortHash}</span>
         <span
           className="node-dot"
           style={{
@@ -384,7 +388,6 @@ export function HistoryTimeline({
             outlineOffset: isAhead ? 1 : undefined,
           }}
         />
-        <span className="node-hash">{commit.shortHash}</span>
         <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
         {/* No subject here on purpose. At this node width the message clipped
             to a few characters, often mid-word and sometimes from both ends,
@@ -764,8 +767,10 @@ export function HistoryTimeline({
                     : `Updating ${integrationPreview.branch} from ${integrationPreview.onto}`
               }
             >
-              <span className="node-dot merge-preview-dot" />
+              {/* Same order as a commit node, so its dot lands on the rail
+                  rather than above it. */}
               <span className="node-hash">{integrationPreview.onto}</span>
+              <span className="node-dot merge-preview-dot" />
               <span className="node-subject">
                 {integrationPreview.done
                   ? "merged"
