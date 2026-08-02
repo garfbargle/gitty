@@ -3026,9 +3026,16 @@ button:focus-visible {
   }
 }
 
+/* These are the parts that must stay whole, so they neither shrink nor wrap.
+   Spelling the counts out as words ("13 to merge" rather than an arrow and a
+   number) made them long enough to wrap inside the chip, which took one chip to
+   43px and the whole row from 41px to 53px. Phrases are only clearer than
+   notation while they stay on one line. */
 .context-chip .chip-kind,
-.context-chip .chip-sync {
+.context-chip .chip-sync,
+.context-chip .chip-count {
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .context-chip.behind {
