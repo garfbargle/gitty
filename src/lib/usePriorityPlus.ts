@@ -2,6 +2,21 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 const HIDDEN_CLASS = "is-overflowed";
 
+/// The text of an item, for the "+N" menu and its accessible name.
+///
+/// Joined from the child elements rather than read off `textContent`, because
+/// the parts of a chip are separate spans with no whitespace between them:
+/// `textContent` alone produced "Remoteorigin/main2 to merge". `innerText`
+/// would insert the separators but returns "" once the element is hidden,
+/// which is exactly when this is needed.
+function readLabel(el: HTMLElement): string {
+  const parts = [...el.children]
+    .map((child) => (child.textContent ?? "").trim())
+    .filter(Boolean);
+  const text = parts.length > 0 ? parts.join(" ") : (el.textContent ?? "");
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /// Collapse whatever does not fit on one line into a trailing "+N".
 ///
 /// This replaces a set of container-query breakpoints that hid chips at fixed
@@ -66,7 +81,7 @@ export function usePriorityPlus(signature: string) {
     items.forEach((el, i) => {
       const over = i >= fits;
       el.classList.toggle(HIDDEN_CLASS, over);
-      if (over) labels.push((el.textContent ?? "").replace(/\s+/g, " ").trim());
+      if (over) labels.push(readLabel(el));
     });
 
     setHidden((current) =>
