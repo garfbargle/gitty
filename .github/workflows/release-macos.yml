@@ -1,0 +1,85 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v0.1.1)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Sync app version from tag
+        run: node scripts/sync-version-from-tag.mjs "${{ steps.tag.outputs.tag }}"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build macOS bundle
+        run: npm run tauri build -- --bundles dmg
+
+      # The Windows release job publishes to this same tag. Rather than race it
+      # for release creation — where whichever job lost would fail with a 422 —
+      # create only when the release is absent, and always upload with
+      # --clobber. Either ordering, and any re-run, converges on the same result.
+      - name: Publish DMG to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG=$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
+          if [[ -z "$DMG" ]]; then
+            echo "No DMG produced under src-tauri/target/release/bundle/dmg" >&2
+            exit 1
+          fi
+          echo "Built $DMG"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — attaching the DMG to it."
+          else
+            echo "Release $TAG not found — creating it."
+            gh release create "$TAG" \
+              --title "Gitty $TAG" \
+              --notes-file .github/release-notes-macos.md \
+              || echo "Release was created concurrently — continuing to upload."
+          fi
+
+          gh release upload "$TAG" "$DMG" --clobber
