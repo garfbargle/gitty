@@ -102,18 +102,26 @@
   --timeline-rail-thickness: 2px;
   --timeline-rail-gap: 8px;
   --timeline-node-width: 132px;
-  /* A fixed height, not a floor: every node reserves the same space including
-     the tag band, so nodes never differ in height and the selection frame is
+  /* One height for every node, so they never differ and the selection frame is
      the same size on all of them. Sized to the real stack — dot 12, hash 16,
-     time 14, two 2px gaps, then a 22px tag band.
+     time 14, two 2px gaps.
+
+     Content is deliberately top-aligned rather than centred: the dot has to sit
+     at a constant y or the rail bends where a node's content is taller. That is
+     also why the tag band is no longer part of this number. Reserving it on
+     every node left 23px of dead air under the time on each untagged commit,
+     which is what made the row read as pinned to the top of the band. It is
+     added back only when something in view is actually tagged.
 
      The commit message used to take a fourth line here. At 132px it clipped to
-     a few characters, often mid-word, which is not enough to recognise a
-     commit by; the inspector carries it in full instead. Dropping it returns
-     19px of height to the diff on every screen. The working-tree node still
+     a few characters, often mid-word, which is not enough to recognise a commit
+     by; the inspector carries it in full instead. The working-tree node still
      uses .node-subject for its state word ("no changes"), which is short and
      always fits — it has no time line, so it sits inside this height. */
-  --timeline-node-height: 69px;
+  --timeline-node-height: 47px;
+  /* Reserved only when something in view is actually tagged. See
+     .timeline-track.has-tags below. */
+  --timeline-tag-band: 22px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -2464,6 +2472,15 @@ button:focus-visible {
 
 .timeline-scroller::-webkit-scrollbar {
   display: none;
+}
+
+/* The band exists so a tagged commit does not stand taller than its
+   neighbours. That only matters when a tag is on screen; reserving it always
+   meant every untagged commit carried 23px of empty space under its timestamp.
+   Applied to the track, so the whole row grows together and the rail stays
+   straight. */
+.timeline-track.has-tags .timeline-node {
+  height: calc(var(--timeline-node-height) + var(--timeline-tag-band));
 }
 
 .timeline-track {

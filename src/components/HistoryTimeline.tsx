@@ -135,6 +135,13 @@ export function HistoryTimeline({
   const tagActionsEnabled = !!(onCreateTag && onDeleteTag);
   const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
   const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
+  // Every node reserves the tag band or none does, so the row keeps one height
+  // and the rail stays straight. Reserving it unconditionally left every
+  // untagged commit sitting above 23px of nothing.
+  const anyTags = useMemo(
+    () => [...ancestry, ...ahead].some((commit) => tagRefs(commit.refs).length > 0),
+    [ancestry, ahead],
+  );
   const commitDates = useMemo(
     () => [...ancestry, ...ahead].map((commit) => commit.date),
     [ancestry, ahead],
@@ -714,7 +721,7 @@ export function HistoryTimeline({
               {lanes.map((lane, index) => renderLane(lane, index))}
             </div>
           ) : null}
-          <div className="timeline-track">
+          <div className={`timeline-track${anyTags ? " has-tags" : ""}`}>
           {ancestry.map((commit) => renderCommitNode(commit, false))}
 
           <button
