@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { CommitEntry, WorktreeEntry } from "../types";
 import { buildGraphRows } from "../lib/graph";
-import { formatRelativeTime, authorInitials, tagName, tagRefs } from "../lib/git";
-import { SquareArrowOutUpRight } from "lucide-react";
+import { formatRelativeTime, authorInitials, branchRefs, tagName, tagRefs } from "../lib/git";
+import { GitBranch, SquareArrowOutUpRight } from "lucide-react";
 import { TagBadge } from "./TagBadge";
 
 /// Horizontal distance between lanes, and the vertical rhythm of one row. Both
@@ -14,6 +14,9 @@ type GraphViewProps = {
   /// Multi-branch history (`graphCommits`), newest first.
   commits: CommitEntry[];
   headHash?: string;
+  /// The branch checked out in *this* folder, so its label can be marked as
+  /// where you are rather than looking like any other branch.
+  headBranch?: string;
   selectedHash?: string;
   unpushedTags?: Set<string>;
   /// Other checkouts of this repository, so rows can show which commits are
@@ -28,6 +31,7 @@ type GraphViewProps = {
 export function GraphView({
   commits,
   headHash,
+  headBranch,
   selectedHash,
   unpushedTags,
   worktrees = [],
@@ -107,6 +111,28 @@ export function GraphView({
                   />
                 </svg>
 
+                {/* The whole point of this view. Without them it's an
+                    unlabelled column of dots and you can't tell which line is
+                    which, or a branch from a checkout. */}
+                <span className="graph-refs">
+                {branchRefs(row.commit.refs).map((ref) => {
+                  const local = ref.replace(/^HEAD -> /, "");
+                  const remote = local.includes("/");
+                  return (
+                    <span
+                      key={ref}
+                      className={`graph-ref${remote ? " remote" : ""}${
+                        local === headBranch ? " head" : ""
+                      }`}
+                      style={remote ? undefined : { borderColor: row.color }}
+                      title={remote ? `${local} (on the remote)` : `${local} (branch)`}
+                    >
+                      <GitBranch size={10} aria-hidden />
+                      {local}
+                    </span>
+                  );
+                })}
+                </span>
                 <span className="graph-subject">{row.commit.subject}</span>
                 {/* A checkout in another folder is its own kind of fact, not a
                     degree of "is this mine", so it gets its own marker rather

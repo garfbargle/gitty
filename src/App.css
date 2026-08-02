@@ -6648,3 +6648,50 @@ button.context-chip.pullable:disabled {
   gap: 4px;
   padding: 1px 7px;
 }
+
+/* Branch labels in the graph. The label is the branch; the outline takes the
+   lane's colour so a name and its line are visibly the same thing. */
+.graph-ref {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  gap: 4px;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 1px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Remote-tracking refs are context, not somewhere you are. */
+.graph-ref.remote {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* The branch checked out in this folder. */
+.graph-ref.head {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+
+/* Refs share one cell so a row with two branches doesn't shift the columns of
+   every other row. */
+.graph-refs {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+/* Lanes, refs, subject, then the trailing metadata. */
+.graph-row {
+  grid-template-columns: var(--graph-gutter) auto minmax(0, 1fr) auto auto auto auto;
+}
