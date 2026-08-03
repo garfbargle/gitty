@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Standing quality contract
+
+`AGENTS.md` and `CONSTITUTION.md` apply in full to every session and delegated
+agent. Before implementation, fixes, refactors, UI changes, or review, load the
+project `gitty-quality` skill, `docs/README.md`, relevant specs/ADRs, and
+relevant portions of `DESIGN.md`. Establish the observable problem and root
+cause before editing; report reproducible verification rather than an
+unsupported completion claim.
+
+Every subagent prompt must name its objective, exact scope, acceptance
+behavior, required corpus, and verification. Keep review agents read-only.
+Concurrent writers or stateful verification runs use isolated Git worktrees so
+one agent cannot move the commit or mutate the files another agent is judging.
+These are Gitty rules; they do not import another project's workflow runtime.
+
 ## What this is
 
 Gitty is a cross-platform Tauri 2 desktop Git client: React 19 + TypeScript frontend (`src/`), Rust backend (`src-tauri/`). It shells out to the system `git` binary — there is no embedded Git library (no libgit2/gitoxide). Anything Git-related is implemented by constructing argv for `git -C <repo> …` and parsing the output.
