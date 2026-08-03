@@ -1,0 +1,7 @@
+[mcp_servers.tauri]
+command = "npx"
+args = ["-y", "@hypothesi/tauri-mcp-server"]
+enabled = true
+required = true
+startup_timeout_sec = 30
+
