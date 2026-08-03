@@ -49,6 +49,8 @@ export type CommitEntry = {
   date: string;
   refs: string;
   subject: string;
+  /** First meaningful body line, used only as compact history context. */
+  bodyPreview?: string | null;
 };
 
 export type FileChange = {
@@ -102,6 +104,8 @@ export type TagEntry = {
   date: string;
   shortHash: string;
   unpushed: boolean;
+  /** Resolved commit, even when it falls outside the capped history pages. */
+  commit?: CommitEntry;
 };
 
 export type RepoChanges = {

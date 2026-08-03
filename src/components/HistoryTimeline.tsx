@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, FolderOpen, GitBranch } from "lucide-react";
-import type { BranchDivergence, CommitEntry, SiblingTip, WorktreeEntry } from "../types";
+import type {
+  BranchDivergence,
+  CommitEntry,
+  SiblingTip,
+  TagEntry,
+  WorktreeEntry,
+} from "../types";
 import {
   aheadTimelineCommits,
   ancestryTimelineCommits,
@@ -20,6 +26,7 @@ import {
 import { usePriorityPlus } from "../lib/usePriorityPlus";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
+import { TagBrowser } from "./TagBrowser";
 
 const SCROLL_END_THRESHOLD = 24;
 
@@ -40,6 +47,7 @@ type HistoryTimelineProps = {
   aheadCommits?: CommitEntry[];
   changeCount: number;
   unpushedTags?: Set<string>;
+  repositoryTags?: TagEntry[];
   selectedHash?: string;
   onSelect: (commit: CommitEntry) => void;
   onSelectWorkingTree: () => void;
@@ -47,6 +55,7 @@ type HistoryTimelineProps = {
   onInteract?: () => void;
   onCreateTag?: (commit: CommitEntry) => void;
   onDeleteTag?: (commit: CommitEntry, name: string) => void;
+  onSelectTag?: (tag: TagEntry) => void;
   onBranchFrom?: (commit: CommitEntry) => void;
   onResetTo?: (commit: CommitEntry) => void;
   workingTreeActive?: boolean;
@@ -99,6 +108,7 @@ export function HistoryTimeline({
   aheadCommits = [],
   changeCount,
   unpushedTags,
+  repositoryTags = [],
   selectedHash,
   onSelect,
   onSelectWorkingTree,
@@ -106,6 +116,7 @@ export function HistoryTimeline({
   onInteract,
   onCreateTag,
   onDeleteTag,
+  onSelectTag,
   onBranchFrom,
   onResetTo,
   workingTreeActive,
@@ -404,6 +415,7 @@ export function HistoryTimeline({
     const active = commit.hash === selectedHash && !workingTreeActive;
     const tags = tagRefs(commit.refs).map(tagName);
     const tagSummary = tags.length > 0 ? ` · ${tags.join(", ")}` : "";
+    const bodyPreview = commit.bodyPreview?.trim();
     // "Not pushed" is state, which is what colour is free to carry in a strip
     // that only ever draws one branch. The boundary sits on the oldest one, so
     // the line is drawn once rather than between every pair.
@@ -418,7 +430,7 @@ export function HistoryTimeline({
       <button
         className={`timeline-node ${active ? "active" : ""} ${isAhead ? "ahead" : ""}${
           unpushed ? " unpushed" : ""
-        }${startsUnpushed ? " push-boundary" : ""}`}
+        }${startsUnpushed ? " push-boundary" : ""}${tags.length > 0 ? " tagged" : ""}`}
         key={`${isAhead ? "ahead" : "ancestry"}-${commit.hash}`}
         type="button"
         ref={(node) => {
@@ -427,16 +439,19 @@ export function HistoryTimeline({
         }}
         onClick={() => selectCommit(commit)}
         onContextMenu={(event) => openTagContextMenu(event, commit)}
-        title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}${unpushed ? " · not pushed yet" : ""}`}
+        title={`${commit.shortHash} · ${commit.subject}${bodyPreview ? ` · ${bodyPreview}` : ""} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}${unpushed ? " · not pushed yet" : ""}`}
       >
         {/* The push line, drawn on the oldest commit the remote does not have.
             A real element rather than a pseudo: ::after is the rail and
             ::before is the selection cursor. */}
         {startsUnpushed ? <span className="push-boundary-line" aria-hidden /> : null}
-        {/* Hash above the dot, time below it, so the rail runs through the
-            middle of the row instead of along its top edge and each commit
-            reads as an identity sitting on the line with its age underneath. */}
-        <span className="node-hash">{commit.shortHash}</span>
+        {/* Human meaning leads. The stable hash remains in the title and the
+            inspector, where identity is useful without consuming the strip's
+            most scannable line. */}
+        <span className={`node-message${bodyPreview ? " has-body" : ""}`}>
+          <span className="node-subject node-commit-subject">{commit.subject}</span>
+          {bodyPreview ? <span className="node-body-preview">{bodyPreview}</span> : null}
+        </span>
         {/* Unpushed commits walk the lane palette, oldest first. Colour is
             unspent in this strip -- it only ever draws one branch, so there is
             no branch identity for it to carry -- and this gives the run of
@@ -452,29 +467,24 @@ export function HistoryTimeline({
             outlineOffset: isAhead ? 1 : undefined,
           }}
         />
-        {/* Time and tags share the bottom line. A tag row of its own forced
-            every node in the strip to be tall enough for it, tagged or not, so
-            one tagged commit anywhere in history left every other commit
-            sitting above a band of empty space. Inline, a tag costs the row
-            nothing. */}
+        {/* Tags and time share the stable metadata line. One badge plus a count
+            preserves the fixed rhythm even when a release commit has several
+            names. The full set remains in the title, inspector, and tag browser. */}
         <span className="node-meta-line">
-          <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
           {tags.length > 0 ? (
             <span className="node-tags">
-              {tags.map((name) => (
-                <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
-              ))}
+              <TagBadge
+                name={tags[0]}
+                unpushed={unpushedTags?.has(tags[0])}
+                muted
+                additionalCount={tags.length - 1}
+                title={tags.join(", ")}
+              />
             </span>
           ) : null}
+          <span className="node-time">{formatRelativeTime(commit.date, now)}</span>
+          {isAhead ? <span className="node-ahead-label">ahead</span> : null}
         </span>
-        {/* No subject here on purpose. At this node width the message clipped
-            to a few characters, often mid-word and sometimes from both ends,
-            which is not enough to recognise a commit by and cost a whole row
-            of height on every node. The inspector shows it in full the moment
-            a commit is selected, and arrow keys move that selection, so the
-            message is one keypress away rather than permanently illegible.
-            The strip's job is position and state; the message has a home. */}
-        {isAhead ? <span className="node-ahead-label">ahead</span> : null}
       </button>
     );
   }
@@ -586,7 +596,15 @@ export function HistoryTimeline({
     showPreviewActions;
 
   function renderContextChips() {
-    if (contextLanes.length === 0 && !siblingTip && !showActions) return null;
+    if (
+      contextLanes.length === 0 &&
+      !siblingTip &&
+      !showActions &&
+      !onHistoryViewChange &&
+      repositoryTags.length === 0
+    ) {
+      return null;
+    }
     return (
       <div className="timeline-context-bar">
         {/* Owns the history region below it, so it heads the row that region
@@ -611,6 +629,29 @@ export function HistoryTimeline({
               Branches
             </button>
           </div>
+        ) : null}
+        {onSelectTag ? (
+          <TagBrowser
+            tags={repositoryTags}
+            onSelect={onSelectTag}
+            onDelete={
+              onDeleteTag
+                ? (tag) =>
+                    onDeleteTag(
+                      tag.commit ?? {
+                        hash: tag.shortHash,
+                        shortHash: tag.shortHash,
+                        parents: [],
+                        author: "",
+                        date: tag.date,
+                        refs: `tag: ${tag.name}`,
+                        subject: "Tagged commit",
+                      },
+                      tag.name,
+                    )
+                : undefined
+            }
+          />
         ) : null}
         {/* The chips are one group, not loose items in the row.
 
@@ -867,7 +908,15 @@ export function HistoryTimeline({
               scrolled away with the commit it marks, which is most of the time:
               the strip opens at the present and the unpushed run can be long. */}
           {boundaryX !== null ? (
-            <div className="push-boundary-flag" style={{ left: boundaryX }}>
+            <div
+              className="push-boundary-flag"
+              style={{
+                // The dashed rule is one physical pixel wide, so its visual
+                // centre sits half a pixel to the right of its left edge.
+                left: boundaryX + 0.5,
+                top: `calc(${laneRegionHeight}px + var(--space-2) + var(--timeline-title-h) + var(--timeline-stack-gap) + var(--timeline-dot-size) / 2)`,
+              }}
+            >
               <span className="push-boundary-label">not pushed</span>
             </div>
           ) : null}

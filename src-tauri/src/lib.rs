@@ -56,6 +56,8 @@ struct CommitEntry {
     date: String,
     refs: String,
     subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +126,9 @@ struct TagEntry {
     date: String,
     short_hash: String,
     unpushed: bool,
+    /// The commit the tag resolves to. Carrying the full entry lets the tag
+    /// browser open tags that sit outside the capped timeline or graph pages.
+    commit: CommitEntry,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1117,23 +1122,22 @@ fn write_backup_on_push(repo_path: &Path, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
-    let Ok(output) = git(
-        repo_path,
-        &[
-            "for-each-ref",
-            "refs/tags",
-            "--sort=-creatordate",
-            "--format=%(refname:short)\x1f%(creatordate:iso-strict)\x1f%(*objectname:short)\x1e",
-        ],
-    ) else {
-        return Vec::new();
-    };
+const TAG_LIST_FORMAT: &str = concat!(
+    "%(refname:short)\x1f",
+    "%(creatordate:iso-strict)\x1f",
+    "%(if)%(*objectname)%(then)%(*objectname)%(else)%(objectname)%(end)\x1f",
+    "%(if)%(*objectname)%(then)%(*objectname:short)%(else)%(objectname:short)%(end)\x1f",
+    "%(if)%(*objectname)%(then)%(*parent)%(else)%(parent)%(end)\x1f",
+    "%(if)%(*objectname)%(then)%(*authorname)%(else)%(authorname)%(end)\x1f",
+    "%(if)%(*objectname)%(then)%(*authordate:iso-strict)%(else)%(authordate:iso-strict)%(end)\x1f",
+    "%(if)%(*objectname)%(then)%(*subject)%(else)%(subject)%(end)\x1e",
+);
 
+fn parse_tag_list_output(output: &str, unpushed: &HashSet<String>) -> Vec<TagEntry> {
     output
         .split('\x1e')
         .filter_map(|record| {
-            let record = record.trim();
+            let record = record.trim_matches('\n');
             if record.is_empty() {
                 return None;
             }
@@ -1141,15 +1145,53 @@ fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
             let mut parts = record.split('\x1f');
             let name = parts.next()?.to_string();
             let date = parts.next().unwrap_or_default().to_string();
+            let hash = parts.next()?.to_string();
             let short_hash = parts.next().unwrap_or_default().to_string();
+            let parents = parts
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|part| part.to_string())
+                .collect();
+            let author = parts.next().unwrap_or_default().to_string();
+            let commit_date = parts.next().unwrap_or_default().to_string();
+            let subject = parts.next().unwrap_or_default().to_string();
+            let commit = CommitEntry {
+                hash,
+                short_hash: short_hash.clone(),
+                parents,
+                author,
+                date: commit_date,
+                refs: format!("tag: {name}"),
+                subject,
+                body_preview: None,
+            };
+
             Some(TagEntry {
                 name: name.clone(),
                 date,
                 short_hash,
                 unpushed: unpushed.contains(&name),
+                commit,
             })
         })
         .collect()
+}
+
+fn tag_list(repo_path: &Path, unpushed: &HashSet<String>) -> Vec<TagEntry> {
+    let Ok(output) = git(
+        repo_path,
+        &[
+            "for-each-ref",
+            "refs/tags",
+            "--sort=-creatordate",
+            &format!("--format={TAG_LIST_FORMAT}"),
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    parse_tag_list_output(&output, unpushed)
 }
 
 fn unpushed_without_tracking(repo_path: &Path) -> (u32, u32) {
@@ -1277,7 +1319,15 @@ fn with_repo_status(mut repo: RepoEntry) -> RepoEntry {
     repo
 }
 
-const COMMIT_LOG_PRETTY: &str = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e";
+const COMMIT_LOG_PRETTY: &str =
+    "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1f%b%x1e";
+
+fn commit_body_preview(body: &str) -> Option<String> {
+    body.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
 
 fn parse_commit_log_output(output: &str) -> Vec<CommitEntry> {
     output
@@ -1289,19 +1339,29 @@ fn parse_commit_log_output(output: &str) -> Vec<CommitEntry> {
             }
 
             let mut parts = record.split('\x1f');
+            let hash = parts.next()?.to_string();
+            let short_hash = parts.next()?.to_string();
+            let parents = parts
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|part| part.to_string())
+                .collect();
+            let author = parts.next().unwrap_or_default().to_string();
+            let date = parts.next().unwrap_or_default().to_string();
+            let refs = parts.next().unwrap_or_default().to_string();
+            let subject = parts.next().unwrap_or_default().to_string();
+            let body_preview = commit_body_preview(parts.next().unwrap_or_default());
+
             Some(CommitEntry {
-                hash: parts.next()?.to_string(),
-                short_hash: parts.next()?.to_string(),
-                parents: parts
-                    .next()
-                    .unwrap_or_default()
-                    .split_whitespace()
-                    .map(|part| part.to_string())
-                    .collect(),
-                author: parts.next().unwrap_or_default().to_string(),
-                date: parts.next().unwrap_or_default().to_string(),
-                refs: parts.next().unwrap_or_default().to_string(),
-                subject: parts.next().unwrap_or_default().to_string(),
+                hash,
+                short_hash,
+                parents,
+                author,
+                date,
+                refs,
+                subject,
+                body_preview,
             })
         })
         .collect()
@@ -6167,6 +6227,36 @@ locked under review
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_body_preview_uses_the_first_meaningful_line() {
+        assert_eq!(
+            commit_body_preview("\nExplain the reason\nThen add detail\n"),
+            Some("Explain the reason".to_string())
+        );
+        assert_eq!(commit_body_preview("\n  \n"), None);
+    }
+
+    #[test]
+    fn tag_list_entries_carry_the_commit_the_tag_resolves_to() {
+        let mut unpushed = HashSet::new();
+        unpushed.insert("v2.0.0".to_string());
+        let output = concat!(
+            "v2.0.0\x1f2026-08-03T10:00:00-04:00\x1f",
+            "0123456789abcdef\x1f0123456\x1fparent-one parent-two\x1f",
+            "Codi\x1f2026-08-03T09:45:00-04:00\x1fShip tag navigation\x1e",
+        );
+
+        let tags = parse_tag_list_output(output, &unpushed);
+
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, "v2.0.0");
+        assert!(tags[0].unpushed);
+        assert_eq!(tags[0].commit.hash, "0123456789abcdef");
+        assert_eq!(tags[0].commit.parents, ["parent-one", "parent-two"]);
+        assert_eq!(tags[0].commit.subject, "Ship tag navigation");
+        assert_eq!(tags[0].commit.refs, "tag: v2.0.0");
+    }
 
     #[test]
     fn test_git_urls_equal() {
