@@ -17,6 +17,11 @@ permissions:
 jobs:
   release-macos:
     runs-on: macos-latest
+    # `secrets` is not available in a step-level `if`, so the one thing the
+    # verification step needs to know -- whether signing is configured at all --
+    # is lifted to a job-level env var here.
+    env:
+      SIGNING_CONFIGURED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,8 +55,51 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Signing and notarization happen here rather than in a separate step:
+      # Tauri's bundler imports the certificate, signs the app, submits it to
+      # Apple and staples the ticket itself when these variables are present.
+      #
+      # Every one of them is optional. With none set the job builds exactly as
+      # it did before -- an ad-hoc signature -- so forks and PR runs are
+      # unaffected. That matters because an ad-hoc build is not merely
+      # "unsigned": once a browser sets com.apple.quarantine on the download,
+      # Gatekeeper refuses it outright and reports the app as damaged, which is
+      # what a user sees today rather than the usual "unidentified developer"
+      # prompt they could click through.
       - name: Build macOS bundle
         run: npm run tauri build -- --bundles dmg
+        env:
+          # Base64 of a "Developer ID Application" .p12 and its password.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Not secret: both already appear in .env.macos-signing.example, and a
+          # team ID is embedded in every signed bundle. Kept as secrets only so
+          # the whole block is configured in one place.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Notarization. Apple ID plus an app-specific password, matching
+          # Option A in .env.macos-signing.example.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+
+      # Fails the release rather than publishing something that cannot launch.
+      # Only runs once signing is configured, so it is inert until the secrets
+      # exist.
+      - name: Verify signature and notarization
+        if: env.SIGNING_CONFIGURED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          if [[ -z "$APP" ]]; then
+            echo "No .app produced to verify" >&2
+            exit 1
+          fi
+          echo "Verifying $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # The check that actually predicts whether a downloaded copy opens.
+          spctl -a -vvv -t install "$APP"
+          xcrun stapler validate "$APP"
 
       # The Windows release job publishes to this same tag. Rather than race it
       # for release creation — where whichever job lost would fail with a 422 —
