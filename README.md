@@ -1,6 +1,6 @@
 # Gitty
 
-![Gitty — keyboard-first Git. The Gitty character, shown as it appears when a repository has no changes, beside the app name and tagline.](public/social-preview.png)
+![The Gitty app icon on a quiet dark background.](public/social-preview.png)
 
 **Fast, keyboard-driven Git for macOS, Windows, and Linux.** Stage, review, commit, and push without leaving the keyboard. Gitty is a cross-platform native [Tauri](https://tauri.app/) app — lightweight, instant to open, and built to stay out of your way.
 
