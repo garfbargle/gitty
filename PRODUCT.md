@@ -118,3 +118,9 @@ This repository is a fork whose `main` is the head of a pull request upstream.
 Changes are proposals: separable, individually droppable, with opinion labelled
 as opinion and kept apart from defect. A defect is wrong regardless of design
 direction; everything else is a suggestion the maintainer can decline.
+
+New cross-cutting work follows the registry in `docs/README.md`: research
+preserves evidence, the backlog preserves candidates, the roadmap sequences
+outcomes, specs define accepted behavior, and ADRs record durable technical
+choices. These layers keep a comparison or idea from becoming product direction
+merely because it was documented.

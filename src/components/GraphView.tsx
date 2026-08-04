@@ -1,5 +1,11 @@
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import type { CommitEntry, WorktreeEntry } from "../types";
+import { buildCommitTagMenuItems } from "../lib/commitTags";
 import { buildGraphRows, laneColor } from "../lib/graph";
 import {
   authorInitials,
@@ -11,6 +17,7 @@ import {
 } from "../lib/git";
 import { GitBranch, SquareArrowOutUpRight } from "lucide-react";
 import { TagBadge } from "./TagBadge";
+import { ContextMenu } from "./ContextMenu";
 
 /// Horizontal distance between lanes, and the vertical rhythm of one row. Both
 /// feed the SVG geometry, so the strands and the dots cannot drift apart.
@@ -77,6 +84,11 @@ type GraphViewProps = {
   /// the HEAD of a branch open in another folder.
   worktrees?: WorktreeEntry[];
   onSelect: (commit: CommitEntry) => void;
+  onVisitCommit?: (commit: CommitEntry) => void;
+  onCreateTag?: (commit: CommitEntry) => void;
+  onDeleteTag?: (commit: CommitEntry, name: string) => void;
+  onBranchFrom?: (commit: CommitEntry) => void;
+  onResetTo?: (commit: CommitEntry) => void;
 };
 
 /// The dense end of the visual language: many branches, so colour does identity
@@ -90,8 +102,19 @@ export function GraphView({
   unpushedTags,
   worktrees = [],
   onSelect,
+  onVisitCommit,
+  onCreateTag,
+  onDeleteTag,
+  onBranchFrom,
+  onResetTo,
 }: GraphViewProps) {
   const rows = useMemo(() => buildGraphRows(commits, headHash), [commits, headHash]);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ReturnType<typeof buildCommitTagMenuItems>;
+  } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   // Read once on mount rather than on every render; a throwing localStorage
   // (private mode, disabled storage) must not take the whole view down with it.
   const [legendDismissed, setLegendDismissed] = useState(() => {
@@ -154,6 +177,22 @@ export function GraphView({
     else moveFocus(index, move, list);
   }
 
+  function openCommitContextMenu(event: React.MouseEvent, commit: CommitEntry) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: buildCommitTagMenuItems(commit, {
+        onVisitCommit,
+        onCreateTag,
+        onDeleteTag,
+        onBranchFrom,
+        onResetTo,
+      }),
+    });
+  }
+
   if (rows.length === 0) {
     return <div className="graph-empty">No history to draw.</div>;
   }
@@ -190,6 +229,7 @@ export function GraphView({
                 type="button"
                 className={`graph-row${active ? " active" : ""}${row.onHead ? " on-head" : ""}`}
                 onClick={() => onSelect(row.commit)}
+                onContextMenu={(event) => openCommitContextMenu(event, row.commit)}
                 onKeyDown={(event) => onRowKeyDown(event, index)}
                 tabIndex={index === cursor ? 0 : -1}
                 title={`${row.commit.shortHash} · ${row.commit.subject}`}
@@ -291,9 +331,15 @@ export function GraphView({
                       {folderName(entry.path)}
                     </span>
                   ))}
-                  {tags.map((name) => (
-                    <TagBadge key={name} name={name} unpushed={unpushedTags?.has(name)} muted />
-                  ))}
+                  {tags.length > 0 ? (
+                    <TagBadge
+                      name={tags[0]}
+                      unpushed={unpushedTags?.has(tags[0])}
+                      muted
+                      additionalCount={tags.length - 1}
+                      title={tags.join(", ")}
+                    />
+                  ) : null}
                   <span className="graph-author" title={row.commit.author}>
                     {authorInitials(row.commit.author)}
                   </span>
@@ -305,6 +351,14 @@ export function GraphView({
           );
         })}
       </ol>
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={closeContextMenu}
+        />
+      ) : null}
     </div>
   );
 }

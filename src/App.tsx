@@ -6,7 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Check, FolderPlus, GitBranch, PanelLeft, RefreshCw } from "lucide-react";
 import { ChangesList, type ChangesListHandle } from "./components/ChangesList";
-import { CommitPanel } from "./components/CommitPanel";
+import { CommitInspector, CommitPanel } from "./components/CommitPanel";
 import { ConflictResolver } from "./components/ConflictResolver";
 import { DiffViewer } from "./components/DiffViewer";
 import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
@@ -2230,6 +2230,14 @@ function App() {
     if (result) {
       setMessage(result.message);
       setTagCreateCommit(null);
+      setViewingCommit((current) => {
+        if (!current || current.hash !== commit.hash) return current;
+        const refs = [...new Set([
+          ...current.refs.split(",").map((ref) => ref.trim()).filter(Boolean),
+          `tag: ${name}`,
+        ])].join(", ");
+        return { ...current, refs };
+      });
       await refreshRepo();
     }
   }
@@ -2240,13 +2248,22 @@ function App() {
 
   async function submitDeleteTag() {
     if (!selectedPath || !tagDeleteTarget) return;
-    const { name } = tagDeleteTarget;
+    const { commit, name } = tagDeleteTarget;
     const result = await run(() =>
       invoke<ActionResult>("delete_tag", { path: selectedPath, name }),
     );
     if (result) {
       setMessage(result.message);
       setTagDeleteTarget(null);
+      setViewingCommit((current) => {
+        if (!current || current.hash !== commit.hash) return current;
+        const refs = current.refs
+          .split(",")
+          .map((ref) => ref.trim())
+          .filter((ref) => ref && ref !== `tag: ${name}`)
+          .join(", ");
+        return { ...current, refs };
+      });
       await refreshRepo();
     }
   }
@@ -3291,6 +3308,7 @@ function App() {
                   aheadCommits={displaySnapshot.aheadCommits ?? []}
                   changeCount={displaySnapshot.changes.length}
                   unpushedTags={unpushedTagSet}
+                  repositoryTags={displaySnapshot.tags ?? []}
                   selectedHash={selectedCommit?.hash}
                   workingTreeActive={workingTreeActive}
                   contextLanes={displaySnapshot.timelineContext ?? []}
@@ -3310,6 +3328,27 @@ function App() {
                   onVisitCommit={(commit) => void openCommitInFolder(commit)}
                   onCreateTag={(commit) => openCreateTagDialog(commit)}
                   onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
+                  onSelectTag={(tag) => {
+                    const loadedCommit = [
+                      ...displaySnapshot.commits,
+                      ...(displaySnapshot.aheadCommits ?? []),
+                      ...(displaySnapshot.graphCommits ?? []),
+                    ].find(
+                      (commit) =>
+                        commit.hash === tag.commit?.hash || commit.shortHash === tag.shortHash,
+                    );
+                    const target = loadedCommit ?? tag.commit;
+                    if (target) {
+                      const relatedTagRefs = (displaySnapshot.tags ?? [])
+                        .filter((entry) => entry.commit?.hash === target.hash)
+                        .map((entry) => `tag: ${entry.name}`);
+                      const refs = [...new Set([
+                        ...target.refs.split(",").map((ref) => ref.trim()).filter(Boolean),
+                        ...relatedTagRefs,
+                      ])].join(", ");
+                      void inspectCommit({ ...target, refs });
+                    }
+                  }}
                   onBranchFrom={(commit) => {
                     setBranchFromCommit(commit);
                     setBranchCreateOpen(true);
@@ -3435,21 +3474,42 @@ function App() {
                     </aside>
                   </div>
                 ) : historyView === "graph" ? (
-                  <GraphView
-                    commits={displaySnapshot.graphCommits ?? []}
-                    headHash={displaySnapshot.commits[0]?.hash}
-                    headBranch={displaySnapshot.branch}
-                    selectedHash={selectedCommit?.hash}
-                    unpushedTags={unpushedTagSet}
-                    worktrees={worktrees}
-                    onSelect={(commit) => {
-                      // Picking a commit here is picking it in the app, not just
-                      // in this view: land on it in the normal view, the same
-                      // state as selecting it on the timeline.
-                      setHistoryView("strip");
-                      void inspectCommit(commit);
-                    }}
-                  />
+                  <div className="graph-workspace">
+                    <GraphView
+                      commits={displaySnapshot.graphCommits ?? []}
+                      headHash={displaySnapshot.commits[0]?.hash}
+                      headBranch={displaySnapshot.branch}
+                      selectedHash={selectedCommit?.hash}
+                      unpushedTags={unpushedTagSet}
+                      worktrees={worktrees}
+                      onSelect={(commit) => void inspectCommit(commit)}
+                      onVisitCommit={(commit) => void openCommitInFolder(commit)}
+                      onCreateTag={(commit) => openCreateTagDialog(commit)}
+                      onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
+                      onBranchFrom={(commit) => {
+                        setBranchFromCommit(commit);
+                        setBranchCreateOpen(true);
+                      }}
+                      onResetTo={(commit) => setResetToTarget(commit)}
+                    />
+                    <aside className="graph-inspector-panel">
+                      {selectedCommit ? (
+                        <CommitInspector
+                          commit={selectedCommit}
+                          message={viewingCommitMessage}
+                          unpushedTags={unpushedTagSet}
+                          onCreateTag={(commit) => openCreateTagDialog(commit)}
+                          onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
+                        />
+                      ) : (
+                        <div className="graph-inspector-empty">
+                          <GitBranch size={18} aria-hidden />
+                          <h3>Inspect a commit</h3>
+                          <p>Select a row to see its full message, identity, and tags.</p>
+                        </div>
+                      )}
+                    </aside>
+                  </div>
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
                 ) : (
@@ -3564,6 +3624,7 @@ function App() {
                       resetMode={resetMode}
                       selectedCommit={selectedCommit}
                       selectedCommitMessage={viewingCommitMessage}
+                      unpushedTags={unpushedTagSet}
                       stagedCount={stagedCount}
                       unstagedCount={unstagedCount}
                       changeCount={changeCount}
@@ -3599,6 +3660,8 @@ function App() {
                       onReset={() => void reset()}
                       onSetupRemote={() => openRepoSettings()}
                       onStartBranch={() => setBranchCreateOpen(true)}
+                      onCreateTag={(commit) => openCreateTagDialog(commit)}
+                      onDeleteTag={(commit, name) => openDeleteTagDialog(commit, name)}
                       disabled={loading}
                     />
                     )}

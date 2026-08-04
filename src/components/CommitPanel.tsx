@@ -5,13 +5,15 @@ import {
   GitCommitHorizontal,
   Link2,
   Loader2,
+  Plus,
   RotateCcw,
   Sparkles,
   X,
 } from "lucide-react";
 import type { BranchEntry, CommitEntry } from "../types";
 import { SHORTCUT } from "../lib/shortcuts";
-import { branchRefs, formatDate, formatRelativeTime } from "../lib/git";
+import { branchRefs, formatDate, formatRelativeTime, tagName, tagRefs } from "../lib/git";
+import { TagBadge } from "./TagBadge";
 
 const NVIDIA_MODELS_URL = "https://build.nvidia.com/models";
 
@@ -26,6 +28,7 @@ type CommitPanelProps = {
   resetMode: "soft" | "hard";
   selectedCommit?: CommitEntry | null;
   selectedCommitMessage?: string;
+  unpushedTags?: Set<string>;
   stagedCount: number;
   unstagedCount: number;
   changeCount: number;
@@ -63,8 +66,92 @@ type CommitPanelProps = {
   onReset: () => void;
   onSetupRemote: () => void;
   onStartBranch?: () => void;
+  onCreateTag?: (commit: CommitEntry) => void;
+  onDeleteTag?: (commit: CommitEntry, name: string) => void;
   disabled?: boolean;
 };
+
+type CommitInspectorProps = {
+  commit: CommitEntry;
+  message?: string;
+  unpushedTags?: Set<string>;
+  onCreateTag?: (commit: CommitEntry) => void;
+  onDeleteTag?: (commit: CommitEntry, name: string) => void;
+};
+
+export function CommitInspector({
+  commit,
+  message = "",
+  unpushedTags,
+  onCreateTag,
+  onDeleteTag,
+}: CommitInspectorProps) {
+  const fullMessage = (message || commit.subject).trim();
+  const body = fullMessage.split("\n").slice(1).join("\n").trim();
+  const refs = branchRefs(commit.refs);
+  const tags = tagRefs(commit.refs).map(tagName);
+
+  return (
+    <section className="panel-block commit-inspector">
+      <h3 className="commit-inspector-subject">{commit.subject}</h3>
+
+      {body ? <p className="commit-inspector-body">{body}</p> : null}
+
+      <dl className="commit-inspector-meta">
+        <dt>Author</dt>
+        <dd>{commit.author}</dd>
+        <dt>When</dt>
+        <dd title={formatDate(commit.date)}>{formatRelativeTime(commit.date)}</dd>
+        <dt>Commit</dt>
+        <dd>
+          <code>{commit.shortHash}</code>
+        </dd>
+      </dl>
+
+      {refs.length > 0 ? (
+        <div className="commit-inspector-refs">
+          {refs.map((ref) => (
+            <span key={ref} className="commit-inspector-ref">
+              <GitBranch size={10} aria-hidden />
+              {ref.replace(/^HEAD -> /, "")}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="commit-inspector-tags-head">
+        <span>Tags</span>
+        {onCreateTag ? (
+          <button type="button" onClick={() => onCreateTag(commit)}>
+            <Plus size={11} aria-hidden />
+            Add tag
+          </button>
+        ) : null}
+      </div>
+      {tags.length > 0 ? (
+        <div className="commit-inspector-tags">
+          {tags.map((name) => (
+            <span className="commit-inspector-tag" key={name}>
+              <TagBadge name={name} unpushed={unpushedTags?.has(name)} />
+              {onDeleteTag ? (
+                <button
+                  type="button"
+                  onClick={() => onDeleteTag(commit, name)}
+                  aria-label={`Delete tag ${name}`}
+                  title={`Delete ${name}`}
+                >
+                  <X size={11} aria-hidden />
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="commit-inspector-tags-empty">No tags on this commit.</p>
+      )}
+    </section>
+  );
+}
 
 export function CommitPanel({
   message,
@@ -77,6 +164,7 @@ export function CommitPanel({
   resetMode,
   selectedCommit,
   selectedCommitMessage = "",
+  unpushedTags,
   stagedCount,
   unstagedCount,
   changeCount,
@@ -112,6 +200,8 @@ export function CommitPanel({
   onReset,
   onSetupRemote,
   onStartBranch,
+  onCreateTag,
+  onDeleteTag,
   disabled,
 }: CommitPanelProps) {
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -188,47 +278,19 @@ export function CommitPanel({
 
   const panelTitle = nvidiaApiKeyConfigured ? "What's in this" : "AI Auto Summarize";
 
-  // The subject is the first line; anything after the blank line is the body,
-  // which is where the reasoning usually lives and where a diff is silent.
-  const fullMessage = (selectedCommitMessage || selectedCommit?.subject || "").trim();
-  const body = fullMessage.split("\n").slice(1).join("\n").trim();
-  const refs = selectedCommit ? branchRefs(selectedCommit.refs) : [];
-
   return (
     <aside className="commit-panel">
       {/* Viewing a commit used to leave this panel empty: the diff was on
           screen with nothing saying which commit it belonged to, who wrote it
           or when. The message is the part a diff cannot tell you. */}
       {selectedCommit ? (
-        <section className="panel-block commit-inspector">
-          <h3 className="commit-inspector-subject">{selectedCommit.subject}</h3>
-
-          {body ? <p className="commit-inspector-body">{body}</p> : null}
-
-          <dl className="commit-inspector-meta">
-            <dt>Author</dt>
-            <dd>{selectedCommit.author}</dd>
-            <dt>When</dt>
-            <dd title={formatDate(selectedCommit.date)}>
-              {formatRelativeTime(selectedCommit.date)}
-            </dd>
-            <dt>Commit</dt>
-            <dd>
-              <code>{selectedCommit.shortHash}</code>
-            </dd>
-          </dl>
-
-          {refs.length > 0 ? (
-            <div className="commit-inspector-refs">
-              {refs.map((ref) => (
-                <span key={ref} className="commit-inspector-ref">
-                  <GitBranch size={10} aria-hidden />
-                  {ref.replace(/^HEAD -> /, "")}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </section>
+        <CommitInspector
+          commit={selectedCommit}
+          message={selectedCommitMessage}
+          unpushedTags={unpushedTags}
+          onCreateTag={onCreateTag}
+          onDeleteTag={onDeleteTag}
+        />
       ) : null}
 
       {showStartBranch ? (

@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-03T17:08:48Z",
+  "title": "Design System: Gitty",
+  "extensions": {
+    "colorMeta": {
+      "daylight-canvas": {
+        "role": "neutral",
+        "displayName": "Daylight Canvas",
+        "canonical": "#f4f6f9",
+        "tonalRamp": ["#181a1d", "#303338", "#555a61", "#7d838b", "#a7adb4", "#cbd0d5", "#e5e8eb", "#f4f6f9"]
+      },
+      "daylight-panel": {
+        "role": "neutral",
+        "displayName": "Daylight Panel",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#191919", "#333333", "#595959", "#808080", "#a6a6a6", "#cccccc", "#e6e6e6", "#ffffff"]
+      },
+      "daylight-sidebar": {
+        "role": "neutral",
+        "displayName": "Daylight Sidebar",
+        "canonical": "#eef1f6",
+        "tonalRamp": ["#17181a", "#2f3033", "#53565a", "#797d83", "#a1a5ab", "#c5c9cf", "#dfe2e7", "#eef1f6"]
+      },
+      "daylight-ink": {
+        "role": "neutral",
+        "displayName": "Daylight Ink",
+        "canonical": "#111827",
+        "tonalRamp": ["#111827", "#263044", "#475167", "#69758d", "#909bb0", "#b7c0d0", "#dce1e9", "#f1f3f6"]
+      },
+      "daylight-secondary": {
+        "role": "neutral",
+        "displayName": "Daylight Secondary",
+        "canonical": "#4b5563",
+        "tonalRamp": ["#181b1f", "#30363e", "#4b5563", "#707b89", "#99a2ad", "#bdc4cc", "#dce0e4", "#f2f3f5"]
+      },
+      "daylight-line": {
+        "role": "neutral",
+        "displayName": "Daylight Line",
+        "canonical": "#dde3ec",
+        "tonalRamp": ["#17191c", "#2e3237", "#515860", "#767f8a", "#9da6b0", "#c0c7cf", "#dde3ec", "#f1f4f8"]
+      },
+      "night-canvas": {
+        "role": "neutral",
+        "displayName": "Night Canvas",
+        "canonical": "#0c0f14",
+        "tonalRamp": ["#0c0f14", "#242931", "#444a54", "#686f7a", "#9097a1", "#b8bdc4", "#dce0e4", "#f3f4f6"]
+      },
+      "night-panel": {
+        "role": "neutral",
+        "displayName": "Night Panel",
+        "canonical": "#12161e",
+        "tonalRamp": ["#12161e", "#2a303a", "#4a515e", "#6e7683", "#959da8", "#bbc1c8", "#dde1e5", "#f3f4f6"]
+      },
+      "night-elevated": {
+        "role": "neutral",
+        "displayName": "Night Elevated",
+        "canonical": "#171c26",
+        "tonalRamp": ["#171c26", "#303642", "#505764", "#747b88", "#9aa1ab", "#bec3ca", "#dfe2e6", "#f4f5f6"]
+      },
+      "night-ink": {
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "canonical": "#eef2f7",
+        "tonalRamp": ["#17191c", "#2f3237", "#53585f", "#797f87", "#a1a7ae", "#c5cad0", "#dfe3e8", "#eef2f7"]
+      },
+      "instrument-blue": {
+        "role": "primary",
+        "displayName": "Instrument Blue",
+        "canonical": "#2563eb",
+        "tonalRamp": ["#07183f", "#0b2f78", "#1548aa", "#2563eb", "#5687f1", "#89adf6", "#bfd2fb", "#edf3ff"]
+      },
+      "instrument-blue-night": {
+        "role": "primary",
+        "displayName": "Instrument Blue Night",
+        "canonical": "#4d9eff",
+        "tonalRamp": ["#071b36", "#0b3769", "#15569d", "#2679d6", "#4d9eff", "#83bcff", "#bbd9ff", "#edf6ff"]
+      },
+      "working-green": {
+        "role": "secondary",
+        "displayName": "Working Green",
+        "canonical": "#10b981",
+        "tonalRamp": ["#05291f", "#07523c", "#087a59", "#0ca071", "#10b981", "#56d2a8", "#9ae6cc", "#e8faf4"]
+      },
+      "attention-amber": {
+        "role": "tertiary",
+        "displayName": "Attention Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": ["#351c02", "#693903", "#9c5905", "#ce7b07", "#f59e0b", "#f9bd55", "#fbd995", "#fff5dd"]
+      },
+      "stop-red": {
+        "role": "tertiary",
+        "displayName": "Stop Red",
+        "canonical": "#ef4444",
+        "tonalRamp": ["#350809", "#681012", "#9b1c20", "#cb2d31", "#ef4444", "#f47b78", "#f9b2af", "#feeeee"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Panel Headline", "purpose": "Panel headings and rare high-level moments." },
+      "title": { "displayName": "Focused Title", "purpose": "Inspector subjects, dialogs, and focused content." },
+      "body": { "displayName": "Interface Body", "purpose": "Primary prose, controls, and row content." },
+      "label": { "displayName": "Compact Label", "purpose": "Metadata, compact navigation, and status." },
+      "timeline": { "displayName": "Timeline Preview", "purpose": "Quiet, human-readable commit subjects in the horizontal history strip." },
+      "caption": { "displayName": "Instrument Caption", "purpose": "Timestamps and tertiary annotations." },
+      "mono": { "displayName": "Machine Identity", "purpose": "Hashes, file paths, diffs, and command output." }
+    },
+    "shadows": [
+      { "name": "low-lift-light", "value": "0 1px 3px rgba(0,0,0,0.06)", "purpose": "Active segmented controls and small raised surfaces in light mode." },
+      { "name": "low-lift-dark", "value": "0 1px 3px rgba(0,0,0,0.35)", "purpose": "Active segmented controls and small raised surfaces in dark mode." },
+      { "name": "overlay-lift", "value": "0 8px 24px rgba(0,0,0,0.12)", "purpose": "Context menus, popovers, and dialogs only." }
+    ],
+    "motion": [
+      { "name": "state", "value": "120ms ease", "purpose": "Hover, focus, selection, and compact control feedback." },
+      { "name": "shell", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Panel and shell transitions." },
+      { "name": "reduced", "value": "0.01ms", "purpose": "Disable decorative motion when reduced motion is requested." }
+    ],
+    "breakpoints": [
+      { "name": "minimum-window", "value": "960px" },
+      { "name": "compact-shell", "value": "1100px" },
+      { "name": "default-shell", "value": "1280px" },
+      { "name": "wide-shell", "value": "1600px" },
+      { "name": "ultrawide-shell", "value": "2000px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Working Button",
+      "kind": "button",
+      "refersTo": "button-working",
+      "description": "Consequential, verified actions such as Commit and Push.",
+      "html": "<button class=\"ds-button-working\">Commit changes</button>",
+      "css": ".ds-button-working { min-height: 40px; padding: 0 12px; border: 1px solid transparent; border-radius: 7px; background: var(--success, #10b981); color: #111827; font: 600 12px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; transition: filter 120ms ease, transform 120ms ease; } .ds-button-working:hover { filter: brightness(0.96); } .ds-button-working:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-button-working:active { transform: scale(0.98); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Compact secondary actions that should not compete with repository data.",
+      "html": "<button class=\"ds-button-ghost\">Copy SHA</button>",
+      "css": ".ds-button-ghost { min-height: 32px; padding: 0 10px; border: 1px solid var(--border, #dde3ec); border-radius: 7px; background: transparent; color: var(--text-secondary, #4b5563); font: 600 12px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; transition: background 120ms ease, transform 120ms ease; } .ds-button-ghost:hover { background: var(--bg-hover, #eef2f8); } .ds-button-ghost:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-button-ghost:active { transform: scale(0.98); }"
+    },
+    {
+      "name": "Tag Reference",
+      "kind": "chip",
+      "refersTo": "tag-reference",
+      "description": "A repository reference attached to a commit, with an explicit unpushed state.",
+      "html": "<span class=\"ds-tag-reference ds-tag-unpushed\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M2 3.5A1.5 1.5 0 0 1 3.5 2H8l6 6-6 6-6-6V3.5Zm3 .5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z\" fill=\"currentColor\"/></svg>v0.27.0</span>",
+      "css": ".ds-tag-reference { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--accent, #2563eb) 35%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); color: var(--accent, #2563eb); font: 600 10px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-tag-reference svg { width: 11px; height: 11px; } .ds-tag-reference:hover { background: color-mix(in srgb, var(--accent, #2563eb) 18%, transparent); } .ds-tag-reference:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-tag-unpushed { border-style: dashed; }"
+    },
+    {
+      "name": "Repository Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Compact text entry for branch names, tags, search, and commit messages.",
+      "html": "<input class=\"ds-input\" value=\"v0.27.1\" aria-label=\"Tag name\" />",
+      "css": ".ds-input { min-height: 34px; padding: 7px 10px; border: 1px solid var(--border, #dde3ec); border-radius: 7px; background: var(--bg-input, #ffffff); color: var(--text, #111827); font: 400 14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; transition: border-color 120ms ease, background 120ms ease; } .ds-input:hover { border-color: var(--border-strong, #8695ab); } .ds-input:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-input:disabled { opacity: 0.58; }"
+    },
+    {
+      "name": "View Switch",
+      "kind": "nav",
+      "refersTo": "view-switch",
+      "description": "Switches between the default Timeline and the dense Branches view without changing selection.",
+      "html": "<nav class=\"ds-view-switch\" aria-label=\"History view\"><button class=\"ds-view-option ds-view-active\">Timeline</button><button class=\"ds-view-option\">Branches</button></nav>",
+      "css": ".ds-view-switch { display: inline-flex; padding: 2px; border: 1px solid var(--border, #dde3ec); border-radius: 999px; background: var(--bg-base, #f4f6f9); } .ds-view-option { min-height: 28px; padding: 4px 12px; border: 0; border-radius: 999px; background: transparent; color: var(--text-secondary, #4b5563); font: 600 12px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; transition: background 120ms ease, color 120ms ease; } .ds-view-option:hover { color: var(--text, #111827); } .ds-view-option:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-view-active { background: var(--bg-elevated, #ffffff); color: var(--text, #111827); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }"
+    },
+    {
+      "name": "Timeline Commit",
+      "kind": "custom",
+      "refersTo": "timeline-node",
+      "description": "The signature horizontal commit preview, led by human meaning, annotated with tags, and selected on one fixed cursor baseline shared with Now.",
+      "html": "<button class=\"ds-timeline-node\"><span class=\"ds-timeline-message\"><span class=\"ds-timeline-subject\">Bring tags into both views</span><span class=\"ds-timeline-body\">Keep release identity available everywhere</span></span><span class=\"ds-timeline-meta\"><span class=\"ds-timeline-tag\">v0.27.0 +2</span><time>2h</time></span></button>",
+      "css": ".ds-timeline-node { width: 148px; min-height: 60px; display: grid; gap: 4px; padding: 6px 8px; border: 1px solid var(--border, #dde3ec); border-radius: 7px; background: var(--bg-panel, #ffffff); color: var(--text, #111827); text-align: left; transition: border-color 120ms ease, background 120ms ease; } .ds-timeline-node:hover { background: var(--bg-hover, #eef2f8); } .ds-timeline-node:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-timeline-message { display: flex; flex-direction: column; min-width: 0; } .ds-timeline-subject, .ds-timeline-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-timeline-subject { color: var(--text, #111827); font: 400 12px/1.2 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-timeline-body { color: var(--text-muted, #6b7280); font: 400 10px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-timeline-meta { display: flex; align-items: center; justify-content: space-between; gap: 4px; color: var(--text-muted, #6b7280); font: 500 10px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-timeline-tag { overflow: hidden; padding: 1px 5px; border-radius: 999px; background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); color: var(--accent, #2563eb); text-overflow: ellipsis; white-space: nowrap; }"
+    },
+    {
+      "name": "Commit Inspector",
+      "kind": "card",
+      "refersTo": "commit-inspector",
+      "description": "A shared detail surface for the selected commit in either history view.",
+      "html": "<article class=\"ds-inspector\"><h3>Bring tags into both views</h3><p>Restores the human-readable timeline preview and makes tag state actionable.</p><dl><div><dt>Commit</dt><dd>8f31c2a</dd></div><div><dt>Tags</dt><dd><span>v0.27.0</span></dd></div></dl></article>",
+      "css": ".ds-inspector { max-width: 320px; padding: 16px; border: 1px solid var(--border, #dde3ec); border-radius: 10px; background: var(--bg-panel, #ffffff); color: var(--text, #111827); } .ds-inspector:hover { border-color: var(--border-strong, #8695ab); } .ds-inspector:focus-within { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; } .ds-inspector h3 { margin: 0 0 8px; font: 600 16px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-inspector p { margin: 0 0 12px; color: var(--text-secondary, #4b5563); font: 400 12px/1.6 Inter, ui-sans-serif, system-ui, sans-serif; } .ds-inspector dl { display: grid; gap: 6px; margin: 0; } .ds-inspector dl div { display: grid; grid-template-columns: 64px 1fr; gap: 8px; } .ds-inspector dt { color: var(--text-muted, #6b7280); font: 600 10px/1.25 Inter, ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; } .ds-inspector dd { margin: 0; font: 400 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; } .ds-inspector dd span { padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent); color: var(--accent, #2563eb); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Working Instrument",
+    "overview": "Gitty should feel like a trusted instrument on a developer's desk: quiet at rest, exact under pressure, and satisfying to operate repeatedly. Imagine it moving from a bright daytime office to a dim late-night monitor while its maker builds Gitty inside Gitty. The interface follows the environment, preserves spatial memory, and keeps the repository itself louder than the chrome.\n\nThis is a compact, tactile system built from type, measured spacing, structural borders, and restrained signal color. It rejects lane forests, ornamental dashboards, decorative color, glass effects, and platform mimicry. Information density is welcome when hierarchy remains immediate.",
+    "keyCharacteristics": [
+      "Quiet, exact, and self-hosting.",
+      "Compact controls with generous interaction targets.",
+      "Structural layering instead of ornamental effects.",
+      "Signal colors reserved for branch identity, availability, and state.",
+      "One continuous timeline with a denser branch graph on demand."
+    ],
+    "rules": [
+      { "name": "The Color Has a Job Rule", "body": "Fill answers \"do I have this,\" weight answers \"is this my line,\" color answers \"which branch\" or \"what state,\" and shape or decoration distinguishes state within a single timeline.", "section": "colors" },
+      { "name": "The Meaning Before Identity Rule", "body": "Show the commit subject before the hash in both Timeline and Branches. A hash is metadata, not a human-scannable title.", "section": "typography" },
+      { "name": "The Flat Until Floating Rule", "body": "Surfaces remain flat at rest. Shadows appear only when a control rises or content floats above another interaction plane.", "section": "elevation" },
+      { "name": "The Mark Carries the Card Rule", "body": "Link previews use the exact shipping app icon on a quiet Night Canvas field. Metadata carries the title and description; the bitmap does not repeat them.", "section": "brand" }
+    ],
+    "dos": [
+      "Do preserve Timeline as the default and Branches as a dense view on demand.",
+      "Do keep the timeline selection cursor on one fixed baseline beneath commits and the pinned Now chrome.",
+      "Do lead every commit representation with its subject and keep the hash available as secondary monospace metadata.",
+      "Do expose tag creation, deletion, copying, and inspection from both views and the shared inspector.",
+      "Do keep unknown state explicit and verify repository state before asserting it.",
+      "Do honor system light, dark, and reduced-motion preferences across platforms."
+    ],
+    "donts": [
+      "Don't introduce lane forests into the horizontal timeline.",
+      "Don't expose raw Git error text without translating it into a clear next action.",
+      "Don't use decorative color; every accent must identify a branch, availability, or state.",
+      "Don't let the interface assert unverified state.",
+      "Don't rely on Apple-specific styling or behavior for core polish.",
+      "Don't use glassmorphism, gradients, colored side stripes, nested cards, or shadows on resting surfaces."
+    ]
+  }
+}

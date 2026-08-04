@@ -117,10 +117,10 @@
   --timeline-rail-gap: 8px;
   /* The stack above the dot, so the rail can be placed from the same numbers
      the node is built from rather than a constant that silently stops matching
-     when the stack changes. hash 16 + one 2px gap puts the dot's centre at 24. */
-  --timeline-hash-h: 16px;
+     when the stack changes. title 16 + one 2px gap puts the dot's centre at 24. */
+  --timeline-title-h: 30px;
   --timeline-stack-gap: 2px;
-  --timeline-node-width: 132px;
+  --timeline-node-width: 148px;
   /* One height for every node, so they never differ and the selection frame is
      the same size on all of them. Sized to the real stack — dot 12, hash 16,
      time 14, two 2px gaps.
@@ -132,12 +132,9 @@
      which is what made the row read as pinned to the top of the band. It is
      added back only when something in view is actually tagged.
 
-     The commit message used to take a fourth line here. At 132px it clipped to
-     a few characters, often mid-word, which is not enough to recognise a commit
-     by; the inspector carries it in full instead. The working-tree node still
-     uses .node-subject for its state word ("no changes"), which is short and
-     always fits — it has no time line, so it sits inside this height. */
-  --timeline-node-height: 47px;
+     A commit subject takes the first line and its metadata shares the last.
+     The working-tree node uses the same height for its short state message. */
+  --timeline-node-height: 60px;
 
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -2146,12 +2143,12 @@ button:focus-visible {
   height: var(--timeline-rail-thickness);
   left: calc(50% + var(--timeline-dot-size) / 2 + var(--timeline-rail-gap));
   position: absolute;
-  /* The dot is no longer the first child: the hash sits above it and the time
+  /* The dot is no longer the first child: the subject sits above it and metadata
      below, so the rail runs through the middle of the row. Derived from the
      stack rather than hard-coded, so moving a line does not leave the rail
      4px off the dots the way a constant did before. */
   top: calc(
-    var(--timeline-hash-h) + var(--timeline-stack-gap) +
+    var(--timeline-title-h) + var(--timeline-stack-gap) +
       (var(--timeline-dot-size) - var(--timeline-rail-thickness)) / 2
   );
   width: calc(100% - var(--timeline-dot-size) - var(--timeline-rail-gap) * 2);
@@ -2199,6 +2196,13 @@ button:focus-visible {
   box-shadow: 0 0 10px color-mix(in srgb, var(--success) 55%, transparent);
 }
 
+/* The pinned Now chrome spans the track's vertical padding as well as the
+   60px node, so `top: 100%` would place its cursor below the scroller. Keep it
+   on the same baseline as every commit cursor: track padding + node + gap. */
+.timeline-node.working-tree.pinned.active::before {
+  top: calc(var(--space-2) + var(--timeline-node-height) + 3px);
+}
+
 /* Selected goes a step brighter again, so the cursor is not the only signal. */
 .timeline-node.active .node-hash {
   color: var(--text);
@@ -2210,6 +2214,17 @@ button:focus-visible {
   position: relative;
   width: var(--timeline-dot-size);
   z-index: 1;
+}
+
+/* A ring says "this point is named" without spending branch or state colour.
+   It is drawn outside the dot so pushed and unpushed fills stay unchanged. */
+.timeline-node.tagged .node-dot::after {
+  border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  border-radius: 50%;
+  content: "";
+  inset: -4px;
+  pointer-events: none;
+  position: absolute;
 }
 
 /* The working tree has no dot. Every other dot marks a commit sitting on the
@@ -2243,6 +2258,7 @@ button:focus-visible {
   /* "Now" and its state line were 2px apart in the same colour, so they read as
      one wrapped phrase rather than a label and the thing it reports. */
   gap: var(--space-1-5);
+  justify-content: center;
 }
 
 /* The state line is what "Now" is telling you, so it sits a step back from the
@@ -2318,14 +2334,16 @@ button:focus-visible {
 
 /* The band the label lives in: from the boundary to the end of the track, so
    there is something on screen for the label to stick to long after the commit
-   it marks has scrolled off the left. Zero height — it exists only to give the
-   sticky label a containing block wide enough to survive. */
+   it marks has scrolled off the left. Its inline top is the rail centre after
+   any context lanes, so the label and the boundary intersection share one
+   anchor instead of being independently positioned. */
 .push-boundary-flag {
+  align-items: center;
+  display: flex;
   height: 0;
   pointer-events: none;
   position: absolute;
   right: 0;
-  top: 0;
   z-index: 3;
 }
 
@@ -2342,7 +2360,10 @@ button:focus-visible {
   display: inline-flex;
   font-family: var(--font-ui);
   font-size: var(--text-2xs);
-  left: var(--space-2);
+  /* At its natural position the translated centre sits exactly on the dashed
+     boundary. If that boundary scrolls offscreen, sticky keeps the whole pill
+     visible with its centre 42px from the viewport edge. */
+  left: 42px;
   letter-spacing: var(--tracking-caps);
   line-height: 1;
   padding: 3px var(--space-2);
@@ -2350,7 +2371,7 @@ button:focus-visible {
      in view, then travels with the boundary once it comes back on screen. */
   position: sticky;
   text-transform: uppercase;
-  top: 0;
+  transform: translateX(-50%);
   white-space: nowrap;
 }
 
@@ -2405,6 +2426,48 @@ button:focus-visible {
   z-index: 1;
 }
 
+.node-message {
+  display: flex;
+  flex-direction: column;
+  height: var(--timeline-title-h);
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.node-message .node-commit-subject {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  line-height: 14px;
+  width: 100%;
+}
+
+/* A subject-only message gets both lines. When a body exists, each part owns
+   one line so the hierarchy remains stable from node to node. */
+.node-message:not(.has-body) .node-commit-subject {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.node-message.has-body .node-commit-subject {
+  white-space: nowrap;
+}
+
+.node-body-preview {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
 .timeline-node.active .node-subject {
   color: var(--text);
 }
@@ -2423,6 +2486,10 @@ button:focus-visible {
   letter-spacing: 0.04em;
   padding: 1px 6px;
   text-transform: uppercase;
+}
+
+.timeline-node.ahead .node-time {
+  display: none;
 }
 
 /* `.node-connector` removed: it drew a second rail directly underneath
@@ -2455,6 +2522,10 @@ button:focus-visible {
 
 /* Row one: the controls. */
 .timeline-context-bar > .view-switch {
+  order: 1;
+}
+
+.timeline-context-bar > .tag-browser {
   order: 1;
 }
 
@@ -3993,6 +4064,22 @@ button.context-chip.pullable.busy,
   white-space: nowrap;
 }
 
+.tag-badge > svg,
+.tag-badge-count {
+  flex-shrink: 0;
+}
+
+.tag-badge-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-badge-count {
+  color: currentColor;
+  font-variant-numeric: tabular-nums;
+}
+
 .tag-badge.muted {
   background: var(--bg-hover);
   border-color: var(--border-subtle);
@@ -4048,6 +4135,7 @@ button.context-chip.pullable.busy,
   display: flex;
   gap: var(--space-1);
   justify-content: center;
+  height: 14px;
   max-width: 100%;
   min-width: 0;
   position: relative;
@@ -4065,6 +4153,220 @@ button.context-chip.pullable.busy,
   flex-wrap: nowrap;
   min-width: 0;
   overflow: hidden;
+}
+
+.node-tags .tag-badge {
+  box-sizing: border-box;
+  height: 14px;
+  line-height: 1;
+  max-width: 76px;
+  padding: 0 4px;
+}
+
+.node-tags .tag-badge > svg {
+  height: 8px;
+  width: 8px;
+}
+
+/* Repository-wide tags are a peer tool beside the view switch, not a third
+   history mode. The popover floats so opening it never moves the timeline. */
+.tag-browser {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 8;
+}
+
+.tag-browser-trigger {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 10px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.tag-browser-trigger:hover,
+.tag-browser-trigger.active {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.tag-browser-trigger em {
+  background: var(--accent-soft);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  min-width: 18px;
+  padding: 1px 5px;
+  text-align: center;
+}
+
+.tag-browser-popover {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), 0 8px 24px rgb(0 0 0 / 0.16);
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  max-height: min(460px, 65vh);
+  overflow: hidden;
+  padding: var(--space-2);
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  width: min(380px, calc(100vw - 48px));
+}
+
+.tag-browser-search {
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.tag-browser-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tag-browser-search input {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  flex: 1;
+  font-size: var(--text-sm);
+  min-height: 34px;
+  min-width: 0;
+  outline: 0;
+}
+
+.tag-browser-summary {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--text-2xs);
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-1) var(--space-1);
+}
+
+.tag-browser-summary em {
+  font-style: normal;
+}
+
+.tag-browser-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.tag-browser-list li {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  display: flex;
+  min-width: 0;
+}
+
+.tag-browser-list li:hover {
+  background: var(--bg-hover);
+}
+
+.tag-browser-row {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  flex: 1;
+  gap: var(--space-2);
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  min-width: 0;
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.tag-browser-row .tag-badge {
+  max-width: 126px;
+}
+
+.tag-browser-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tag-browser-row-copy strong {
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-browser-row-copy small {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-browser-row-copy code {
+  font-family: var(--font-mono);
+}
+
+.tag-browser-delete {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  margin-right: var(--space-1);
+  opacity: 0;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+  width: 28px;
+}
+
+.tag-browser-list li:hover .tag-browser-delete,
+.tag-browser-delete:focus-visible {
+  opacity: 1;
+}
+
+.tag-browser-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.tag-browser-empty {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  margin: 0;
+  padding: var(--space-5) var(--space-2);
+  text-align: center;
 }
 
 
@@ -5297,6 +5599,17 @@ button.context-chip.pullable.busy,
   font-style: italic;
 }
 
+.timeline-node.merge-preview > .node-hash {
+  align-items: center;
+  display: flex;
+  height: var(--timeline-title-h);
+  justify-content: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .timeline-node.merge-preview.merged .merge-preview-dot {
   background: var(--success);
   border-color: var(--success);
@@ -5907,9 +6220,55 @@ button.context-chip.pullable.busy,
 
 .graph-view {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   padding: var(--space-2) 0 var(--space-6);
+}
+
+.graph-workspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) var(--commit-panel-width);
+  min-height: 0;
+}
+
+.graph-workspace > .graph-view {
+  border-right: 1px solid var(--border);
+}
+
+.graph-inspector-panel {
+  background: var(--bg-panel);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.graph-inspector-panel .commit-inspector {
+  border-bottom: 0;
+}
+
+.graph-inspector-empty {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+
+.graph-inspector-empty h3 {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  margin: 0;
+}
+
+.graph-inspector-empty p {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  margin: 0;
+  max-width: 24ch;
 }
 
 .graph-rows {
@@ -6158,7 +6517,7 @@ button.context-chip.pullable.busy,
   display: inline-flex;
   flex-shrink: 0;
   gap: 2px;
-  margin-right: var(--space-2);
+  margin-right: 0;
   padding: 2px;
 }
 
@@ -6457,4 +6816,76 @@ button.context-chip.pullable.busy,
   font-size: var(--text-2xs);
   gap: 4px;
   padding: 1px 6px;
+}
+
+.commit-inspector-tags-head {
+  align-items: center;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  justify-content: space-between;
+  letter-spacing: var(--tracking-caps);
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  text-transform: uppercase;
+}
+
+.commit-inspector-tags-head button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  gap: 3px;
+  letter-spacing: 0;
+  padding: 3px 5px;
+  text-transform: none;
+}
+
+.commit-inspector-tags-head button:hover {
+  background: var(--accent-soft);
+}
+
+.commit-inspector-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.commit-inspector-tag {
+  align-items: center;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.commit-inspector-tag > button {
+  align-items: center;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 21px;
+  justify-content: center;
+  margin-left: -5px;
+  padding: 0 5px 0 6px;
+}
+
+.commit-inspector-tag > button:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.commit-inspector-tags-empty {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  margin: 0;
 }
