@@ -93,41 +93,14 @@ type GitProgress = {
 
 type BackupSetupResult = ActionResult & { synced: boolean };
 
-function discoveredInsertIndex(repos: DiscoveredRepoEntry[], lastEditedAt: number): number {
-  let lo = 0;
-  let hi = repos.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (repos[mid].lastEditedAt > lastEditedAt) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
-  }
-  return lo;
-}
-
-function upsertDiscoveredRepo(
+function mergeDiscoveredRepos(
   current: DiscoveredRepoEntry[],
-  repo: DiscoveredRepoEntry,
+  incoming: DiscoveredRepoEntry[],
 ): DiscoveredRepoEntry[] {
-  const existingIndex = current.findIndex((item) => item.path === repo.path);
-  if (existingIndex !== -1) {
-    const existing = current[existingIndex];
-    if (existing.lastEditedAt === repo.lastEditedAt) {
-      return current;
-    }
-    const without = current.slice(0, existingIndex).concat(current.slice(existingIndex + 1));
-    const insertAt = discoveredInsertIndex(without, repo.lastEditedAt);
-    const next = without.slice();
-    next.splice(insertAt, 0, { ...existing, lastEditedAt: repo.lastEditedAt });
-    return next;
-  }
-
-  const insertAt = discoveredInsertIndex(current, repo.lastEditedAt);
-  const next = current.slice();
-  next.splice(insertAt, 0, repo);
-  return next;
+  if (incoming.length === 0) return current;
+  const byPath = new Map(current.map((repo) => [repo.path, repo]));
+  for (const repo of incoming) byPath.set(repo.path, repo);
+  return [...byPath.values()].sort((left, right) => right.lastEditedAt - left.lastEditedAt);
 }
 
 type NavZone = "timeline" | "files";
@@ -717,11 +690,28 @@ function App() {
 
     let active = true;
     const unlisteners: Array<() => void> = [];
+    let discoveryBatch: DiscoveredRepoEntry[] = [];
+    let discoveryBatchTimer: number | null = null;
+
+    const flushDiscoveryBatch = () => {
+      discoveryBatchTimer = null;
+      if (!active || discoveryBatch.length === 0) return;
+      const batch = discoveryBatch;
+      discoveryBatch = [];
+      setDiscoveredRepos((current) => mergeDiscoveredRepos(current, batch));
+    };
+
+    const queueDiscoveredRepo = (repo: DiscoveredRepoEntry) => {
+      discoveryBatch.push(repo);
+      if (discoveryBatchTimer === null) {
+        discoveryBatchTimer = window.setTimeout(flushDiscoveryBatch, 100);
+      }
+    };
 
     void (async () => {
       const onFound = await listen<DiscoveredRepoEntry>("repo-discovery-found", (event) => {
         if (!active) return;
-        setDiscoveredRepos((current) => upsertDiscoveredRepo(current, event.payload));
+        queueDiscoveredRepo(event.payload);
       });
       if (!active) {
         onFound();
@@ -731,6 +721,11 @@ function App() {
 
       const onStarted = await listen("repo-discovery-started", () => {
         if (!active) return;
+        discoveryBatch = [];
+        if (discoveryBatchTimer !== null) {
+          window.clearTimeout(discoveryBatchTimer);
+          discoveryBatchTimer = null;
+        }
         setDiscovering(true);
         setDiscoveredRepos([]);
       });
@@ -741,7 +736,9 @@ function App() {
       unlisteners.push(onStarted);
 
       const onFinished = await listen("repo-discovery-finished", () => {
-        if (active) setDiscovering(false);
+        if (!active) return;
+        flushDiscoveryBatch();
+        setDiscovering(false);
       });
       if (!active) {
         onFinished();
@@ -757,6 +754,7 @@ function App() {
 
     return () => {
       active = false;
+      if (discoveryBatchTimer !== null) window.clearTimeout(discoveryBatchTimer);
       for (const unlisten of unlisteners) unlisten();
     };
   }, [reposLoaded, savedPaths, startDiscovery]);

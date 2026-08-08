@@ -8,6 +8,27 @@ export type RepoImage = {
 const iconCache = new Map<string, string>();
 const inflight = new Map<string, Promise<string | null>>();
 const subscribers = new Map<string, Set<() => void>>();
+const MAX_CONCURRENT_ICON_LOADS = 4;
+
+let activeIconLoads = 0;
+const iconLoadQueue: Array<() => void> = [];
+
+function scheduleIconLoad<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      activeIconLoads += 1;
+      void task()
+        .then(resolve, reject)
+        .finally(() => {
+          activeIconLoads -= 1;
+          iconLoadQueue.shift()?.();
+        });
+    };
+
+    if (activeIconLoads < MAX_CONCURRENT_ICON_LOADS) run();
+    else iconLoadQueue.push(run);
+  });
+}
 
 /** Notify mounted <RepoIcon> instances for a path that their icon changed. */
 export function subscribeRepoIcon(path: string, listener: () => void): () => void {
@@ -65,7 +86,9 @@ export async function fetchRepoIcon(
   const pending = inflight.get(cacheKey);
   if (pending) return pending;
 
-  const task = invoke<string | null>("resolve_repo_icon", { path, forceRescan: force })
+  const task = scheduleIconLoad(() =>
+    invoke<string | null>("resolve_repo_icon", { path, forceRescan: force }),
+  )
     .then((dataUrl) => {
       inflight.delete(cacheKey);
       if (dataUrl) {

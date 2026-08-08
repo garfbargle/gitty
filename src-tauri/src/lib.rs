@@ -1750,45 +1750,63 @@ fn remote_list(repo_path: &Path) -> Vec<RemoteEntry> {
 }
 
 #[tauri::command]
-fn resolve_repo_icon(
+async fn resolve_repo_icon(
     app: AppHandle,
     path: String,
     force_rescan: Option<bool>,
 ) -> Result<Option<String>, String> {
-    let repo = normalize_repo(&path)?;
-    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), force_rescan.unwrap_or(false))
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), force_rescan.unwrap_or(false))
+    })
+    .await
+    .map_err(|err| format!("Icon task failed: {err}"))?
 }
 
 #[tauri::command]
-fn list_repo_images(path: String) -> Result<Vec<repo_icon::RepoImage>, String> {
-    let repo = normalize_repo(&path)?;
-    Ok(repo_icon::list_repo_images(Path::new(&repo.path)))
+async fn list_repo_images(path: String) -> Result<Vec<repo_icon::RepoImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        Ok(repo_icon::list_repo_images(Path::new(&repo.path)))
+    })
+    .await
+    .map_err(|err| format!("Icon image task failed: {err}"))?
 }
 
 #[tauri::command]
-fn set_repo_icon(
+async fn set_repo_icon(
     app: AppHandle,
     path: String,
     relative_path: String,
 ) -> Result<Option<String>, String> {
-    let repo = normalize_repo(&path)?;
-    repo_icon::set_repo_icon_override(&app, &repo.path, &relative_path)?;
-    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        repo_icon::set_repo_icon_override(&app, &repo.path, &relative_path)?;
+        repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+    })
+    .await
+    .map_err(|err| format!("Set icon task failed: {err}"))?
 }
 
 #[tauri::command]
-fn clear_repo_icon(app: AppHandle, path: String) -> Result<Option<String>, String> {
-    let repo = normalize_repo(&path)?;
-    repo_icon::clear_repo_icon_override(&app, &repo.path)?;
-    repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+async fn clear_repo_icon(app: AppHandle, path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        repo_icon::clear_repo_icon_override(&app, &repo.path)?;
+        repo_icon::resolve_repo_icon(&app, Path::new(&repo.path), false)
+    })
+    .await
+    .map_err(|err| format!("Clear icon task failed: {err}"))?
 }
 
 #[tauri::command]
-fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
-    Ok(load_repos_from_disk(&app)?
-        .into_iter()
-        .map(with_repo_status)
-        .collect())
+async fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
+    // Startup only needs the persisted list. A full `git status -uall` for
+    // every saved repository turns opening the app into N working-tree scans;
+    // selected repositories refresh their status as part of the snapshot path.
+    tauri::async_runtime::spawn_blocking(move || load_repos_from_disk(&app))
+        .await
+        .map_err(|err| format!("Repository list task failed: {err}"))?
 }
 
 #[tauri::command]
