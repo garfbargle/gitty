@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchRepoIcon,
   invalidateRepoIcon,
@@ -14,7 +14,12 @@ type RepoIconProps = {
   className?: string;
 };
 
-export function RepoIcon({ path, name, size = 16, className = "" }: RepoIconProps) {
+export const RepoIcon = memo(function RepoIcon({
+  path,
+  name,
+  size = 16,
+  className = "",
+}: RepoIconProps) {
   const [dataUrl, setDataUrl] = useState<string | null | undefined>(undefined);
   const retriedRef = useRef(false);
 
@@ -92,4 +97,4 @@ export function RepoIcon({ path, name, size = 16, className = "" }: RepoIconProp
       {repoIconInitial(name)}
     </span>
   );
-}
+});

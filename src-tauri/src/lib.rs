@@ -4640,7 +4640,13 @@ fn same_path(left: &Path, right: &Path) -> bool {
 /// Every checkout of this repository. Gitty's own scratch worktrees are marked
 /// `internal` so the UI can leave them out.
 #[tauri::command]
-fn list_worktrees(path: String) -> Result<Vec<WorktreeEntry>, String> {
+async fn list_worktrees(path: String) -> Result<Vec<WorktreeEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_worktrees_blocking(path))
+        .await
+        .map_err(|err| format!("Worktree lookup failed: {err}"))?
+}
+
+fn list_worktrees_blocking(path: String) -> Result<Vec<WorktreeEntry>, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let output = git(&repo_path, &["worktree", "list", "--porcelain"])?;
@@ -5969,7 +5975,7 @@ locked under review
     }
 
     fn paths_of(repo: &Path) -> Vec<String> {
-        list_worktrees(repo.to_string_lossy().to_string())
+        list_worktrees_blocking(repo.to_string_lossy().to_string())
             .expect("list")
             .into_iter()
             .map(|entry| entry.path)
@@ -5994,7 +6000,7 @@ locked under review
         .expect("add_worktree should succeed");
 
         assert!(Path::new(&created).exists(), "folder should be on disk");
-        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        let entries = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
         assert_eq!(entries.len(), 2);
         let added = entries
             .iter()
@@ -6083,7 +6089,7 @@ locked under review
 
         // Delete the folder the way a user would, leaving git's registration behind.
         fs::remove_dir_all(&target).expect("remove folder");
-        let before = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        let before = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
         assert_eq!(before.len(), 2, "git still remembers it");
         assert!(
             before.iter().any(|entry| entry.prunable),
@@ -6112,7 +6118,7 @@ locked under review
         )
         .expect("add with create_branch");
 
-        let entries = list_worktrees(repo.to_string_lossy().to_string()).expect("list");
+        let entries = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
         assert!(
             entries
                 .iter()

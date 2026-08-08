@@ -247,7 +247,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   // Linked folders whose source has moved on, driving the top-bar chip. Computed
-  // on the network only at deliberate moments (repo open + fetch), never polled.
+  // on the network only at deliberate moments (settings, fetch, or an action),
+  // never during a repository switch or by polling.
   const [behindFolders, setBehindFolders] = useState<LinkedFolder[]>([]);
   // Known-source linked folders that can be published (subtree push). Instant/
   // local — publishing is deliberate, so this isn't gated on a network check.
@@ -813,25 +814,13 @@ function App() {
     }
   }, [snapshot?.repo.path, selectedPath]);
 
-  // Compute linked-folder update status once when a repo opens (guarded against a
-  // fast repo switch landing stale results). Fetch refreshes it after that.
+  // Selection must only change the visible repository. Linked-folder probes can
+  // scan Git history and contact every configured source, so running them here
+  // made a simple sidebar click compete with scrolling. Refresh them after a
+  // fetch, an explicit linked-folder action, or when their settings are opened.
   useEffect(() => {
     setBehindFolders([]);
     setPublishableFolders([]);
-    if (!selectedPath) return;
-    let cancelled = false;
-    const path = selectedPath;
-    void (async () => {
-      // Publishable set is instant (local content comparison, no network).
-      const publishable = await computePublishableFolders(path).catch(() => [] as LinkedFolder[]);
-      if (!cancelled) setPublishableFolders(publishable);
-      const behind = await computeBehindFolders(path).catch(() => [] as LinkedFolder[]);
-      if (!cancelled) setBehindFolders(behind);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath]);
 
   async function run<T>(task: () => Promise<T>, successMessage = "") {
@@ -978,11 +967,13 @@ function App() {
     }
   }
 
-  function openRepoSettings() {
+  function openRepoSettings(path = selectedPath) {
     setRepoSettingsOpen(true);
     // Tag status requires a remote comparison, so defer it until the settings
     // that display it are opened rather than paying for it on every repo load.
-    void refreshRepo();
+    void refreshRepo(path);
+    void refreshBehindFolders(path);
+    void refreshPublishableFolders(path);
   }
 
   useEffect(() => {
@@ -3262,9 +3253,9 @@ function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenRepoSettings={(path) => {
           if (path !== selectedPath) {
-            void selectRepo(path).then(() => openRepoSettings());
+            void selectRepo(path).then(() => openRepoSettings(path));
           } else {
-            openRepoSettings();
+            openRepoSettings(path);
           }
         }}
         onRescanDiscovery={rescanDiscovery}

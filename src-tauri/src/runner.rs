@@ -35,7 +35,13 @@ pub struct ActionFinishedPayload {
 
 /// Detect capabilities and actionable commands for a repository at `path`.
 #[tauri::command]
-pub fn detect_repo_actions(path: String) -> Vec<RepoAction> {
+pub async fn detect_repo_actions(path: String) -> Vec<RepoAction> {
+    tauri::async_runtime::spawn_blocking(move || detect_repo_actions_blocking(path))
+        .await
+        .unwrap_or_default()
+}
+
+fn detect_repo_actions_blocking(path: String) -> Vec<RepoAction> {
     let mut actions = Vec::new();
     let root = Path::new(&path);
 
@@ -443,7 +449,7 @@ mod tests {
         )
         .unwrap();
 
-        let actions = detect_repo_actions(dir.to_string_lossy().to_string());
+        let actions = detect_repo_actions_blocking(dir.to_string_lossy().to_string());
         let _ = fs::remove_dir_all(&dir);
 
         assert!(actions.iter().any(|a| a.command == "npm run dev"));
@@ -469,7 +475,7 @@ mod tests {
         )
         .unwrap();
 
-        let actions = detect_repo_actions(dir.to_string_lossy().to_string());
+        let actions = detect_repo_actions_blocking(dir.to_string_lossy().to_string());
         let _ = fs::remove_dir_all(&dir);
 
         assert!(actions.iter().any(|a| a.command == "npm run tauri"));
@@ -486,7 +492,7 @@ mod tests {
         let mut file = File::create(&cargo_path).unwrap();
         writeln!(file, r#"[package]\nname = "test-crate""#).unwrap();
 
-        let actions = detect_repo_actions(dir.to_string_lossy().to_string());
+        let actions = detect_repo_actions_blocking(dir.to_string_lossy().to_string());
         let _ = fs::remove_dir_all(&dir);
 
         assert_eq!(actions.len(), 4);
