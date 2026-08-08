@@ -601,6 +601,15 @@ function App() {
   const canMergeIntoMain = canIntegrate && aheadOfMain > 0;
 
   const sortedRepos = useMemo(() => sortRepos(repos, repoSortMode), [repos, repoSortMode]);
+  // Which saved repository the current checkout belongs to. Another folder of a
+  // repository is not in the saved list (see `openCheckout`), so without this the
+  // sidebar highlights nothing and the repo picker falls back to `repos[0]` —
+  // naming an unrelated project while you look at this one.
+  const owningRepoPath = useMemo(() => {
+    if (!selectedPath || repos.some((repo) => repo.path === selectedPath)) return selectedPath;
+    const main = worktrees.find((entry) => entry.isMain)?.path;
+    return main && repos.some((repo) => repo.path === main) ? main : selectedPath;
+  }, [repos, selectedPath, worktrees]);
   const sortedDiscoveredRepos = useMemo(
     () => sortRepos(discoveredRepos, repoSortMode),
     [discoveredRepos, repoSortMode],
@@ -611,7 +620,7 @@ function App() {
     snapshot && snapshot.repo.path === selectedPath ? snapshot : null;
   const repoSwitching = Boolean(selectedPath && contentPath !== selectedPath);
   const switchingRepoName =
-    repos.find((repo) => repo.path === selectedPath)?.name ?? "repository";
+    repos.find((repo) => repo.path === owningRepoPath)?.name ?? "repository";
   const discoveryStarted = useRef(false);
   const selectRepoRequestRef = useRef(0);
   // Async Git work can finish after the user selects another repository. Keep
@@ -1497,6 +1506,20 @@ function App() {
 
   async function saveDiscoveredRepo(path: string) {
     await addRepo(path);
+  }
+
+  // Open another folder of the repository the user is already in.
+  //
+  // This used to call `addRepo`, on the reasoning that another checkout is just
+  // another repo path. That is true of the plumbing and false of the product: it
+  // wrote the folder to the saved list permanently, under the *repository's* own
+  // name, so a worktree became a sidebar row indistinguishable from the project
+  // it came from. Agent tooling creates these constantly, so the list filled up
+  // with duplicates nobody asked for. Switching is what "open" promised; the
+  // folder stays reachable from its repository's Folders chip either way.
+  async function openCheckout(path: string) {
+    setRepoSettingsOpen(false);
+    await selectRepo(path);
   }
 
   async function chooseRepoFolder() {
@@ -3241,7 +3264,7 @@ function App() {
         repos={sortedRepos}
         discoveredRepos={sortedDiscoveredRepos}
         discovering={discovering}
-        selectedPath={selectedPath}
+        selectedPath={owningRepoPath}
         contentPath={contentPath}
         onSelect={(path) => void selectRepo(path)}
         onSaveDiscovered={(path) => void saveDiscoveredRepo(path)}
@@ -3279,6 +3302,7 @@ function App() {
             <TopBar
               repos={sortedRepos}
               selectedPath={selectedPath}
+              repoIdentityPath={owningRepoPath}
               branch="…"
               branches={["…"]}
               loading
@@ -3301,6 +3325,7 @@ function App() {
             <TopBar
               repos={sortedRepos}
               selectedPath={selectedPath}
+              repoIdentityPath={owningRepoPath}
               branch={displaySnapshot.branch}
               branches={branchNames.length > 0 ? branchNames : [displaySnapshot.branch]}
               worktrees={worktrees}
@@ -3324,7 +3349,7 @@ function App() {
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
               onRepoChange={(path) => void selectRepo(path)}
-              onOpenWorktree={(path) => void addRepo(path)}
+              onOpenWorktree={(path) => void openCheckout(path)}
               onBranchChange={(branch) => {
                 // Git can't check out a branch that's open in another folder.
                 // Rather than let it fail, go to that folder — which is what
@@ -3333,7 +3358,7 @@ function App() {
                   (entry) => !entry.isCurrent && entry.branch === branch,
                 );
                 if (elsewhere) {
-                  void addRepo(elsewhere.path);
+                  void openCheckout(elsewhere.path);
                   return;
                 }
                 void checkoutBranch(branch);
@@ -3369,7 +3394,7 @@ function App() {
                   currentBranch={displaySnapshot.branch}
                   worktrees={worktrees}
                   unpushedCommits={displaySnapshot.unpushedCommits}
-                  onOpenCheckout={(path) => void addRepo(path)}
+                  onOpenCheckout={(path) => void openCheckout(path)}
                   key={displaySnapshot.repo.path}
                   commits={displaySnapshot.commits}
                   aheadCommits={displaySnapshot.aheadCommits ?? []}
@@ -3793,12 +3818,7 @@ function App() {
             worktrees={worktrees}
             onWorktreesChanged={() => setWorktreeRefresh((n) => n + 1)}
             onConfirmRemove={(entry) => setWorktreeToRemove(entry)}
-            onOpenWorktree={(worktreePath) => {
-              // Another checkout of the same repository is, to Gitty, just
-              // another repo path: add it if it isn't saved yet, then select it.
-              setRepoSettingsOpen(false);
-              void addRepo(worktreePath);
-            }}
+            onOpenWorktree={(worktreePath) => void openCheckout(worktreePath)}
             onClose={() => setRepoSettingsOpen(false)}
             onSaveRemote={saveRemote}
             onRemoveRemote={removeRemote}

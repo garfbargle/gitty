@@ -107,8 +107,22 @@ fn should_skip_dir(name: &str) -> bool {
         .any(|skip| name.eq_ignore_ascii_case(skip))
 }
 
+/// Whether this folder is a repository in its own right, as opposed to a view of
+/// one.
+///
+/// A linked worktree (like a submodule) marks itself with a `.git` *file* holding
+/// a `gitdir:` pointer; only an original clone has a `.git` directory. The
+/// distinction matters because agent tooling creates worktrees constantly, and
+/// they take the repository's own folder name — so discovering one produced a
+/// second sidebar row indistinguishable from the project it came from. The
+/// caller still treats either form as a boundary and stops descending; this only
+/// decides what gets *listed*.
+fn is_own_repository(path: &Path) -> bool {
+    path.join(".git").is_dir()
+}
+
 fn quick_repo_entry(path: &Path) -> Option<RepoEntry> {
-    if !path.join(".git").exists() {
+    if !is_own_repository(path) {
         return None;
     }
 
@@ -181,6 +195,31 @@ mod tests {
         assert!(!roots.contains(&home));
 
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn discovery_lists_clones_but_not_linked_worktrees() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("gitty-worktree-{unique}"));
+        let clone = root.join("project");
+        let worktree = root.join("project-feature");
+
+        fs::create_dir_all(clone.join(".git")).unwrap();
+        fs::create_dir_all(&worktree).unwrap();
+        // What `git worktree add` writes: a file, not a directory.
+        fs::write(
+            worktree.join(".git"),
+            "gitdir: /tmp/project/.git/worktrees/feature\n",
+        )
+        .unwrap();
+
+        assert!(quick_repo_entry(&clone).is_some());
+        assert!(quick_repo_entry(&worktree).is_none());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }
 

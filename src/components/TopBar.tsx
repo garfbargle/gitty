@@ -19,7 +19,12 @@ import { RepoPicker } from "./RepoPicker";
 
 type TopBarProps = {
   repos: RepoEntry[];
+  /// The folder actually open — what the IDE and task runner should act on.
   selectedPath: string;
+  /// The saved repository that folder belongs to, which differs from
+  /// `selectedPath` while another checkout is open. Only the repo picker uses it:
+  /// it names the *project*, and a worktree is the same project seen elsewhere.
+  repoIdentityPath: string;
   branch: string;
   branches: string[];
   /// Other checkouts of this repository, so the branch list can show which
@@ -81,6 +86,7 @@ type TopBarProps = {
 export function TopBar({
   repos,
   selectedPath,
+  repoIdentityPath,
   branch,
   branches,
   worktrees = [],
@@ -163,7 +169,7 @@ export function TopBar({
           />
         ) : null}
 
-        <RepoPicker repos={repos} selectedPath={selectedPath} onChange={onRepoChange} />
+        <RepoPicker repos={repos} selectedPath={repoIdentityPath} onChange={onRepoChange} />
 
         <span className="breadcrumb-sep">›</span>
 

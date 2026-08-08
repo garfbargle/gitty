@@ -567,6 +567,13 @@ export function HistoryTimeline({
   const showPreviewActions = !!inPreview && !!onReturnToWorkingTree;
 
   const otherCheckouts = worktrees.filter((entry) => !entry.isCurrent && !entry.internal);
+  // Opening another folder of a repository no longer saves it to the sidebar, so
+  // the sidebar and the repo picker both keep naming the repository — correctly,
+  // since it is the same project. That leaves the branch as the only hint you
+  // moved, which is not enough when two folders sit on branches you did not
+  // choose. Say the folder outright, but only when it is not the original clone.
+  const currentCheckout = worktrees.find((entry) => entry.isCurrent && !entry.internal);
+  const awayFromMainCheckout = !!currentCheckout && !currentCheckout.isMain;
 
   // What does not fit collapses into a trailing "+N" rather than vanishing at a
   // fixed width. The signature is what the row actually says, so the cached
@@ -576,6 +583,7 @@ export function HistoryTimeline({
     siblingTip?.name ?? "",
     contextLanes.map((lane) => `${lane.kind}:${lane.refName}:${lane.behind}:${lane.ahead}`).join(),
     otherCheckouts.length,
+    awayFromMainCheckout ? folderName(currentCheckout.path) : "",
   ].join("|");
   const { ref: chipsRef, hidden: hiddenChips } = usePriorityPlus(chipSignature);
 
@@ -628,11 +636,20 @@ export function HistoryTimeline({
         {currentBranch ? (
           <div
             className="context-chip here"
-            title={`${currentBranch} is checked out in this folder`}
+            title={
+              awayFromMainCheckout
+                ? `${currentBranch} is checked out in ${currentCheckout.path}`
+                : `${currentBranch} is checked out in this folder`
+            }
           >
             <span className="chip-kind">Here</span>
             <GitBranch size={12} aria-hidden />
             <span className="chip-ref">{currentBranch}</span>
+            {awayFromMainCheckout ? (
+              <span className="chip-sync">
+                <FolderOpen size={11} aria-hidden /> {folderName(currentCheckout.path)}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {renderSiblingChip()}

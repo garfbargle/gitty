@@ -305,6 +305,36 @@ the mechanism of the simplification rather than more surface area.
 ## Later / parked
 
 - Super-faint strands for *all* other branches on the timeline (decision 3).
-- Visible worktree management (list/open/remove) if the internal use proves
-  itself.
+- ~~Visible worktree management (list/open/remove) if the internal use proves
+  itself.~~ **Shipped** as the `WorktreeSection` ("Folders") and the timeline's
+  "Folders N" chip. See the note below — going visible had a consequence the
+  north star didn't anticipate.
 - "Update" auto-offer when the app regains focus and main has moved.
+
+## Opening another folder is not adding a repository
+
+Worktrees went from hidden engine to a visible "Folders" list, and the four
+"open this folder" affordances were all wired to `addRepo` — on the reasoning
+that another checkout is just another repo path. True of the plumbing, false of
+the product: `add_repo` writes to `repos.json`, so *opening* a folder silently
+**saved it forever**, as a sidebar row carrying the repository's own name. With
+agent tooling creating worktrees constantly (`.claude/worktrees/`,
+`.codex/worktrees/`), the sidebar filled with duplicates of projects already in
+it, indistinguishable from the real thing.
+
+Locked:
+
+1. **Open switches, it does not save.** `openCheckout` selects the folder without
+   touching the saved list. Nothing persists a checkout across restarts, and the
+   folder stays reachable from its repository's Folders chip either way.
+2. **The sidebar and repo picker name the *repository*.** `owningRepoPath`
+   resolves the current checkout back to its main clone (`WorktreeEntry.isMain`),
+   so the sidebar keeps the project highlighted and the picker cannot fall
+   through to `repos[0]` and name an unrelated project.
+3. **The "Here" chip says which folder you are in** when it is not the original
+   clone. Once opening stopped saving, the branch name was the only hint you had
+   moved — not enough when two folders sit on branches you did not choose.
+4. **Discovery lists clones, not views.** `quick_repo_entry` requires a `.git`
+   *directory*; a linked worktree (and a submodule) has a `.git` *file*. The
+   walker still treats either as a boundary and stops descending — this only
+   decides what gets listed.
