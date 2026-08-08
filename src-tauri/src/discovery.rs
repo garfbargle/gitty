@@ -13,6 +13,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_DEPTH: usize = 12;
+const MAX_DISCOVERED_REPOS: usize = 500;
 
 /// Development-oriented locations worth searching automatically.  Do not add
 /// the home directory or macOS protected folders (such as Desktop or
@@ -206,6 +207,9 @@ fn scan_roots(
     let _ = app.emit("repo-discovery-started", ());
 
     for root in roots {
+        if found >= MAX_DISCOVERED_REPOS {
+            break;
+        }
         if cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -220,6 +224,9 @@ fn scan_roots(
         let mut stack = vec![(root, 0usize)];
 
         while let Some((dir, depth)) = stack.pop() {
+            if found >= MAX_DISCOVERED_REPOS {
+                break;
+            }
             if cancel.load(Ordering::Relaxed) {
                 break;
             }

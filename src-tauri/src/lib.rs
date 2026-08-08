@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    hash::{Hash, Hasher},
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -1283,6 +1284,18 @@ fn with_repo_status(mut repo: RepoEntry) -> RepoEntry {
     repo
 }
 
+/// Startup metadata must not turn the saved-repository list into a fleet of
+/// subprocesses. The reflog stat is cheap and covers normal working copies;
+/// selected repositories fill in their full state via `repo_snapshot`.
+fn with_repo_startup_metadata(mut repo: RepoEntry) -> RepoEntry {
+    repo.last_activity_at = fs::metadata(Path::new(&repo.path).join(".git/logs/HEAD"))
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64);
+    repo
+}
+
 const COMMIT_LOG_PRETTY: &str = "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%D%x1f%s%x1e";
 
 fn parse_commit_log_output(output: &str) -> Vec<CommitEntry> {
@@ -1814,7 +1827,10 @@ async fn list_repos(app: AppHandle) -> Result<Vec<RepoEntry>, String> {
     // Startup only needs the persisted list. A full `git status -uall` for
     // every saved repository turns opening the app into N working-tree scans;
     // selected repositories refresh their status as part of the snapshot path.
-    tauri::async_runtime::spawn_blocking(move || load_repos_from_disk(&app))
+    tauri::async_runtime::spawn_blocking(move || {
+        load_repos_from_disk(&app)
+            .map(|repos| repos.into_iter().map(with_repo_startup_metadata).collect())
+    })
         .await
         .map_err(|err| format!("Repository list task failed: {err}"))?
 }
@@ -2005,6 +2021,14 @@ struct RepoFocusState {
     fingerprint: String,
 }
 
+fn repo_metadata_fingerprint(branch: &str, refs: &str, remotes: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    branch.hash(&mut hasher);
+    refs.hash(&mut hasher);
+    remotes.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RepoEnrichment {
@@ -2112,7 +2136,9 @@ async fn repo_focus_state(path: String) -> Result<RepoFocusState, String> {
         let remotes = git(repo_path, &["remote", "-v"])?;
 
         Ok(RepoFocusState {
-            fingerprint: format!("{}\n{refs}\n{remotes}", current_branch(repo_path)),
+            // The raw ref listing can be megabytes in a fork. The frontend only
+            // compares this value, so cross the IPC boundary with a compact hash.
+            fingerprint: repo_metadata_fingerprint(&current_branch(repo_path), &refs, &remotes),
         })
     })
     .await
@@ -6286,5 +6312,12 @@ mod tests {
         assert!(truncated);
         assert!(preview.len() <= MAX_DISPLAY_DIFF_BYTES);
         assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn repo_metadata_fingerprint_is_compact_and_sensitive_to_changes() {
+        let baseline = repo_metadata_fingerprint("main", "refs", "origin");
+        assert_eq!(baseline.len(), 16);
+        assert_ne!(baseline, repo_metadata_fingerprint("main", "new refs", "origin"));
     }
 }

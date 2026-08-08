@@ -155,6 +155,7 @@ const STATUS_MESSAGE_DISMISS_MS = 4_000;
 const AUTO_FETCH_MIN_INTERVAL_MS = 15_000;
 const AUTO_FETCH_INTERVAL_MS = 5 * 60_000;
 const MAX_OPEN_DIFF_FILES = 4;
+const MAX_ACTION_LOG_ENTRIES = 2_000;
 
 const repoSortModes = new Set<RepoSortMode>([
   "manual",
@@ -400,24 +401,38 @@ function App() {
   }, [selectedPath, repoActions]);
 
   useEffect(() => {
+    const pendingOutput = new Map<string, ActionLogEntry[]>();
+    let outputFrame: number | null = null;
+
+    const flushOutput = () => {
+      outputFrame = null;
+      if (pendingOutput.size === 0) return;
+      const pending = new Map(pendingOutput);
+      pendingOutput.clear();
+      setTerminalSessions((sessions) =>
+        sessions.map((session) => {
+          const entries = pending.get(session.runId);
+          if (!entries) return session;
+          return {
+            ...session,
+            logs: [...session.logs, ...entries].slice(-MAX_ACTION_LOG_ENTRIES),
+          };
+        }),
+      );
+    };
+
     const unlistenOutput = listen<{ actionId: string; line: string; stream: "stdout" | "stderr" }>(
       "action-runner-output",
       (event) => {
-        setTerminalSessions((sessions) =>
-          sessions.map((session) => {
-            if (session.runId !== event.payload.actionId) return session;
-            const newLog: ActionLogEntry = {
-              id: `${Date.now()}-${Math.random()}`,
-              line: event.payload.line,
-              stream: event.payload.stream,
-              timestamp: Date.now(),
-            };
-            return {
-              ...session,
-              logs: [...session.logs, newLog],
-            };
-          })
-        );
+        const entries = pendingOutput.get(event.payload.actionId) ?? [];
+        entries.push({
+          id: `${Date.now()}-${Math.random()}`,
+          line: event.payload.line,
+          stream: event.payload.stream,
+          timestamp: Date.now(),
+        });
+        pendingOutput.set(event.payload.actionId, entries);
+        if (outputFrame === null) outputFrame = window.requestAnimationFrame(flushOutput);
       }
     );
 
@@ -439,6 +454,7 @@ function App() {
     );
 
     return () => {
+      if (outputFrame !== null) window.cancelAnimationFrame(outputFrame);
       unlistenOutput.then((fn) => fn());
       unlistenFinished.then((fn) => fn());
     };
