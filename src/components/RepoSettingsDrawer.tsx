@@ -403,7 +403,7 @@ function LinkedFoldersSection({
   async function remove(folder: LinkedFolder) {
     if (
       !window.confirm(
-        `Remove ${folder.prefix}? This deletes the folder (staged for your next commit) and unlinks it.`,
+        `Remove ${folder.prefix}? This deletes its files (staged for your next commit) and unlinks it.`,
       )
     ) {
       return;
@@ -423,14 +423,21 @@ function LinkedFoldersSection({
   return (
     <div className="settings-field">
       <div className="settings-field-head">
-        <label>Linked folders</label>
+        {/* "Linked repos", not "linked folders". The Folders section directly
+            below is git worktrees — other checkouts of *this* repository — and
+            the timeline chip that counts them also says Folders. Two unrelated
+            features wearing one noun, stacked, both with a folder icon and an
+            Add button, is the single most confusing thing in this drawer. The
+            distinction that matters is whose code it is: a linked repo is
+            somebody else's repository living in a subfolder of yours. */}
+        <label>Linked repos</label>
         <div className="settings-field-head-actions">
           {folders && folders.length > 0 ? (
             <button
               type="button"
               className="settings-inline-link"
               disabled={controlsDisabled || checking}
-              title="Check each folder's source for new updates"
+              title="Check each linked repo's source for new updates"
               onClick={() => void checkUpdates()}
             >
               {checking ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
@@ -448,7 +455,7 @@ function LinkedFoldersSection({
             }}
           >
             <Plus size={12} />
-            Add linked folder
+            Add linked repo
           </button>
         </div>
       </div>
@@ -516,11 +523,18 @@ function LinkedFoldersSection({
       ) : folders.length === 0 ? (
         !formOpen ? (
           <p className="settings-field-note">
-            Mirror another repo into a folder. It stays real files in your repo — a clone just works.
+            Mirror another repository into a subfolder of this one. Its files are committed here as
+            real files, so a fresh clone just works.
           </p>
         ) : null
       ) : (
+        // The explanation used to live only in the empty state, which meant the
+        // people most likely to need it — anyone who cloned a repo that already
+        // had one, since the manifest is committed — never saw it at all.
         <div className="subtree-list">
+          <p className="settings-field-note">
+            Each of these is another repository mirrored into a subfolder of this one.
+          </p>
           {folders.map((folder) => (
             <div className="subtree-item" key={folder.prefix}>
               <FolderGit2 size={16} className="subtree-item-icon" />
@@ -572,7 +586,7 @@ function LinkedFoldersSection({
                   <button
                     type="button"
                     className="settings-btn"
-                    title="Publish this folder's committed changes back to its source"
+                    title="Publish this linked repo's committed changes back to its source"
                     disabled={controlsDisabled}
                     onClick={() => void push(folder.prefix)}
                   >
@@ -598,7 +612,7 @@ function LinkedFoldersSection({
                 <button
                   type="button"
                   className="settings-btn"
-                  title="Gitty couldn't find this folder's source — set it to enable Update"
+                  title="Gitty couldn't find this linked repo's source — set it to enable Update"
                   disabled={controlsDisabled}
                   onClick={() => beginSetSource(folder)}
                 >

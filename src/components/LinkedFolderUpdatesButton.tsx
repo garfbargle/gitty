@@ -83,7 +83,7 @@ export function LinkedFolderUpdatesButton({
   const title =
     count === 1
       ? `${folders[0].prefix} has updates from its source`
-      : `${count} linked folders have updates from their sources`;
+      : `${count} linked repos have updates from their sources`;
 
   return (
     <div className={`linked-updates-group${open ? " open" : ""}`} ref={rootRef} aria-live="polite">
@@ -106,7 +106,7 @@ export function LinkedFolderUpdatesButton({
       {open ? (
         <div className="linked-updates-menu" role="menu">
           <div className="linked-updates-menu-head">
-            {count === 1 ? "1 folder has updates" : `${count} folders have updates`}
+            {count === 1 ? "1 linked repo has updates" : `${count} linked repos have updates`}
           </div>
           {folders.map((folder) => (
             <div className="linked-updates-item" key={folder.prefix} role="menuitem">
@@ -142,7 +142,7 @@ export function LinkedFolderUpdatesButton({
               }}
             >
               <Settings size={13} />
-              Manage linked folders
+              Manage linked repos
             </button>
           ) : null}
         </div>

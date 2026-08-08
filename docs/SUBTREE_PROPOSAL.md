@@ -1,4 +1,15 @@
-# Linked folders — subtree support for Gitty
+# Linked repos — subtree support for Gitty
+
+> **Vocabulary correction (supersedes every "linked folder" below).** The feature
+> is called **"linked repo"** in the UI, not "linked folder". "Folder" was
+> already taken: `WorktreeSection` labels git worktrees **"Folders"**, and the
+> timeline context row counts them in a **"Folders N"** chip. The two sections
+> render adjacent in `RepoSettingsDrawer`, both with a folder icon and an Add
+> button, so one noun covered two unrelated features — a repo's *own* other
+> checkouts, and *somebody else's* repository vendored into a subfolder. That
+> collision was the single biggest source of confusion in the drawer. Identifiers
+> (`LinkedFolder`, `list_linked_folders`, `prefix`) deliberately keep the old
+> name: they are the invoke contract, and churning them buys nothing.
 
 A proposal, written to match `SIMPLIFICATION_PLAN.md`: phased, independently
 shippable, opinionated, and allergic to git vocabulary.
@@ -314,8 +325,48 @@ timeline gains a squash commit; Update with a conflict → drawer closes, resolv
 opens, Finish update commits and returns to now; Remove → folder leaves the list
 and a staged deletion appears.
 
-**Phase 3 — Awareness + Send changes back.** Optional behind-chip surfacing, and
-the gated `contribute_linked_folder`. Only after Phase 2 proves out.
+**Phase 3 — Awareness + Send changes back. — DONE (shipped; this section was
+stale for a month and described it as unbuilt).**
+
+- [x] `check_subtree_updates` — on-demand `ls-remote` per known-source folder,
+      compared against the recorded split SHA. Drives `LinkedFolderUpdatesButton`,
+      a top-bar chip that appears only when at least one folder is behind.
+- [x] `check_subtree_publishable` — local tree comparison (`HEAD:<prefix>` vs
+      `<remote>/<branch>^{tree}`), so it clears once the source has the changes.
+      Drives `LinkedFolderPublishButton`.
+- [x] `push_linked_folder` — `git subtree push`, no `--squash`, gated on a clean
+      prefix. A rejected push is reported as "the source moved on — Update first".
+
+Both chips refresh on exactly four events (repo switch, after a fetch, on opening
+settings, after a linked action). There is no polling, by design.
+
+### Phase 3.1 — Corrections from review
+- **The three network commands were synchronous.** `add_linked_folder`,
+  `update_linked_folder` and `push_linked_folder` were plain `#[tauri::command]
+  fn` while every other network command in the file is `async` + `spawn_blocking`.
+  In Tauri 2 that runs a clone / fetch / history-split on the main thread. All
+  three now have `_blocking` bodies behind an async command, matching `push_repo`.
+- **Add-then-Update was self-blocking.** `add_linked_folder` leaves
+  `.gitty/subtrees.json` uncommitted on purpose, and `update_linked_folder` gated
+  on a whole-repo `git status --porcelain` — so the very next Update refused,
+  citing a file the app had just written. `tree_dirty_for_subtree_pull` now
+  exempts the manifest (and only the manifest), with `-uall` so an untracked
+  `.gitty/` is not collapsed to a directory line the exemption can't match.
+
+### Still open (found in review, not yet fixed)
+- `subtree_pull_outcome` can report **"0 file(s) need conflict resolution."** in
+  the `MERGE_HEAD`-without-unmerged-files branch.
+- Up-to-date and rejection detection are **substring matches** on combined
+  stdout+stderr, so they are locale-dependent.
+- `remote_name_for_url` compares URLs with **exact string equality** while
+  `git_urls_equal` exists in the same file — a `.git` suffix mismatch silently
+  makes Publish status "unknown" rather than wrong-but-visible.
+- A **corrupt manifest reads as empty** and is then overwritten, dropping every
+  other entry.
+- `updatesAvailable` is `tip != split` — that is *different*, not *behind*, so a
+  folder that is ahead still reports updates.
+- The drawer's **Publish button has no publishable check** and is always enabled;
+  the dirty guard is backend-side and surfaces as a raw error string.
 
 ## What we deliberately don't build
 

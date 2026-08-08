@@ -3741,7 +3741,7 @@ fn write_subtree_manifest(
             .map_err(|err| format!("Could not create {}: {err}", parent.display()))?;
     }
     let data = serde_json::to_string_pretty(entries)
-        .map_err(|err| format!("Could not serialize linked folders: {err}"))?;
+        .map_err(|err| format!("Could not serialize linked repos: {err}"))?;
     fs::write(&path, format!("{data}\n"))
         .map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
@@ -3796,7 +3796,7 @@ fn git_subtree(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String)
 fn validate_prefix(prefix: &str) -> Result<String, String> {
     let trimmed = prefix.trim().trim_matches('/').to_string();
     if trimmed.is_empty() {
-        return Err("Choose a folder for the linked folder.".to_string());
+        return Err("Choose a folder for the linked repo.".to_string());
     }
     if Path::new(&trimmed).is_absolute() || trimmed.split('/').any(|part| part == "..") {
         return Err("The folder must be a path inside this repository.".to_string());
@@ -4168,8 +4168,23 @@ fn check_subtree_publishable_blocking(path: String) -> Result<Vec<SubtreePublish
 
 /// Add a folder that mirrors another repo (`git subtree add --squash`), then
 /// record its origin in the manifest so Update is one click later.
+///
+/// `subtree add` clones the source, so this is a network operation and must be
+/// offloaded like `push_repo` / `fetch_repo` — a synchronous command would run
+/// the clone on the main thread and freeze the window for its duration.
 #[tauri::command]
-fn add_linked_folder(
+async fn add_linked_folder(
+    path: String,
+    prefix: String,
+    url: String,
+    branch: String,
+) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || add_linked_folder_blocking(path, prefix, url, branch))
+        .await
+        .map_err(|err| format!("Linking failed: {err}"))?
+}
+
+fn add_linked_folder_blocking(
     path: String,
     prefix: String,
     url: String,
@@ -4273,11 +4288,48 @@ fn subtree_pull_outcome(
     })
 }
 
+/// The repo's manifest path relative to its root, as `git status --porcelain`
+/// spells it. Kept next to the dirty check that has to recognise it.
+const SUBTREE_MANIFEST_REL: &str = ".gitty/subtrees.json";
+
+/// Whether the working tree has changes that should block a linked-repo update,
+/// ignoring Gitty's own manifest.
+///
+/// `add_linked_folder` writes `.gitty/subtrees.json` and deliberately leaves it
+/// uncommitted for the user to commit through the normal flow. A plain
+/// whole-repo dirty gate therefore refused the Update immediately after an Add,
+/// blocking the user on a file the app itself had just written. A subtree pull
+/// never touches the manifest, so it is not work the merge can clobber — unless
+/// the linked folder is somehow `.gitty` itself, in which case the exemption is
+/// dropped and the gate stays strict.
+fn tree_dirty_for_subtree_pull(repo_path: &Path, prefix: &str) -> bool {
+    let exempt_manifest = !SUBTREE_MANIFEST_REL.starts_with(&format!("{}/", prefix.trim_end_matches('/')));
+    // `-uall` matters: the default collapses an untracked directory to `.gitty/`,
+    // and the manifest is the first thing ever written there, so on a repo with
+    // no `.gitty` yet the exemption would never match the line git printed.
+    git(repo_path, &["status", "--porcelain", "--untracked-files=all"])
+        .map(|out| {
+            out.lines()
+                .filter(|line| line.len() > 3)
+                .any(|line| !(exempt_manifest && line[3..].trim() == SUBTREE_MANIFEST_REL))
+        })
+        .unwrap_or(false)
+}
+
 /// Pull the source repo's latest work into a linked folder
 /// (`git subtree pull --squash`). Needs a clean tree (a subtree pull is a merge
 /// and can't autostash); conflicts flow to the shared resolver.
+///
+/// Network op, so it is offloaded rather than run on the main thread — see
+/// `add_linked_folder`.
 #[tauri::command]
-fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, String> {
+async fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || update_linked_folder_blocking(path, prefix))
+        .await
+        .map_err(|err| format!("Update failed: {err}"))?
+}
+
+fn update_linked_folder_blocking(path: String, prefix: String) -> Result<UpdateOutcome, String> {
     ensure_subtree_available()?;
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -4290,14 +4342,11 @@ fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, S
         .flatten();
     let (url, branch, _from_manifest) =
         resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest).ok_or_else(|| {
-            "Gitty doesn't know where this folder came from. Set its source first.".to_string()
+            "Gitty doesn't know where this linked repo came from. Set its source first.".to_string()
         })?;
 
-    let dirty = git(repo_path, &["status", "--porcelain"])
-        .map(|out| !out.trim().is_empty())
-        .unwrap_or(false);
-    if dirty {
-        return Err("Save or set aside your changes before updating a linked folder.".to_string());
+    if tree_dirty_for_subtree_pull(repo_path, &prefix) {
+        return Err("Save or set aside your changes before updating a linked repo.".to_string());
     }
 
     let (success, stdout, stderr) = git_subtree(
@@ -4313,8 +4362,18 @@ fn update_linked_folder(path: String, prefix: String) -> Result<UpdateOutcome, S
 /// that with a clear hint. A rejected push means the source moved on since the
 /// last sync, so the fix is Update-then-Publish. No `--squash` on push: it splits
 /// the folder's real history so the source repo gets clean per-change commits.
+///
+/// Network op, so it is offloaded rather than run on the main thread — see
+/// `add_linked_folder`. `subtree push` also splits history, which is slow on a
+/// large folder, so this is the one most visibly wrong to run inline.
 #[tauri::command]
-fn push_linked_folder(path: String, prefix: String) -> Result<ActionResult, String> {
+async fn push_linked_folder(path: String, prefix: String) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || push_linked_folder_blocking(path, prefix))
+        .await
+        .map_err(|err| format!("Publish failed: {err}"))?
+}
+
+fn push_linked_folder_blocking(path: String, prefix: String) -> Result<ActionResult, String> {
     ensure_subtree_available()?;
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -4327,7 +4386,7 @@ fn push_linked_folder(path: String, prefix: String) -> Result<ActionResult, Stri
         .flatten();
     let (url, branch, _from_manifest) =
         resolve_subtree_source(repo_path, &prefix, split.as_deref(), &manifest).ok_or_else(|| {
-            "Gitty doesn't know where this folder came from. Set its source first.".to_string()
+            "Gitty doesn't know where this linked repo came from. Set its source first.".to_string()
         })?;
 
     // Push only sends committed work; uncommitted edits in the folder would be
@@ -5980,6 +6039,33 @@ locked under review
             .into_iter()
             .map(|entry| entry.path)
             .collect()
+    }
+
+    /// `add_linked_folder` leaves the manifest uncommitted on purpose, so the
+    /// update gate has to ignore it or Add is immediately followed by a refusal
+    /// to Update — the app blocking on a file it wrote itself.
+    #[test]
+    fn the_update_gate_ignores_gittys_own_manifest_but_nothing_else() {
+        let repo = scratch_repo("subtree-gate");
+
+        assert!(!tree_dirty_for_subtree_pull(&repo, "vendor/ui-kit"));
+
+        fs::create_dir_all(repo.join(".gitty")).expect("mkdir");
+        fs::write(repo.join(".gitty/subtrees.json"), "[]\n").expect("write manifest");
+        assert!(
+            !tree_dirty_for_subtree_pull(&repo, "vendor/ui-kit"),
+            "an uncommitted manifest must not block an update"
+        );
+
+        // Staged rather than untracked is still the manifest, still exempt.
+        run_git(&repo, &["add", ".gitty/subtrees.json"]);
+        assert!(!tree_dirty_for_subtree_pull(&repo, "vendor/ui-kit"));
+
+        // Any other edit still blocks: the pull is a merge and cannot autostash.
+        fs::write(repo.join("a.txt"), "two").expect("write");
+        assert!(tree_dirty_for_subtree_pull(&repo, "vendor/ui-kit"));
+
+        let _ = fs::remove_dir_all(&repo);
     }
 
     #[test]

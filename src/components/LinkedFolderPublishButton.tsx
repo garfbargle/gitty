@@ -80,7 +80,7 @@ export function LinkedFolderPublishButton({
   const title =
     count === 1
       ? `Publish ${folders[0].prefix} to its source`
-      : "Publish linked folders back to their sources";
+      : "Publish linked repos back to their sources";
 
   return (
     <div className={`linked-updates-group${open ? " open" : ""}`} ref={rootRef} aria-live="polite">
@@ -137,7 +137,7 @@ export function LinkedFolderPublishButton({
               }}
             >
               <Settings size={13} />
-              Manage linked folders
+              Manage linked repos
             </button>
           ) : null}
         </div>
