@@ -1584,7 +1584,7 @@ fn timeline_context(
     lanes
 }
 
-fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
+fn branch_list(repo_path: &Path, include_divergence: bool) -> Vec<BranchEntry> {
     let current = git(repo_path, &["branch", "--show-current"]).unwrap_or_default();
     let Ok(output) = git(
         repo_path,
@@ -1620,7 +1620,7 @@ fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
 
             // Position relative to the branch the user is on, so the working-tree
             // view can answer "main is N ahead of me" without a round trip.
-            let (ahead, behind) = if is_current || current.is_empty() {
+            let (ahead, behind) = if !include_divergence || is_current || current.is_empty() {
                 (Some(0), Some(0))
             } else {
                 match divergence(repo_path, &name, &current) {
@@ -1629,12 +1629,16 @@ fn branch_list(repo_path: &Path) -> Vec<BranchEntry> {
                 }
             };
 
-            let (ahead_upstream, behind_upstream) = match &upstream {
-                Some(up) => match divergence(repo_path, &name, up) {
-                    Some((a, b)) => (Some(a), Some(b)),
+            let (ahead_upstream, behind_upstream) = if !include_divergence {
+                (None, None)
+            } else {
+                match &upstream {
+                    Some(up) => match divergence(repo_path, &name, up) {
+                        Some((a, b)) => (Some(a), Some(b)),
+                        None => (None, None),
+                    },
                     None => (None, None),
-                },
-                None => (None, None),
+                }
             };
 
             Some(BranchEntry {
@@ -1860,6 +1864,7 @@ fn repo_snapshot_blocking(
     path: String,
     limit: Option<u32>,
     lite: bool,
+    include_tags: bool,
 ) -> Result<RepoSnapshot, String> {
     let mut repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
@@ -1871,20 +1876,17 @@ fn repo_snapshot_blocking(
 
     let repo_path_changes = repo_path.clone();
     let repo_path_commits = repo_path.clone();
-    let repo_path_graph = repo_path.clone();
     let repo_path_remotes = repo_path.clone();
     let repo_path_branches = repo_path.clone();
 
-    let (changes, commits, graph_commits, remotes, branches) = std::thread::scope(|scope| {
+    let (changes, commits, remotes, branches) = std::thread::scope(|scope| {
         let changes_handle = scope.spawn(|| changed_files(&repo_path_changes));
         let commits_handle = scope.spawn(|| commit_log(&repo_path_commits, log_limit));
-        let graph_handle = scope.spawn(|| graph_log_page(&repo_path_graph, 0, log_limit));
         let remotes_handle = scope.spawn(|| remote_list(&repo_path_remotes));
-        let branches_handle = scope.spawn(|| branch_list(&repo_path_branches));
+        let branches_handle = scope.spawn(|| branch_list(&repo_path_branches, !lite));
         (
             changes_handle.join().unwrap(),
             commits_handle.join().unwrap(),
-            graph_handle.join().unwrap(),
             remotes_handle.join().unwrap(),
             branches_handle.join().unwrap(),
         )
@@ -1922,7 +1924,6 @@ fn repo_snapshot_blocking(
         (Vec::new(), None, Vec::new(), Vec::new())
     } else {
         let repo_path_ahead = repo_path.clone();
-        let repo_path_tags = repo_path.clone();
         let commits_for_ahead = commits.clone();
         let branch_for_ahead = branch.clone();
         std::thread::scope(|scope| {
@@ -1934,14 +1935,14 @@ fn repo_snapshot_blocking(
                     &branch_for_ahead,
                 )
             });
-            let tags_handle = scope.spawn(move || {
-                let unpushed = unpushed_tags(&repo_path_tags);
-                let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
-                let tags = tag_list(&repo_path_tags, &unpushed_set);
-                (tags, unpushed)
-            });
             let (ahead_commits, ahead_branch) = ahead_handle.join().unwrap();
-            let (tags, unpushed) = tags_handle.join().unwrap();
+            let (tags, unpushed) = if include_tags {
+                let unpushed = unpushed_tags(&repo_path);
+                let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
+                (tag_list(&repo_path, &unpushed_set), unpushed)
+            } else {
+                (Vec::new(), Vec::new())
+            };
             (ahead_commits, ahead_branch, tags, unpushed)
         })
     };
@@ -1963,7 +1964,8 @@ fn repo_snapshot_blocking(
         is_clean,
         changes,
         commits,
-        graph_commits,
+        // Branch graph construction is deferred until its view is opened.
+        graph_commits: Vec::new(),
         ahead_commits,
         ahead_branch,
         remotes,
@@ -2006,27 +2008,30 @@ struct RepoEnrichment {
     unpushed_tags: Vec<String>,
 }
 
-fn repo_enrich_blocking(path: String, ahead_limit: Option<u32>) -> Result<RepoEnrichment, String> {
+fn repo_enrich_blocking(
+    path: String,
+    ahead_limit: Option<u32>,
+    include_tags: bool,
+) -> Result<RepoEnrichment, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let branch = current_branch(&repo_path);
     let limit = ahead_limit.unwrap_or(40).clamp(1, 400);
 
     let repo_path_ahead = repo_path.clone();
-    let repo_path_tags = repo_path;
     let branch_for_ahead = branch.clone();
     std::thread::scope(|scope| {
         let ahead_handle = scope.spawn(move || {
             ahead_commits(&repo_path_ahead, &[], limit, &branch_for_ahead)
         });
-        let tags_handle = scope.spawn(move || {
-            let unpushed = unpushed_tags(&repo_path_tags);
-            let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
-            let tags = tag_list(&repo_path_tags, &unpushed_set);
-            (tags, unpushed)
-        });
         let (ahead_commits, ahead_branch) = ahead_handle.join().unwrap();
-        let (tags, unpushed) = tags_handle.join().unwrap();
+        let (tags, unpushed) = if include_tags {
+            let unpushed = unpushed_tags(&repo_path);
+            let unpushed_set: HashSet<String> = unpushed.iter().cloned().collect();
+            (tag_list(&repo_path, &unpushed_set), unpushed)
+        } else {
+            (Vec::new(), Vec::new())
+        };
         Ok(RepoEnrichment {
             ahead_commits,
             ahead_branch,
@@ -2037,53 +2042,75 @@ fn repo_enrich_blocking(path: String, ahead_limit: Option<u32>) -> Result<RepoEn
 }
 
 #[tauri::command]
-async fn repo_enrich(path: String, ahead_limit: Option<u32>) -> Result<RepoEnrichment, String> {
-    tauri::async_runtime::spawn_blocking(move || repo_enrich_blocking(path, ahead_limit))
+async fn repo_enrich(
+    path: String,
+    ahead_limit: Option<u32>,
+    include_tags: Option<bool>,
+) -> Result<RepoEnrichment, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        repo_enrich_blocking(path, ahead_limit, include_tags.unwrap_or(true))
+    })
         .await
         .map_err(|err| format!("Enrich task failed: {err}"))?
 }
 
 #[tauri::command]
-fn repo_commits(path: String, skip: Option<u32>, limit: Option<u32>) -> Result<Vec<CommitEntry>, String> {
-    let repo = normalize_repo(&path)?;
-    let skip = skip.unwrap_or(0);
-    let limit = limit.unwrap_or(50);
-    Ok(graph_log_page(Path::new(&repo.path), skip, limit))
+async fn repo_commits(
+    path: String,
+    skip: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Vec<CommitEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        let skip = skip.unwrap_or(0);
+        let limit = limit.unwrap_or(50);
+        Ok(graph_log_page(Path::new(&repo.path), skip, limit))
+    })
+    .await
+    .map_err(|err| format!("Graph task failed: {err}"))?
 }
 
 #[tauri::command]
-fn repo_changes(path: String) -> Result<RepoChanges, String> {
-    let repo = normalize_repo(&path)?;
-    let changes = changed_files(Path::new(&repo.path));
-    Ok(RepoChanges {
-        is_clean: changes.is_empty(),
-        changes,
+async fn repo_changes(path: String) -> Result<RepoChanges, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        let changes = changed_files(Path::new(&repo.path));
+        Ok(RepoChanges {
+            is_clean: changes.is_empty(),
+            changes,
+        })
     })
+    .await
+    .map_err(|err| format!("Changes task failed: {err}"))?
 }
 
 #[tauri::command]
-fn repo_focus_state(path: String) -> Result<RepoFocusState, String> {
-    let repo = normalize_repo(&path)?;
-    let repo_path = Path::new(&repo.path);
+async fn repo_focus_state(path: String) -> Result<RepoFocusState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        let repo_path = Path::new(&repo.path);
 
-    // `for-each-ref` includes local branches, fetched remote refs, and tags;
-    // `current_branch` also catches switching between branches at the same tip.
-    // Remote URLs live in config rather than refs, so include those as well.
-    let refs = git(
-        repo_path,
-        &[
-            "for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(*objectname)",
-            "refs/heads",
-            "refs/remotes",
-            "refs/tags",
-        ],
-    )?;
-    let remotes = git(repo_path, &["remote", "-v"])?;
+        // `for-each-ref` includes local branches, fetched remote refs, and tags;
+        // `current_branch` also catches switching between branches at the same tip.
+        // Remote URLs live in config rather than refs, so include those as well.
+        let refs = git(
+            repo_path,
+            &[
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00%(*objectname)",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ],
+        )?;
+        let remotes = git(repo_path, &["remote", "-v"])?;
 
-    Ok(RepoFocusState {
-        fingerprint: format!("{}\n{refs}\n{remotes}", current_branch(repo_path)),
+        Ok(RepoFocusState {
+            fingerprint: format!("{}\n{refs}\n{remotes}", current_branch(repo_path)),
+        })
     })
+    .await
+    .map_err(|err| format!("Focus task failed: {err}"))?
 }
 
 fn snapshot_was_superseded(generation: Option<u64>) -> bool {
@@ -2096,8 +2123,10 @@ async fn repo_snapshot(
     limit: Option<u32>,
     generation: Option<u64>,
     lite: Option<bool>,
+    include_tags: Option<bool>,
 ) -> Result<RepoSnapshot, String> {
     let lite = lite.unwrap_or(false);
+    let include_tags = include_tags.unwrap_or(!lite);
     if let Some(g) = generation {
         SNAPSHOT_GENERATION.store(g, Ordering::SeqCst);
     }
@@ -2105,7 +2134,7 @@ async fn repo_snapshot(
         if snapshot_was_superseded(generation) {
             return Err(SNAPSHOT_SUPERSEDED.to_string());
         }
-        let result = repo_snapshot_blocking(path, limit, lite)?;
+        let result = repo_snapshot_blocking(path, limit, lite, include_tags)?;
         if snapshot_was_superseded(generation) {
             return Err(SNAPSHOT_SUPERSEDED.to_string());
         }
@@ -3433,7 +3462,7 @@ fn update_branch(path: String, onto: Option<String>) -> Result<UpdateOutcome, St
     let onto = onto
         .map(|o| o.trim().to_string())
         .filter(|o| !o.is_empty())
-        .or_else(|| integration_branch(&branch_list(repo_path)))
+        .or_else(|| integration_branch(&branch_list(repo_path, true)))
         .ok_or_else(|| "No main branch to update from.".to_string())?;
 
     if onto == branch {
@@ -4354,7 +4383,7 @@ fn merge_into_trunk(path: String, source: Option<String>) -> Result<MergeOutcome
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
 
-    let trunk = integration_branch(&branch_list(repo_path))
+    let trunk = integration_branch(&branch_list(repo_path, true))
         .ok_or_else(|| "No main branch to merge into.".to_string())?;
 
     let source = source
@@ -4825,21 +4854,25 @@ fn init_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
 }
 
 #[tauri::command]
-fn fetch_repo(path: String) -> Result<ActionResult, String> {
-    let repo = normalize_repo(&path)?;
-    let repo_path = Path::new(&repo.path);
-    let remote = default_remote_name(repo_path)
-        .ok_or_else(|| "Add a primary remote before fetching.".to_string())?;
-    // Extra remotes are backup destinations. Fetching only the primary keeps a
-    // backup from becoming an accidental source of branch state or merges.
-    let output = git_network_owned(
-        repo_path,
-        vec!["fetch".to_string(), "--prune".to_string(), remote.clone()],
-    )?;
-    Ok(ActionResult {
-        message: format!("Fetched {remote}."),
-        output,
+async fn fetch_repo(path: String) -> Result<ActionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = normalize_repo(&path)?;
+        let repo_path = Path::new(&repo.path);
+        let remote = default_remote_name(repo_path)
+            .ok_or_else(|| "Add a primary remote before fetching.".to_string())?;
+        // Extra remotes are backup destinations. Fetching only the primary keeps a
+        // backup from becoming an accidental source of branch state or merges.
+        let output = git_network_owned(
+            repo_path,
+            vec!["fetch".to_string(), "--prune".to_string(), remote.clone()],
+        )?;
+        Ok(ActionResult {
+            message: format!("Fetched {remote}."),
+            output,
+        })
     })
+    .await
+    .map_err(|err| format!("Fetch task failed: {err}"))?
 }
 
 #[tauri::command]

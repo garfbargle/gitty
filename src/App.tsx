@@ -630,6 +630,7 @@ function App() {
   const lastFocusRefreshAtRef = useRef(0);
   const focusFingerprintByPathRef = useRef(new Map<string, string>());
   const snapshotGenerationRef = useRef(0);
+  const graphLoadRequestRef = useRef(0);
   const changesRefreshRequestRef = useRef(0);
   /// Guards the commit preview the same way the others guard their reads.
   /// inspectCommit sets the viewed commit, then awaits its files and diff; with
@@ -942,6 +943,9 @@ function App() {
 
   function openRepoSettings() {
     setRepoSettingsOpen(true);
+    // Tag status requires a remote comparison, so defer it until the settings
+    // that display it are opened rather than paying for it on every repo load.
+    void refreshRepo();
   }
 
   useEffect(() => {
@@ -1088,7 +1092,7 @@ function App() {
       setSnapshot(result);
       setSelectedPath(result.repo.path);
       updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
-      void enrichRepoSnapshot(path, requestId);
+      void enrichRepoSnapshot(path, requestId, false);
       return;
     }
 
@@ -1125,11 +1129,16 @@ function App() {
     setPushRejected(false);
   }
 
-  async function enrichRepoSnapshot(path: string, switchGeneration: number): Promise<void> {
+  async function enrichRepoSnapshot(
+    path: string,
+    switchGeneration: number,
+    includeTags = true,
+  ): Promise<void> {
     try {
       const result = await invoke<RepoEnrichment>("repo_enrich", {
         path,
         aheadLimit: INITIAL_COMMIT_LIMIT,
+        includeTags,
       });
       if (switchGeneration !== selectRepoRequestRef.current) return;
       setSnapshot((prev) =>
@@ -1138,8 +1147,7 @@ function App() {
               ...prev,
               aheadCommits: result.aheadCommits,
               aheadBranch: result.aheadBranch,
-              tags: result.tags,
-              unpushedTags: result.unpushedTags,
+              ...(includeTags ? { tags: result.tags, unpushedTags: result.unpushedTags } : {}),
             }
           : prev,
       );
@@ -1170,7 +1178,14 @@ function App() {
 
   async function refreshRepoQuiet(
     path = selectedPath,
-    options?: { updateState?: boolean; generation?: number; lite?: boolean; limit?: number },
+    options?: {
+      updateState?: boolean;
+      generation?: number;
+      lite?: boolean;
+      limit?: number;
+      includeTags?: boolean;
+      preserveTags?: boolean;
+    },
   ): Promise<RepoSnapshot | null> {
     if (!path) return null;
     const updateState = options?.updateState !== false;
@@ -1181,13 +1196,22 @@ function App() {
         limit: options?.limit ?? INITIAL_COMMIT_LIMIT,
         generation: options?.generation ?? null,
         lite: options?.lite ?? false,
+        includeTags: options?.includeTags ?? null,
       });
       if (
         updateState &&
         stateGeneration === snapshotGenerationRef.current &&
         selectedPathRef.current === path
       ) {
-        setSnapshot(result);
+        setSnapshot((previous) =>
+          options?.preserveTags && previous?.repo.path === result.repo.path
+            ? {
+                ...result,
+                tags: previous.tags,
+                unpushedTags: previous.unpushedTags,
+              }
+            : result,
+        );
       }
       updateRepoDirtyState(result.repo.path, !result.isClean, result.repo.lastActivityAt);
       return result;
@@ -1197,6 +1221,30 @@ function App() {
       return null;
     }
   }
+
+  // Graph history can fan out across every local and recent remote branch.
+  // Keep it out of the default timeline load and fetch it only after the user
+  // opens the Branches view.
+  useEffect(() => {
+    if (historyView !== "graph" || !selectedPath || snapshot?.repo.path !== selectedPath) return;
+    if ((snapshot.graphCommits?.length ?? 0) > 0) return;
+
+    const requestId = ++graphLoadRequestRef.current;
+    void invoke<CommitEntry[]>("repo_commits", {
+      path: selectedPath,
+      skip: 0,
+      limit: INITIAL_COMMIT_LIMIT,
+    })
+      .then((graphCommits) => {
+        if (requestId !== graphLoadRequestRef.current) return;
+        setSnapshot((current) =>
+          current?.repo.path === selectedPath ? { ...current, graphCommits } : current,
+        );
+      })
+      .catch((err) => {
+        if (requestId === graphLoadRequestRef.current) setError(String(err));
+      });
+  }, [historyView, selectedPath, snapshot?.repo.path, snapshot?.graphCommits?.length]);
 
   async function refreshChangesQuiet(path = selectedPath): Promise<FileChange[] | null> {
     if (!path) return null;
@@ -2650,7 +2698,10 @@ function App() {
         return { ...current, [path]: { message: [activity.message, timestampLogOutput([result.message, result.output].filter(Boolean).join("\n"))].filter(Boolean).join("\n"), error: "" } };
       });
       if (selectedPath === path) setPushRejected(false);
-      const snap = await refreshRepoQuiet(path);
+      const snap = await refreshRepoQuiet(path, {
+        includeTags: tags,
+        preserveTags: !tags,
+      });
       // Only count what this push actually tried to ship. Tags left behind by a
       // commits-only push are not "remaining work" — counting them held the
       // button in its post-push state forever on any fork carrying upstream tags.
@@ -2685,7 +2736,7 @@ function App() {
         if (selectedPath === path) setPushRejected(true);
       }
       setPushPhases((current) => ({ ...current, [path]: "idle" }));
-      await refreshRepoQuiet(path);
+      await refreshRepoQuiet(path, { includeTags: false, preserveTags: true });
       return false;
     } finally {
       pushLockRef.current.delete(path);
