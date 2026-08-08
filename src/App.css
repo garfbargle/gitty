@@ -5885,9 +5885,10 @@ button.context-chip.pullable.busy,
 }
 
 /* ───────────────────── Reduced motion ─────────────────────
-   The OS-level "reduce motion" preference was previously unhandled. Animation
-   is decoration here, never the only signal for a state change, so it can be
-   removed outright rather than substituted. */
+   The OS-level "reduce motion" preference keeps ornamental motion out of the
+   interface. An in-flight Push is different: its motion is the clearest signal
+   that a network operation is still alive, so retain a slow, stepped version
+   of that indicator rather than leaving it looking frozen. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -5896,6 +5897,16 @@ button.context-chip.pullable.busy,
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .push-btn-group.pushing .push-btn-main {
+    animation:
+      push-active-pulse 1.8s steps(2, end) infinite,
+      push-shimmer 2.4s steps(4, end) infinite !important;
+  }
+
+  .push-btn-group.pushing .spin {
+    animation: spin 1.6s steps(8, end) infinite !important;
   }
 }
 
