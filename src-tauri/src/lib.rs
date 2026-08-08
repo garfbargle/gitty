@@ -3349,7 +3349,13 @@ fn resolve_conflict(path: String, file: String, side: String) -> Result<ActionRe
 }
 
 #[tauri::command]
-fn conflict_sides(path: String, file: String) -> Result<ConflictSides, String> {
+async fn conflict_sides(path: String, file: String) -> Result<ConflictSides, String> {
+    tauri::async_runtime::spawn_blocking(move || conflict_sides_blocking(path, file))
+        .await
+        .map_err(|err| format!("Conflict side lookup failed: {err}"))?
+}
+
+fn conflict_sides_blocking(path: String, file: String) -> Result<ConflictSides, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let file = file.trim().to_string();
@@ -3372,7 +3378,13 @@ fn conflict_sides(path: String, file: String) -> Result<ConflictSides, String> {
 
 /// Reads a working-tree file as text so the changes view can edit it inline.
 #[tauri::command]
-fn read_working_file(path: String, file_path: String) -> Result<String, String> {
+async fn read_working_file(path: String, file_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || read_working_file_blocking(path, file_path))
+        .await
+        .map_err(|err| format!("Working-file read failed: {err}"))?
+}
+
+fn read_working_file_blocking(path: String, file_path: String) -> Result<String, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
     let file_path = file_path.trim().to_string();
@@ -3975,7 +3987,13 @@ fn resolve_subtree_source(
 /// committed manifest's origin hints. Local-only and instant — no network,
 /// matching Gitty's no-background-polling stance; Update fetches on demand.
 #[tauri::command]
-fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
+async fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_linked_folders_blocking(path))
+        .await
+        .map_err(|err| format!("Linked-folder lookup failed: {err}"))?
+}
+
+fn list_linked_folders_blocking(path: String) -> Result<Vec<LinkedFolder>, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
 
@@ -4027,7 +4045,13 @@ fn list_linked_folders(path: String) -> Result<Vec<LinkedFolder>, String> {
 /// itself offline. A folder with an unknown source or no recorded sync point, or
 /// one the network can't reach, comes back `updates_available: None` (neutral).
 #[tauri::command]
-fn check_subtree_updates(path: String) -> Result<Vec<SubtreeUpdateStatus>, String> {
+async fn check_subtree_updates(path: String) -> Result<Vec<SubtreeUpdateStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_subtree_updates_blocking(path))
+        .await
+        .map_err(|err| format!("Linked-folder update check failed: {err}"))?
+}
+
+fn check_subtree_updates_blocking(path: String) -> Result<Vec<SubtreeUpdateStatus>, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
 
@@ -4097,7 +4121,13 @@ fn tracking_tip_tree(repo_path: &Path, url: &str, branch: &str) -> Option<String
 /// last-fetched tip tree — because the split-SHA trailer goes stale after a
 /// push. Instant/local; freshness of "behind" edge cases follows the last fetch.
 #[tauri::command]
-fn check_subtree_publishable(path: String) -> Result<Vec<SubtreePublishStatus>, String> {
+async fn check_subtree_publishable(path: String) -> Result<Vec<SubtreePublishStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_subtree_publishable_blocking(path))
+        .await
+        .map_err(|err| format!("Linked-folder publish check failed: {err}"))?
+}
+
+fn check_subtree_publishable_blocking(path: String) -> Result<Vec<SubtreePublishStatus>, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
 
