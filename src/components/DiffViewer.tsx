@@ -32,6 +32,7 @@ type DiffViewerProps = {
   showWorkingTreeBadges?: boolean;
   emptyMessage?: string;
   disabled?: boolean;
+  truncated?: boolean;
   onUnstage?: (path: string) => void;
   onStageHunk?: (filePath: string, patch: string) => void;
   onUnstageHunk?: (filePath: string, patch: string) => void;
@@ -160,6 +161,9 @@ function DiffHunkView({
   onEditLine?: (filePath: string, newLine: number, expected: string, text: string) => void;
 }) {
   const { hunk, scope, file } = scopedHunk;
+  const maxVisibleLines = 1_500;
+  const visibleLines = hunk.lines.slice(0, maxVisibleLines);
+  const hiddenLineCount = hunk.lines.length - visibleLines.length;
   const canStage = showActions && scope === "unstaged" && onStageHunk;
   const canDiscard = showActions && scope === "unstaged" && onDiscardHunk;
   const canUnstage = showActions && scope === "staged" && onUnstageHunk;
@@ -225,7 +229,7 @@ function DiffHunkView({
         </div>
       ) : null}
       <div className="diff-lines">
-        {hunk.lines.map((line, lineIndex) => (
+        {visibleLines.map((line, lineIndex) => (
           <DiffLineRow
             line={line}
             filePath={filePath}
@@ -235,6 +239,11 @@ function DiffHunkView({
             key={`${line.kind}-${lineIndex}`}
           />
         ))}
+        {hiddenLineCount > 0 ? (
+          <div className="diff-empty inline">
+            {hiddenLineCount.toLocaleString()} more lines in this hunk are hidden to keep the viewer responsive.
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -422,6 +431,7 @@ export function DiffViewer({
   showWorkingTreeBadges = true,
   emptyMessage,
   disabled,
+  truncated = false,
   onUnstage,
   onStageHunk,
   onUnstageHunk,
@@ -435,6 +445,7 @@ export function DiffViewer({
   const showHunkActions =
     showWorkingTreeBadges &&
     !commit &&
+    !truncated &&
     !!(onStageHunk || onUnstageHunk || onDiscardHunk);
   // Inline editing works on real working-tree files, so only in the working-tree
   // view (never a historical commit) and only when a save handler is wired in.
@@ -495,6 +506,11 @@ export function DiffViewer({
 
   return (
     <section className="diff-panel-center">
+      {truncated ? (
+        <div className="diff-empty inline">
+          This diff preview is capped at 256 KiB. Hunk actions are disabled; stage or unstage the file instead.
+        </div>
+      ) : null}
       <header className="diff-toolbar">
         <div className="diff-toolbar-left">
           {multiFile ? (

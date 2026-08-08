@@ -25,6 +25,7 @@ use std::{
 static SNAPSHOT_GENERATION: AtomicU64 = AtomicU64::new(0);
 const SNAPSHOT_SUPERSEDED: &str = "__superseded__";
 const NETWORK_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const GIT_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
 fn network_operation_is_idle(elapsed: Duration, last_activity_ms: u64) -> bool {
     elapsed
@@ -615,6 +616,7 @@ fn git_network_owned_with_progress(
         let mut reader = BufReader::new(stderr);
         let mut all = Vec::new();
         let mut buffer = [0u8; 1024];
+        let mut last_progress_emit = Instant::now();
         loop {
             let Ok(count) = reader.read(&mut buffer) else {
                 break;
@@ -627,7 +629,11 @@ fn git_network_owned_with_progress(
             all.extend_from_slice(chunk);
             let text = String::from_utf8_lossy(chunk).replace('\r', "\n");
             for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+                if last_progress_emit.elapsed() < GIT_PROGRESS_EMIT_INTERVAL {
+                    continue;
+                }
                 emit_git_progress(&progress_app, &progress_path, progress_phase.clone(), line);
+                last_progress_emit = Instant::now();
             }
         }
         all
@@ -2412,6 +2418,23 @@ fn git_apply_cached(repo_path: &Path, patch: &str, reverse: bool) -> Result<Stri
     git_apply_patch(repo_path, patch, true, reverse)
 }
 
+// The diff viewer renders every returned line. Keep a single file's payload
+// bounded before it crosses the IPC boundary so generated files cannot lock up
+// the WebView or consume unbounded renderer memory.
+const MAX_DISPLAY_DIFF_BYTES: usize = 256 * 1024;
+
+fn truncate_diff_for_display(diff: String) -> (String, bool) {
+    if diff.len() <= MAX_DISPLAY_DIFF_BYTES {
+        return (diff, false);
+    }
+
+    let mut end = MAX_DISPLAY_DIFF_BYTES;
+    while end > 0 && !diff.is_char_boundary(end) {
+        end -= 1;
+    }
+    (diff[..end].to_string(), true)
+}
+
 fn file_diff_parts_blocking(path: String, file_path: String) -> Result<FileDiffParts, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = Path::new(&repo.path);
@@ -2445,7 +2468,13 @@ fn file_diff_parts_blocking(path: String, file_path: String) -> Result<FileDiffP
         }
     }
 
-    Ok(FileDiffParts { staged, unstaged })
+    let (staged, staged_truncated) = truncate_diff_for_display(staged);
+    let (unstaged, unstaged_truncated) = truncate_diff_for_display(unstaged);
+    Ok(FileDiffParts {
+        staged,
+        unstaged,
+        truncated: staged_truncated || unstaged_truncated,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2453,6 +2482,7 @@ fn file_diff_parts_blocking(path: String, file_path: String) -> Result<FileDiffP
 struct FileDiffParts {
     staged: String,
     unstaged: String,
+    truncated: bool,
 }
 
 #[tauri::command]
@@ -2543,7 +2573,8 @@ fn file_diff_blocking(path: String, file_path: String, commit: Option<String>) -
                 "--".to_string(),
                 file_path,
             ],
-        );
+        )
+        .map(|diff| truncate_diff_for_display(diff).0);
     }
 
     let unstaged = git_owned(
@@ -2576,13 +2607,13 @@ fn file_diff_blocking(path: String, file_path: String, commit: Option<String>) -
 
     if combined.is_empty() {
         if let Some(untracked) = untracked_file_diff(repo_path, &file_path)? {
-            return Ok(untracked);
+            return Ok(truncate_diff_for_display(untracked).0);
         }
         Ok(format!(
             "No tracked diff for {file_path}. This may be an untracked file."
         ))
     } else {
-        Ok(combined)
+        Ok(truncate_diff_for_display(combined).0)
     }
 }
 
@@ -6246,5 +6277,14 @@ mod tests {
             Duration::from_secs(89).as_millis() as u64,
         ));
         assert!(network_operation_is_idle(Duration::from_secs(120), 0));
+    }
+
+    #[test]
+    fn diff_preview_cap_respects_utf8_boundaries() {
+        let input = "🦊".repeat(MAX_DISPLAY_DIFF_BYTES);
+        let (preview, truncated) = truncate_diff_for_display(input);
+        assert!(truncated);
+        assert!(preview.len() <= MAX_DISPLAY_DIFF_BYTES);
+        assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
     }
 }

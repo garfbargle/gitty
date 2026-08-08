@@ -154,6 +154,7 @@ const STATUS_MESSAGE_DISMISS_MS = 4_000;
 // refresh into a network request.
 const AUTO_FETCH_MIN_INTERVAL_MS = 15_000;
 const AUTO_FETCH_INTERVAL_MS = 5 * 60_000;
+const MAX_OPEN_DIFF_FILES = 4;
 
 const repoSortModes = new Set<RepoSortMode>([
   "manual",
@@ -229,11 +230,13 @@ function App() {
   const [focus, setFocus] = useState<DiffFocus>(null);
   const [diff, setDiff] = useState(emptyDiff);
   const [diffBundles, setDiffBundles] = useState<DiffFileBundle[]>([]);
+  const [diffTruncated, setDiffTruncated] = useState(false);
   const [diffSelection, setDiffSelection] = useState<ChangeSelectionEntry[]>([]);
 
   useEffect(() => {
     if (diff === emptyDiff) {
       setDiffBundles([]);
+      setDiffTruncated(false);
     }
   }, [diff]);
   const [commitMessage, setCommitMessage] = useState("");
@@ -663,23 +666,41 @@ function App() {
   // output must never bleed into the repository currently on screen.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    const pendingByPath = new Map<string, string[]>();
+    let frame: number | null = null;
+
+    const flushProgress = () => {
+      frame = null;
+      if (pendingByPath.size === 0) return;
+      const pending = new Map(pendingByPath);
+      pendingByPath.clear();
+      setGitActivityByPath((current) => {
+        const next = { ...current };
+        for (const [path, lines] of pending) {
+          const activity = current[path] ?? { message: "", error: "" };
+          next[path] = {
+            ...activity,
+            message: [...activity.message.split("\n"), ...lines].filter(Boolean).slice(-120).join("\n"),
+          };
+        }
+        return next;
+      });
+    };
+
     void listen<GitProgress>("git-progress", (event) => {
       const line = timestampLogOutput(`${event.payload.phase}: ${event.payload.message}`.trim());
       if (!line) return;
-      setGitActivityByPath((current) => {
-        const activity = current[event.payload.path] ?? { message: "", error: "" };
-        return {
-          ...current,
-          [event.payload.path]: {
-            ...activity,
-            message: [...activity.message.split("\n"), line].filter(Boolean).slice(-120).join("\n"),
-          },
-        };
-      });
+      const lines = pendingByPath.get(event.payload.path) ?? [];
+      lines.push(line);
+      pendingByPath.set(event.payload.path, lines);
+      if (frame === null) frame = window.requestAnimationFrame(flushProgress);
     }).then((stop) => {
       unlisten = stop;
     });
-    return () => unlisten?.();
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      unlisten?.();
+    };
   }, []);
 
   const rescanDiscovery = useCallback(() => {
@@ -1554,11 +1575,13 @@ function App() {
     path = selectedPath,
   ) {
     const seen = new Set<string>();
-    const entries = selection.filter((entry) => {
+    const uniqueEntries = selection.filter((entry) => {
       if (seen.has(entry.file.path)) return false;
       seen.add(entry.file.path);
       return true;
     });
+    const entries = uniqueEntries.slice(0, MAX_OPEN_DIFF_FILES);
+    const omittedCount = uniqueEntries.length - entries.length;
 
     const requestId = ++loadDiffRequestRef.current;
     setDiffSelection(selection);
@@ -1567,13 +1590,14 @@ function App() {
       if (requestId !== loadDiffRequestRef.current) return;
       setDiff(emptyDiff);
       setDiffBundles([]);
+      setDiffTruncated(false);
       return;
     }
 
     try {
       const parts = await Promise.all(
         entries.map((entry) =>
-          invoke<{ staged: string; unstaged: string }>("file_diff_parts", {
+          invoke<{ staged: string; unstaged: string; truncated: boolean }>("file_diff_parts", {
             path,
             filePath: entry.file.path,
           }),
@@ -1582,6 +1606,7 @@ function App() {
       if (requestId !== loadDiffRequestRef.current) return;
       const bundles = parts.flatMap((part) => buildDiffBundles(part.staged, part.unstaged));
       setDiffBundles(bundles);
+      setDiffTruncated(parts.some((part) => part.truncated));
       const combined = parts
         .flatMap((part) => [part.staged, part.unstaged])
         .map((part) => part.trim())
@@ -1591,6 +1616,9 @@ function App() {
         setDiff(combined || "This file has no tracked diff.");
       } else {
         setDiff(combined || "No diff available for selected files.");
+      }
+      if (omittedCount > 0) {
+        setMessage(`Showing diffs for the first ${MAX_OPEN_DIFF_FILES} selected files.`);
       }
     } catch (err) {
       if (requestId !== loadDiffRequestRef.current) return;
@@ -3562,6 +3590,7 @@ function App() {
                           showWorkingTreeBadges={!viewingCommit}
                           emptyMessage={emptyDiff}
                           disabled={loading}
+                          truncated={workingTreeActive && diffTruncated}
                           onUnstage={(path) => void unstageFiles([path])}
                           onStageHunk={(filePath, patch) => void stageHunk(filePath, patch)}
                           onUnstageHunk={(filePath, patch) => void unstageHunk(filePath, patch)}
