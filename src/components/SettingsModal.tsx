@@ -8,9 +8,20 @@ type SettingsModalProps = {
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /// Extra class on the panel, for the rare surface that needs more room than
+  /// the settings width.
+  className?: string;
 };
 
-export function SettingsModal({ open, title, subtitle, onClose, children, footer }: SettingsModalProps) {
+export function SettingsModal({
+  open,
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  className,
+}: SettingsModalProps) {
   useEffect(() => {
     if (!open) return;
 
@@ -32,7 +43,7 @@ export function SettingsModal({ open, title, subtitle, onClose, children, footer
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div
-        className="settings-modal"
+        className={className ? `settings-modal ${className}` : "settings-modal"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"

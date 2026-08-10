@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, Loader2, Lock, Plus, RefreshCw, Trash2 } from "lucide-react";
-import type { ActionResult, WorktreeEntry } from "../types";
+import { FolderOpen, Loader2, Lock, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import type { ActionResult, WorktreeCleanupEntry, WorktreeEntry } from "../types";
 import { shortenPath } from "../lib/git";
 import { revealInFinder } from "../lib/finder";
 
@@ -12,6 +12,12 @@ type WorktreeSectionProps = {
   /// worktree here used to leave the row showing a stale count until something
   /// unrelated happened to refresh it.
   worktrees: WorktreeEntry[];
+  /// Per-folder judgement of what would be lost by removing it. Owned by the
+  /// drawer, which also shows the count at the top — this panel is the bottom
+  /// of a long scroll.
+  cleanup: WorktreeCleanupEntry[];
+  /// Open the review list. Nothing is removed without going through it.
+  onReviewCleanup: () => void;
   /// Re-read the list after this panel mutates it.
   onWorktreesChanged: () => void;
   /// Switch Gitty to another checkout of the same repository.
@@ -30,6 +36,8 @@ export function WorktreeSection({
   repoPath,
   disabled,
   worktrees,
+  cleanup,
+  onReviewCleanup,
   onWorktreesChanged,
   onOpenWorktree,
   onConfirmRemove,
@@ -54,13 +62,19 @@ export function WorktreeSection({
 
   const controlsDisabled = disabled || busy !== null;
   const others = worktrees.filter((entry) => !entry.isCurrent);
+  const finished = cleanup.filter((entry) => entry.verdict === "safe");
+  const maybeFinished = cleanup.filter((entry) => entry.verdict === "probably");
+  const reviewable = finished.length + maybeFinished.length;
+  const judged = new Map(cleanup.map((entry) => [entry.path, entry] as const));
 
   return (
     <div className="settings-field">
       <div className="settings-field-head">
         <label>Folders</label>
         <div className="settings-field-head-actions">
-          {worktrees.some((entry) => entry.prunable) ? (
+          {/* The review covers folders git has lost track of too, so the bare
+              prune only shows when there is no review to offer. */}
+          {worktrees.some((entry) => entry.prunable) && reviewable === 0 ? (
             <button
               type="button"
               className="settings-inline-link"
@@ -91,6 +105,28 @@ export function WorktreeSection({
         Keep more than one branch open at once, each in its own folder, so you can switch without
         stashing. These are git worktrees.
       </p>
+
+      {reviewable > 0 ? (
+        <div className="cleanup-banner">
+          <Sparkles size={14} />
+          <span className="cleanup-banner-copy">
+            <strong>
+              {finished.length > 0
+                ? `${finished.length} ${finished.length === 1 ? "folder looks" : "folders look"} finished.`
+                : `${maybeFinished.length} ${maybeFinished.length === 1 ? "folder may be" : "folders may be"} finished with.`}
+            </strong>
+            <span>Nothing in them would be lost. Gitty can walk you through removing them.</span>
+          </span>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={controlsDisabled}
+            onClick={onReviewCleanup}
+          >
+            Review
+          </button>
+        </div>
+      ) : null}
 
       {adding ? (
         <div className="subtree-add-form">
@@ -165,6 +201,11 @@ export function WorktreeSection({
                 {entry.branch ?? `detached at ${entry.head.slice(0, 7)}`}
                 {entry.isMain ? <em className="worktree-badge">main folder</em> : null}
                 {entry.isCurrent ? <em className="worktree-badge current">open now</em> : null}
+                {judged.get(entry.path)?.verdict === "safe" && !entry.prunable ? (
+                  <em className="worktree-badge finished" title={judged.get(entry.path)?.reason}>
+                    finished
+                  </em>
+                ) : null}
                 {entry.locked ? (
                   <em className="worktree-badge" title="Locked">
                     <Lock size={10} /> locked

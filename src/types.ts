@@ -309,3 +309,65 @@ export type WorktreeEntry = {
   /// Gitty's own scratch checkout (merge or commit preview), not the user's.
   internal: boolean;
 };
+
+/// How sure Gitty is that a folder can go.
+///
+/// "safe" means every commit and file in it exists somewhere else, and is the
+/// only verdict ticked on the user's behalf. "probably" means nothing would be
+/// lost but the work is still open. "keep" means something lives only there.
+export type WorktreeCleanupVerdict = "safe" | "probably" | "keep";
+
+export type WorktreeCleanupEntry = {
+  path: string;
+  branch: string | null;
+  verdict: WorktreeCleanupVerdict;
+  /// One plain sentence saying why — present for every verdict, including the
+  /// folders Gitty won't offer.
+  reason: string;
+  /// True but not disqualifying: files git never tracked that go with the folder.
+  warnings: string[];
+  /// The folder is already gone from disk; only the record is left.
+  missing: boolean;
+  /// When git last touched this checkout, ms since epoch.
+  lastUsedAt: number | null;
+};
+
+export type WorktreeCleanupFailure = {
+  path: string;
+  message: string;
+};
+
+export type WorktreeCleanupOutcome = {
+  removed: string[];
+  failures: WorktreeCleanupFailure[];
+  message: string;
+};
+
+/// One repository's answer during an all-repositories scan. Streamed as it
+/// lands, so the list fills in rather than waiting on the slowest project.
+///
+/// Every payload carries the `scanId` it belongs to; a scan that has been
+/// superseded keeps emitting for a moment, and its events must be dropped
+/// rather than merged into the new one's results.
+export type TidyRepoResult = {
+  scanId: number;
+  repoName: string;
+  repoPath: string;
+  entries: WorktreeCleanupEntry[];
+  /// Why this repository could not be read — an unmounted drive, a moved
+  /// folder. Kept rather than dropped: "nothing to tidy" and "couldn't look"
+  /// must not look the same.
+  error: string | null;
+};
+
+export type TidyProgress = {
+  scanId: number;
+  scanned: number;
+  total: number;
+};
+
+export type TidyFolderSize = {
+  scanId: number;
+  path: string;
+  bytes: number;
+};

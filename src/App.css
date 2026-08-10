@@ -6147,6 +6147,335 @@ button.context-chip.pullable.busy,
   color: var(--danger);
 }
 
+/* Folder cleanup: the suggestion, and the review it opens.
+
+   The suggestion appears twice — once at the top of the repository drawer,
+   once beside the folder list itself — because the folder list is several
+   screens down and the top of the drawer is where a passing glance lands.
+   Same tone in both places so it reads as one thing said twice, not two
+   different notices. */
+.cleanup-hint,
+.cleanup-banner {
+  align-items: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.cleanup-hint {
+  margin-bottom: var(--space-3);
+}
+
+.cleanup-banner {
+  margin-bottom: var(--space-2);
+}
+
+.cleanup-hint-copy,
+.cleanup-banner-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cleanup-hint-copy strong,
+.cleanup-banner-copy strong {
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+
+.cleanup-hint-copy span,
+.cleanup-banner-copy span {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.cleanup-hint .settings-btn,
+.cleanup-banner .settings-btn {
+  flex-shrink: 0;
+}
+
+.worktree-badge.finished {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cleanup-group {
+  margin-top: var(--space-3);
+}
+
+.cleanup-group-head h4 {
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-caps);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.cleanup-group-head p {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  margin: 2px 0 0;
+}
+
+.cleanup-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.cleanup-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+/* Folders nothing can be done to are dimmed rather than dropped: "why isn't
+   that one here?" is the question that sends people to a terminal. */
+.cleanup-item.keep {
+  opacity: 0.62;
+}
+
+.cleanup-item-main {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.cleanup-item.keep .cleanup-item-main {
+  cursor: default;
+}
+
+.cleanup-item-main input {
+  margin-top: 2px;
+}
+
+.cleanup-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cleanup-item-title {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  gap: var(--space-1);
+}
+
+.cleanup-item-age {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-style: normal;
+  font-weight: var(--weight-medium);
+}
+
+.cleanup-item-text small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanup-item-reason {
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.cleanup-item-warning {
+  align-items: center;
+  color: var(--warning);
+  display: flex;
+  font-size: var(--text-2xs);
+  gap: var(--space-1);
+}
+
+/* Used by every folder-removal surface. They had no rules at all, so the
+   sentence explaining what a removal destroys rendered at browser-default
+   size and colour inside the dialog. */
+.confirm-dialog-lede {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.confirm-dialog-note {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  margin: var(--space-2) 0 0;
+}
+
+.settings-error {
+  color: var(--danger);
+  font-size: var(--text-xs);
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+}
+
+/* Tidy up: the same review, across every repository at once.
+
+   Wider than the settings panels it borrows its shell from. Thirteen
+   repository groups at the settings width is a column of truncated names, and
+   the whole point of this surface is being able to take it in. */
+.settings-modal.tidy-modal {
+  max-height: min(86vh, 720px);
+  max-width: 620px;
+}
+
+.tidy-modal .settings-modal-body {
+  gap: var(--space-3);
+}
+
+.tidy-summary {
+  align-items: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-3);
+}
+
+.tidy-summary-figure {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 1px;
+}
+
+.tidy-summary-figure strong {
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  line-height: 1.1;
+}
+
+.tidy-summary-figure span {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.tidy-summary-copy {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  margin: 0;
+}
+
+.tidy-select-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tidy-rescan {
+  margin-left: auto;
+}
+
+.tidy-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tidy-repo {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tidy-repo-head {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  text-align: left;
+  width: 100%;
+}
+
+.tidy-repo-head:hover {
+  background: var(--bg-hover);
+}
+
+.tidy-chevron {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+
+.tidy-repo-head.open .tidy-chevron {
+  transform: rotate(90deg);
+}
+
+.tidy-repo-name {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tidy-repo-meta {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  margin-left: auto;
+}
+
+.tidy-repo-error {
+  align-items: center;
+  color: var(--warning);
+  display: flex;
+  font-size: var(--text-2xs);
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* How many of this group's folders are ticked, so a collapsed group never
+   hides part of what the Remove button is about to do. */
+.tidy-repo-chosen {
+  background: var(--accent);
+  border-radius: 999px;
+  color: #fff;
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  min-width: 18px;
+  padding: 1px 6px;
+  text-align: center;
+}
+
+.tidy-folder-list {
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+}
+
 .settings-check {
   align-items: center;
   color: var(--text-secondary);

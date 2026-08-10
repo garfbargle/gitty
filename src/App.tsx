@@ -13,6 +13,7 @@ import { buildDiffBundles, type DiffFileBundle } from "./lib/diff";
 import { HistoryTimeline } from "./components/HistoryTimeline";
 import { SplitPane } from "./components/SplitPane";
 import { AppSettingsDrawer } from "./components/AppSettingsDrawer";
+import { TidyUpDrawer } from "./components/TidyUpDrawer";
 import { RepoSettingsDrawer } from "./components/RepoSettingsDrawer";
 import { RepoSidebar } from "./components/RepoSidebar";
 import { TopBar } from "./components/TopBar";
@@ -245,6 +246,7 @@ function App() {
   const [pushOnCommit, setPushOnCommit] = useState(false);
   const [resetMode, setResetMode] = useState<"soft" | "hard">("soft");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tidyUpOpen, setTidyUpOpen] = useState(false);
   const [repoSettingsOpen, setRepoSettingsOpen] = useState(false);
   // Linked folders whose source has moved on, driving the top-bar chip. Computed
   // on the network only at deliberate moments (settings, fetch, or an action),
@@ -3274,6 +3276,7 @@ function App() {
         onSortModeChange={changeRepoSortMode}
         onAddExisting={() => void chooseRepoFolder()}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTidyUp={() => setTidyUpOpen(true)}
         onOpenRepoSettings={(path) => {
           if (path !== selectedPath) {
             void selectRepo(path).then(() => openRepoSettings(path));
@@ -3859,6 +3862,14 @@ function App() {
             }
           })();
         }}
+      />
+
+      <TidyUpDrawer
+        open={tidyUpOpen}
+        repoPaths={repos.map((repo) => repo.path)}
+        openPath={selectedPath}
+        onClose={() => setTidyUpOpen(false)}
+        onFoldersRemoved={() => setWorktreeRefresh((n) => n + 1)}
       />
 
       <AppSettingsDrawer

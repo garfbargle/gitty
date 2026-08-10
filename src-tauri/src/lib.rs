@@ -4,6 +4,7 @@ mod repo_icon;
 mod runner;
 mod settings;
 mod summarize;
+mod tidy;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use discovery::{start_repo_discovery, RepoDiscovery};
@@ -4689,7 +4690,7 @@ fn parse_worktree_list(output: &str, repo_path: &Path) -> Vec<WorktreeEntry> {
 
 /// Compares two paths after canonicalising, so `/tmp` and `/private/tmp` (and
 /// trailing separators) don't read as different checkouts.
-fn same_path(left: &Path, right: &Path) -> bool {
+pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     match (left.canonicalize(), right.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => left == right,
@@ -4797,6 +4798,481 @@ fn prune_worktrees(path: String) -> Result<ActionResult, String> {
     Ok(ActionResult {
         message: "Cleaned up folders git could no longer find.".to_string(),
         output,
+    })
+}
+
+/// Whether a checkout can be removed without losing anything, and how sure we
+/// are.
+///
+/// Three verdicts rather than a boolean, because "nothing would be lost" and
+/// "you have probably finished with this" are different claims, and only the
+/// first one is safe to tick on the user's behalf.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum CleanupVerdict {
+    /// Every commit and every file in the folder exists somewhere else.
+    Safe,
+    /// Nothing would be lost, but the work is still open — offered, never
+    /// pre-selected.
+    Probably,
+    /// Something lives only here. Never offered.
+    Keep,
+}
+
+/// One folder, judged.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorktreeCleanupEntry {
+    pub(crate) path: String,
+    pub(crate) branch: Option<String>,
+    pub(crate) verdict: CleanupVerdict,
+    /// One plain sentence saying why, shown against the folder in the review
+    /// list. Every verdict has one, including `keep` — "no" without a reason
+    /// is the thing that makes people delete the folder by hand instead.
+    pub(crate) reason: String,
+    /// True but not disqualifying: files git never tracked that would go with
+    /// the folder.
+    pub(crate) warnings: Vec<String>,
+    /// The folder is already gone from disk; only git's record of it is left.
+    pub(crate) missing: bool,
+    /// When git last touched this checkout's index, ms since epoch.
+    pub(crate) last_used_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeCleanupFailure {
+    path: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeCleanupOutcome {
+    removed: Vec<String>,
+    failures: Vec<WorktreeCleanupFailure>,
+    message: String,
+}
+
+/// Ignored files that carry no information worth warning about.
+fn is_noise_file(name: &str) -> bool {
+    name == ".DS_Store" || name == "Thumbs.db" || name.ends_with(".log")
+}
+
+/// A half-finished merge, rebase, cherry-pick or bisect. Removing the folder
+/// underneath one throws away conflict resolution with nothing to recover from.
+fn operation_in_progress(worktree: &Path) -> bool {
+    let Ok(dir) = git(worktree, &["rev-parse", "--absolute-git-dir"]) else {
+        return false;
+    };
+    let dir = PathBuf::from(dir.trim());
+    [
+        "MERGE_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+    ]
+    .iter()
+    .any(|name| dir.join(name).exists())
+}
+
+/// Number of changed or untracked entries. `None` when git could not answer,
+/// which is treated as "don't touch it" rather than "nothing there".
+fn uncommitted_count(worktree: &Path) -> Option<usize> {
+    git(worktree, &["status", "--porcelain"])
+        .ok()
+        .map(|output| output.lines().filter(|line| !line.trim().is_empty()).count())
+}
+
+/// When git last wrote this checkout's index — the closest thing to "when did
+/// you last work in here" that survives restarts and needs nothing stored.
+fn worktree_last_used(worktree: &Path) -> Option<u64> {
+    let dir = git(worktree, &["rev-parse", "--absolute-git-dir"]).ok()?;
+    let meta = fs::metadata(PathBuf::from(dir.trim()).join("index")).ok()?;
+    meta.modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|since| since.as_millis() as u64)
+}
+
+/// Ignored files that would be deleted with the folder and could not be got
+/// back.
+///
+/// `git worktree remove` refuses on uncommitted *tracked* work but deletes
+/// ignored files without a word, so this is the one real way to lose something
+/// by accepting a suggestion here.
+///
+/// Only *files* count. `--directory` collapses each wholly-ignored directory to
+/// one entry, and in practice those are dependencies and build output —
+/// `node_modules/`, `dist/`, `src-tauri/target/`, `src-tauri/gen/`. Judging
+/// them by name needs a list that is wrong for the next toolchain along, and
+/// being wrong here is expensive in the direction nobody notices: every folder
+/// gets demoted out of "nothing would be lost" and the suggestion stops meaning
+/// anything. What actually hurts to lose is a single ignored file — a `.env`, a
+/// local database, a scratch note — and those are listed individually whatever
+/// directory they sit in.
+fn irreplaceable_local_files(worktree: &Path) -> Vec<String> {
+    let Ok(output) = git(
+        worktree,
+        &[
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "--no-empty-directory",
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.ends_with('/'))
+        .filter(|line| {
+            let name = line.rsplit('/').next().unwrap_or(line);
+            !is_noise_file(name)
+        })
+        .take(20)
+        .map(str::to_string)
+        .collect()
+}
+
+/// "`.env`", "`.env` and `data.db`", "`.env`, `data.db` and 3 more".
+fn name_phrase(names: &[String]) -> String {
+    match names.len() {
+        0 => String::new(),
+        1 => names[0].clone(),
+        2 => format!("{} and {}", names[0], names[1]),
+        _ => format!("{}, {} and {} more", names[0], names[1], names.len() - 2),
+    }
+}
+
+/// Where a branch's commits exist besides this folder.
+enum Published {
+    /// Tracking a remote branch, with everything pushed to it.
+    UpToDate(String),
+    /// Tracking a remote branch, with commits that never left this machine.
+    Unpushed(u32),
+    /// Configured to track a remote branch that no longer exists — the shape a
+    /// merged-and-deleted pull request branch leaves behind after a prune.
+    RemoteGone,
+    /// Never published anywhere.
+    Untracked,
+}
+
+fn published_state(repo_path: &Path, branch: &str) -> Published {
+    let remote = git(repo_path, &["config", &format!("branch.{branch}.remote")]).unwrap_or_default();
+    let merge = git(repo_path, &["config", &format!("branch.{branch}.merge")]).unwrap_or_default();
+    let remote = remote.trim();
+    let merge = merge.trim();
+    // A remote of "." means the branch tracks another local branch; nothing has
+    // been published by that.
+    if remote.is_empty() || merge.is_empty() || remote == "." {
+        return Published::Untracked;
+    }
+
+    let short = merge.strip_prefix("refs/heads/").unwrap_or(merge);
+    let tracking = format!("{remote}/{short}");
+    if !rev_exists(repo_path, &format!("refs/remotes/{tracking}")) {
+        return Published::RemoteGone;
+    }
+
+    match divergence(repo_path, branch, &tracking) {
+        Some((ahead, _)) if ahead > 0 => Published::Unpushed(ahead),
+        Some(_) => Published::UpToDate(tracking),
+        None => Published::Untracked,
+    }
+}
+
+/// The trunk, plus the remote's copy of it. A branch already absorbed into
+/// either one has nothing of its own left, and checking both covers the two
+/// orders people work in: merged locally, or merged on the host and not pulled
+/// down yet. Remote first, local last, so callers can take the last entry as
+/// the name to show.
+fn trunk_refs(repo_path: &Path) -> Vec<String> {
+    let mut refs = Vec::new();
+    if let Some(trunk) = integration_branch(&branch_list(repo_path, false)) {
+        if let Some(remote) = default_remote_name(repo_path) {
+            refs.push(format!("{remote}/{trunk}"));
+        }
+        refs.push(trunk);
+    }
+    refs
+}
+
+fn contained_in(repo_path: &Path, commit: &str, reference: &str) -> bool {
+    if !rev_exists(repo_path, reference) {
+        return false;
+    }
+    git_raw(repo_path, &["merge-base", "--is-ancestor", commit, reference])
+        .map(|(success, _, _)| success)
+        .unwrap_or(false)
+}
+
+/// Judge one checkout. Ref questions run against the repository; anything about
+/// files on disk has to run inside the folder itself.
+fn classify_worktree(
+    repo_path: &Path,
+    entry: &WorktreeEntry,
+    trunk_refs: &[String],
+) -> WorktreeCleanupEntry {
+    let worktree = PathBuf::from(&entry.path);
+    let mut verdict = WorktreeCleanupEntry {
+        path: entry.path.clone(),
+        branch: entry.branch.clone(),
+        verdict: CleanupVerdict::Keep,
+        reason: String::new(),
+        warnings: Vec::new(),
+        missing: entry.prunable || !worktree.exists(),
+        last_used_at: None,
+    };
+
+    if verdict.missing {
+        verdict.verdict = CleanupVerdict::Safe;
+        verdict.reason =
+            "The folder is already gone from your disk — only the leftover record is left."
+                .to_string();
+        return verdict;
+    }
+
+    verdict.last_used_at = worktree_last_used(&worktree);
+
+    if entry.locked {
+        verdict.reason = "You marked this folder to be kept.".to_string();
+        return verdict;
+    }
+    if operation_in_progress(&worktree) {
+        verdict.reason =
+            "Something is half-finished here. Finish it or undo it before removing the folder."
+                .to_string();
+        return verdict;
+    }
+    let Some(pending) = uncommitted_count(&worktree) else {
+        verdict.reason =
+            "Gitty could not read this folder, so it won't claim the folder is safe to remove."
+                .to_string();
+        return verdict;
+    };
+    if pending > 0 {
+        verdict.reason = if pending == 1 {
+            "One unsaved change exists only in this folder.".to_string()
+        } else {
+            format!("{pending} unsaved changes exist only in this folder.")
+        };
+        return verdict;
+    }
+
+    let trunk_label = trunk_refs.last().map(String::as_str).unwrap_or("main");
+    let head = if entry.head.is_empty() {
+        "HEAD".to_string()
+    } else {
+        entry.head.clone()
+    };
+
+    if trunk_refs
+        .iter()
+        .any(|reference| contained_in(repo_path, &head, reference))
+    {
+        verdict.verdict = CleanupVerdict::Safe;
+        verdict.reason = match &entry.branch {
+            Some(branch) => format!("Everything on {branch} is already in {trunk_label}."),
+            None => format!("Everything in this folder is already in {trunk_label}."),
+        };
+    } else if entry.detached || entry.branch.is_none() {
+        verdict.reason =
+            format!("This folder sits on a single commit that isn't in {trunk_label} yet.");
+        return verdict;
+    } else {
+        let branch = entry.branch.clone().unwrap_or_default();
+        match published_state(repo_path, &branch) {
+            Published::RemoteGone => {
+                verdict.verdict = CleanupVerdict::Probably;
+                verdict.reason = format!(
+                    "The shared copy of {branch} is gone, which usually means it was merged and tidied up. It hasn't reached your {trunk_label} yet."
+                );
+            }
+            Published::UpToDate(tracking) => {
+                verdict.verdict = CleanupVerdict::Probably;
+                verdict.reason = format!(
+                    "Everything on {branch} is saved and published to {tracking}, but it hasn't reached {trunk_label} yet."
+                );
+            }
+            Published::Unpushed(count) => {
+                verdict.reason = if count == 1 {
+                    format!("One commit on {branch} exists nowhere but here.")
+                } else {
+                    format!("{count} commits on {branch} exist nowhere but here.")
+                };
+                return verdict;
+            }
+            Published::Untracked => {
+                let only_here = trunk_refs
+                    .iter()
+                    .filter_map(|reference| {
+                        divergence(repo_path, &branch, reference).map(|(ahead, _)| ahead)
+                    })
+                    .min();
+                verdict.reason = match only_here {
+                    Some(1) => format!("One commit on {branch} exists nowhere but here."),
+                    Some(count) if count > 0 => {
+                        format!("{count} commits on {branch} exist nowhere but here.")
+                    }
+                    // No trunk to compare against and nothing published: there is
+                    // no evidence either way, and a guess would be the one kind of
+                    // mistake this whole feature exists to avoid.
+                    _ => format!(
+                        "{branch} has never been published, and there's no main branch to compare it against."
+                    ),
+                };
+                return verdict;
+            }
+        }
+    }
+
+    // Removable as far as git is concerned — but git only guards what it
+    // tracks, and the folder goes as a whole.
+    let leftovers = irreplaceable_local_files(&worktree);
+    if !leftovers.is_empty() {
+        verdict.verdict = CleanupVerdict::Probably;
+        verdict.warnings.push(format!(
+            "Removing the folder also deletes {}, which git was never tracking.",
+            name_phrase(&leftovers)
+        ));
+    }
+
+    verdict
+}
+
+/// Which of this repository's other folders are finished with.
+///
+/// Deliberately not folded into `list_worktrees`: this costs a status walk and
+/// several ref lookups per folder, and `list_worktrees` runs on every repo
+/// switch. Gitty's own scratch checkouts are left out — the user never sees
+/// them and `cleanup_commit_worktrees` already clears them.
+#[tauri::command]
+async fn scan_worktree_cleanup(path: String) -> Result<Vec<WorktreeCleanupEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_worktree_cleanup_blocking(path))
+        .await
+        .map_err(|err| format!("Folder check failed: {err}"))?
+}
+
+pub(crate) fn scan_worktree_cleanup_blocking(path: String) -> Result<Vec<WorktreeCleanupEntry>, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let listed = git(&repo_path, &["worktree", "list", "--porcelain"])?;
+    let entries = parse_worktree_list(&listed, &repo_path);
+    let trunk = trunk_refs(&repo_path);
+
+    let candidates: Vec<&WorktreeEntry> = entries
+        .iter()
+        .filter(|entry| !entry.is_main && !entry.is_current && !entry.internal)
+        .collect();
+
+    // Each folder costs its own status walk, so a repository with several would
+    // otherwise serialise into a visible wait before the panel could say
+    // anything.
+    let mut results: Vec<WorktreeCleanupEntry> = std::thread::scope(|scope| {
+        let handles: Vec<_> = candidates
+            .iter()
+            .map(|entry| scope.spawn(|| classify_worktree(&repo_path, entry, &trunk)))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok())
+            .collect()
+    });
+
+    // Safest first, and oldest first within each group: the folder you last
+    // touched in March is the one you want to see at the top.
+    results.sort_by(|a, b| {
+        let rank = |verdict: CleanupVerdict| match verdict {
+            CleanupVerdict::Safe => 0,
+            CleanupVerdict::Probably => 1,
+            CleanupVerdict::Keep => 2,
+        };
+        rank(a.verdict)
+            .cmp(&rank(b.verdict))
+            .then_with(|| a.last_used_at.unwrap_or(0).cmp(&b.last_used_at.unwrap_or(0)))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    Ok(results)
+}
+
+/// Remove several checkouts in one confirmed action.
+///
+/// Not a loop over `remove_worktree` on the frontend: a folder git has already
+/// lost track of cannot be *removed* at all, only pruned, and a batch that
+/// stopped at the first such entry would leave the user worse off than before
+/// they accepted the suggestion. Each path is attempted independently and the
+/// failures come back named.
+#[tauri::command]
+fn remove_worktrees(path: String, worktrees: Vec<String>) -> Result<WorktreeCleanupOutcome, String> {
+    let repo = normalize_repo(&path)?;
+    let repo_path = PathBuf::from(&repo.path);
+    let main = main_worktree(&repo_path);
+
+    let mut removed: Vec<String> = Vec::new();
+    let mut failures: Vec<WorktreeCleanupFailure> = Vec::new();
+
+    for raw in worktrees {
+        let target = PathBuf::from(raw.trim());
+        let target_str = target.to_string_lossy().to_string();
+
+        if main.as_ref().is_some_and(|main| same_path(&target, main)) {
+            failures.push(WorktreeCleanupFailure {
+                path: target_str,
+                message: "That's the repository's main folder, so it can't be removed here."
+                    .to_string(),
+            });
+            continue;
+        }
+        if same_path(&target, &repo_path) {
+            failures.push(WorktreeCleanupFailure {
+                path: target_str,
+                message: "That's the folder you have open right now.".to_string(),
+            });
+            continue;
+        }
+
+        // Already gone from disk: there is nothing to remove, and the prune
+        // below is what clears the record.
+        if !target.exists() {
+            removed.push(target_str);
+            continue;
+        }
+
+        match git_owned(
+            &repo_path,
+            vec!["worktree".into(), "remove".into(), target_str.clone()],
+        ) {
+            Ok(_) => removed.push(target_str),
+            Err(message) => failures.push(WorktreeCleanupFailure {
+                path: target_str,
+                message,
+            }),
+        }
+    }
+
+    let _ = git(&repo_path, &["worktree", "prune"]);
+
+    let message = match (removed.len(), failures.len()) {
+        (0, 0) => "Nothing to remove.".to_string(),
+        (1, 0) => "Removed 1 folder.".to_string(),
+        (count, 0) => format!("Removed {count} folders."),
+        (0, failed) => format!("Could not remove {failed} folder(s)."),
+        (count, failed) => format!("Removed {count} folder(s); {failed} could not be removed."),
+    };
+
+    Ok(WorktreeCleanupOutcome {
+        removed,
+        failures,
+        message,
     })
 }
 
@@ -5811,6 +6287,7 @@ async fn summarize_changes(
 pub fn run() {
     tauri::Builder::default()
         .manage(RepoDiscovery::default())
+        .manage(tidy::TidyScan::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -5863,6 +6340,10 @@ pub fn run() {
             list_worktrees,
             add_worktree,
             remove_worktree,
+            remove_worktrees,
+            scan_worktree_cleanup,
+            tidy::start_tidy_scan,
+            tidy::cancel_tidy_scan,
             prune_worktrees,
             merge_status,
             abort_merge,
@@ -6213,6 +6694,236 @@ locked under review
         );
 
         let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// Adds a folder on `feature` and returns its path, so the cleanup tests
+    /// can start from "one other folder exists".
+    fn scratch_folder(repo: &Path, name: &str) -> PathBuf {
+        let target = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            "feature".to_string(),
+            Some(false),
+        )
+        .expect("add");
+        target
+    }
+
+    fn scan(repo: &Path) -> Vec<WorktreeCleanupEntry> {
+        scan_worktree_cleanup_blocking(repo.to_string_lossy().to_string()).expect("scan")
+    }
+
+    /// `feature` sits on the same commit as `main`, so the folder holds nothing
+    /// that isn't already in the trunk.
+    #[test]
+    fn a_folder_already_in_main_is_safe_to_remove() {
+        let repo = scratch_repo("clean-safe");
+        let target = scratch_folder(&repo, "safe");
+
+        let found = scan(&repo);
+        assert_eq!(found.len(), 1, "only the other folder is judged");
+        assert_eq!(found[0].verdict, CleanupVerdict::Safe);
+        assert!(found[0].reason.contains("already in main"), "got: {}", found[0].reason);
+        assert!(found[0].warnings.is_empty());
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// The whole point of the feature: a folder holding work that exists
+    /// nowhere else must never be offered, however finished it looks.
+    #[test]
+    fn unsaved_work_keeps_a_folder_off_the_list() {
+        let repo = scratch_repo("clean-dirty");
+        let target = scratch_folder(&repo, "dirty");
+        fs::write(target.join("a.txt"), "edited").expect("write");
+
+        let found = scan(&repo);
+        assert_eq!(found[0].verdict, CleanupVerdict::Keep);
+        assert!(
+            found[0].reason.contains("unsaved change"),
+            "got: {}",
+            found[0].reason
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn a_commit_that_never_left_the_folder_keeps_it() {
+        let repo = scratch_repo("clean-own-commit");
+        let target = scratch_folder(&repo, "owncommit");
+        fs::write(target.join("b.txt"), "new").expect("write");
+        run_git(&target, &["add", "-A"]);
+        run_git(&target, &["commit", "-qm", "only here"]);
+
+        let found = scan(&repo);
+        assert_eq!(found[0].verdict, CleanupVerdict::Keep);
+        assert!(
+            found[0].reason.contains("nowhere but here"),
+            "got: {}",
+            found[0].reason
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// `git worktree remove` happily deletes ignored files, so a `.env` in the
+    /// folder is the one way accepting a suggestion here could actually lose
+    /// something.
+    ///
+    /// Ignored *directories* must not count. Every real project has several —
+    /// this one has `dist/`, `node_modules/`, `src-tauri/gen/` and
+    /// `src-tauri/target/` — and an earlier version judged them by their first
+    /// path component against a list of known-disposable names, so `src-tauri/`
+    /// failed to match and every folder in this very repository was demoted out
+    /// of "nothing would be lost". A suggestion that never fires is worse than
+    /// no suggestion: it is the same silence, with the cost of the scan.
+    #[test]
+    fn an_ignored_file_demotes_a_folder_but_ignored_directories_do_not() {
+        let repo = scratch_repo("clean-leftovers");
+        fs::write(
+            repo.join(".gitignore"),
+            ".env\nnode_modules/\ndist/\nsrc-tauri/gen/\n*.log\n",
+        )
+        .expect("write");
+        run_git(&repo, &["add", "-A"]);
+        run_git(&repo, &["commit", "-qm", "ignore rules"]);
+        run_git(&repo, &["branch", "-f", "feature", "main"]);
+
+        let target = scratch_folder(&repo, "leftovers");
+        for (dir, file) in [
+            ("node_modules/pkg", "index.js"),
+            ("dist", "app.js"),
+            ("src-tauri/gen/schemas", "acl.json"),
+        ] {
+            fs::create_dir_all(target.join(dir)).expect("dir");
+            fs::write(target.join(dir).join(file), "//").expect("write");
+        }
+        fs::write(target.join("debug.log"), "noise").expect("write");
+
+        let rebuildable_only = scan(&repo);
+        assert_eq!(
+            rebuildable_only[0].verdict,
+            CleanupVerdict::Safe,
+            "build output alone should not change the verdict: {} {:?}",
+            rebuildable_only[0].reason,
+            rebuildable_only[0].warnings
+        );
+
+        fs::write(target.join(".env"), "TOKEN=1").expect("write");
+        let with_secret = scan(&repo);
+        assert_eq!(with_secret[0].verdict, CleanupVerdict::Probably);
+        assert!(
+            with_secret[0].warnings.iter().any(|note| note.contains(".env")),
+            "got: {:?}",
+            with_secret[0].warnings
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn a_folder_deleted_behind_gits_back_is_safe_and_marked_missing() {
+        let repo = scratch_repo("clean-missing");
+        let target = scratch_folder(&repo, "missing");
+        fs::remove_dir_all(&target).expect("delete behind git's back");
+
+        let found = scan(&repo);
+        assert_eq!(found[0].verdict, CleanupVerdict::Safe);
+        assert!(found[0].missing);
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// A half-finished merge is invisible in `git status --porcelain` once the
+    /// conflicts are resolved and staged, so it needs its own check or the
+    /// folder reads as clean and gets offered up mid-merge.
+    #[test]
+    fn a_half_finished_merge_keeps_a_folder() {
+        let repo = scratch_repo("clean-midmerge");
+        let target = scratch_folder(&repo, "midmerge");
+        let git_dir = git(&target, &["rev-parse", "--absolute-git-dir"]).expect("git dir");
+        let head = git(&target, &["rev-parse", "HEAD"]).expect("head");
+        fs::write(PathBuf::from(git_dir.trim()).join("MERGE_HEAD"), head).expect("write");
+
+        let found = scan(&repo);
+        assert_eq!(found[0].verdict, CleanupVerdict::Keep);
+        assert!(
+            found[0].reason.contains("half-finished"),
+            "got: {}",
+            found[0].reason
+        );
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// A batch that gave up at the first entry git could no longer remove would
+    /// leave the user worse off than before they accepted the suggestion.
+    #[test]
+    fn a_batch_removal_clears_live_and_missing_folders_together() {
+        let repo = scratch_repo("clean-batch");
+        let live = scratch_folder(&repo, "batch-live");
+        let gone = repo
+            .parent()
+            .unwrap()
+            .join(format!("gitty-wt-batch-gone-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&gone);
+        add_worktree(
+            repo.to_string_lossy().to_string(),
+            gone.to_string_lossy().to_string(),
+            "second".to_string(),
+            Some(true),
+        )
+        .expect("add");
+        fs::remove_dir_all(&gone).expect("delete behind git's back");
+
+        let outcome = remove_worktrees(
+            repo.to_string_lossy().to_string(),
+            vec![
+                gone.to_string_lossy().to_string(),
+                live.to_string_lossy().to_string(),
+            ],
+        )
+        .expect("batch removal");
+
+        assert_eq!(outcome.removed.len(), 2, "failures: {:?}", outcome.failures);
+        assert!(outcome.failures.is_empty());
+        assert!(!live.exists(), "the live folder should be gone from disk");
+        assert_eq!(paths_of(&repo).len(), 1, "both registrations should be gone");
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn a_batch_removal_refuses_the_main_and_open_folders() {
+        let repo = scratch_repo("clean-batch-guard");
+
+        let outcome = remove_worktrees(
+            repo.to_string_lossy().to_string(),
+            vec![repo.to_string_lossy().to_string()],
+        )
+        .expect("batch removal");
+
+        assert!(outcome.removed.is_empty());
+        assert_eq!(outcome.failures.len(), 1);
+        assert!(
+            outcome.failures[0].message.contains("main folder"),
+            "got: {}",
+            outcome.failures[0].message
+        );
+        assert!(repo.exists(), "the repository must survive");
+
         let _ = fs::remove_dir_all(&repo);
     }
 

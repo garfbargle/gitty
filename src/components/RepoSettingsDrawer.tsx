@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -10,12 +11,21 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
-import type { LinkedFolder, RemoteEntry, WorktreeEntry } from "../types";
+import type {
+  LinkedFolder,
+  RemoteEntry,
+  WorktreeCleanupEntry,
+  WorktreeCleanupOutcome,
+  WorktreeEntry,
+} from "../types";
 import { SettingsModal } from "./SettingsModal";
 import { RepoIcon } from "./RepoIcon";
 import { WorktreeSection } from "./WorktreeSection";
+import { WorktreeCleanupDialog } from "./WorktreeCleanupDialog";
 import { clearRepoIcon, listRepoImages, setRepoIcon, type RepoImage } from "../lib/repoIcons";
 import {
   addLinkedFolder,
@@ -670,6 +680,15 @@ export function RepoSettingsDrawer({
   // saved remote whose URL matches one is hidden here — it lives under Linked
   // folders instead of masquerading as a repo remote.
   const [subtreeUrls, setSubtreeUrls] = useState<Set<string>>(new Set());
+  // What could be removed without losing anything, and why. Read here rather
+  // than in the Folders panel because the hint at the top of this drawer needs
+  // the same answer, and the panel is several screens further down.
+  const [cleanup, setCleanup] = useState<WorktreeCleanupEntry[]>([]);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [hintDismissedFor, setHintDismissedFor] = useState<string | null>(null);
+  const cleanupRequestRef = useRef(0);
 
   useEffect(() => {
     if (!open) return;
@@ -679,9 +698,59 @@ export function RepoSettingsDrawer({
     setSaveError(null);
   }, [open, remotes]);
 
+  // The scan walks every other folder's working tree, so it only runs while
+  // this drawer is open. A late answer from a repository the user has already
+  // switched away from is dropped rather than shown.
+  //
+  // Deliberately not keyed on `worktrees`: that array is rebuilt on every
+  // window focus and after every removal, and re-scanning then rebuilt the
+  // review list underneath whoever was reading it. Removals prune their own
+  // rows, and a folder that has only just been added is never one you are
+  // finished with, so there is nothing this would catch that matters.
+  useEffect(() => {
+    if (!open || !repoPath) {
+      setCleanup([]);
+      // Otherwise the review is still open the next time this drawer is, over
+      // folders that were judged for a repository the user has left.
+      setCleanupOpen(false);
+      setCleanupError(null);
+      return;
+    }
+    const request = cleanupRequestRef.current + 1;
+    cleanupRequestRef.current = request;
+    invoke<WorktreeCleanupEntry[]>("scan_worktree_cleanup", { path: repoPath })
+      .then((result) => {
+        if (cleanupRequestRef.current === request) setCleanup(result);
+      })
+      .catch(() => {
+        if (cleanupRequestRef.current === request) setCleanup([]);
+      });
+  }, [open, repoPath]);
+
   const dirty = useMemo(() => draftsDirty(baseline, drafts), [baseline, drafts]);
   const canSave = dirty && validDrafts(drafts).length > 0 && !saving;
   const canFetch = uniqueRemotes(remotes).length > 0;
+
+  const finishedFolders = cleanup.filter((entry) => entry.verdict === "safe");
+  const hintKey = `gitty.folderCleanupHint:${repoPath}`;
+  // Keyed on *which* folders are finished rather than a plain "seen it" flag:
+  // dismissing the hint over two stale folders shouldn't silence it when a
+  // third one finishes months later.
+  const hintSignature = finishedFolders
+    .map((entry) => entry.path)
+    .sort()
+    .join(" ");
+  const showCleanupHint = finishedFolders.length > 0 && hintDismissedFor !== hintSignature;
+
+  useEffect(() => {
+    if (!open) return;
+    setHintDismissedFor(localStorage.getItem(hintKey));
+  }, [open, hintKey]);
+
+  function dismissCleanupHint() {
+    localStorage.setItem(hintKey, hintSignature);
+    setHintDismissedFor(hintSignature);
+  }
 
   // Hide saved remotes that only back a linked folder; always keep unsaved rows.
   const visibleDrafts = drafts.filter(
@@ -765,6 +834,41 @@ export function RepoSettingsDrawer({
     removeDraft(id);
   }
 
+  async function removeFinishedFolders(paths: string[]) {
+    setCleanupBusy(true);
+    setCleanupError(null);
+    try {
+      const outcome = await invoke<WorktreeCleanupOutcome>("remove_worktrees", {
+        path: repoPath,
+        worktrees: paths,
+      });
+      // Drop what went instead of re-reading every folder. Each one is judged
+      // on its own, so removing three teaches the scan nothing about the rest —
+      // and a list that rebuilds itself under the user mid-review is the thing
+      // that makes a review feel unsafe.
+      const gone = new Set(outcome.removed);
+      setCleanup((current) => current.filter((entry) => !gone.has(entry.path)));
+
+      // A partial result stays on screen with the folders that resisted named,
+      // rather than closing on a message that says "removed 2 of 3" and leaving
+      // the user to work out which one.
+      if (outcome.failures.length > 0) {
+        setCleanupError(
+          outcome.failures.map((failure) => `${failure.path}: ${failure.message}`).join("\n"),
+        );
+      } else {
+        setCleanupOpen(false);
+      }
+      // The folder list behind this dialog still has to catch up; only the
+      // cleanup verdicts are pruned in place.
+      onWorktreesChanged();
+    } catch (err) {
+      setCleanupError(String(err));
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
+
   async function changeBackupOnPush(enabled: boolean) {
     setSavingBackupPreference(true);
     try {
@@ -776,6 +880,7 @@ export function RepoSettingsDrawer({
   }
 
   return (
+    <>
     <SettingsModal
       open={open}
       title="Repository"
@@ -814,6 +919,39 @@ export function RepoSettingsDrawer({
         </>
       }
     >
+      {/* Folders sit at the bottom of a long drawer, so the one thing worth
+          acting on gets said before the scroll. */}
+      {showCleanupHint ? (
+        <div className="cleanup-hint">
+          <Sparkles size={14} />
+          <span className="cleanup-hint-copy">
+            <strong>
+              {finishedFolders.length === 1
+                ? "One folder here looks finished."
+                : `${finishedFolders.length} folders here look finished.`}
+            </strong>
+            <span>Everything in them is saved and exists somewhere else too.</span>
+          </span>
+          <button
+            type="button"
+            className="settings-btn"
+            disabled={disabled}
+            onClick={() => setCleanupOpen(true)}
+          >
+            Review
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Dismiss"
+            title="Not now"
+            onClick={dismissCleanupHint}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
+
       <RepoIconSection open={open} repoName={repoName} repoPath={repoPath} disabled={disabled} />
 
       <div className="settings-field">
@@ -908,11 +1046,26 @@ export function RepoSettingsDrawer({
           repoPath={repoPath}
           disabled={disabled}
           worktrees={worktrees}
+          cleanup={cleanup}
+          onReviewCleanup={() => setCleanupOpen(true)}
           onWorktreesChanged={onWorktreesChanged}
           onOpenWorktree={onOpenWorktree}
           onConfirmRemove={onConfirmRemove}
         />
       ) : null}
     </SettingsModal>
+
+    <WorktreeCleanupDialog
+      open={open && cleanupOpen}
+      entries={cleanup}
+      busy={cleanupBusy}
+      error={cleanupError}
+      onCancel={() => {
+        setCleanupOpen(false);
+        setCleanupError(null);
+      }}
+      onConfirm={(paths) => void removeFinishedFolders(paths)}
+    />
+    </>
   );
 }

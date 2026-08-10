@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Settings,
   SlidersHorizontal,
+  Sparkles,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
 import type { DiscoveredRepoEntry, RepoEntry, RepoSortMode } from "../types";
@@ -41,6 +42,8 @@ type RepoSidebarProps = {
   onSortModeChange: (mode: RepoSortMode) => void;
   onAddExisting: () => void;
   onOpenSettings: () => void;
+  /// Open the all-repositories folder cleanup.
+  onOpenTidyUp: () => void;
   onOpenRepoSettings: (path: string) => void;
   onRescanDiscovery: () => void;
   onHide?: () => void;
@@ -60,6 +63,7 @@ export const RepoSidebar = memo(function RepoSidebar({
   onSortModeChange,
   onAddExisting,
   onOpenSettings,
+  onOpenTidyUp,
   onOpenRepoSettings,
   onRescanDiscovery,
   onHide,
@@ -312,6 +316,14 @@ export const RepoSidebar = memo(function RepoSidebar({
         <button type="button" className="add-repo-btn" onClick={onAddExisting}>
           <Plus size={15} />
           Add Repository
+        </button>
+        <button
+          type="button"
+          className="icon-btn sm"
+          title="Tidy up folders"
+          onClick={onOpenTidyUp}
+        >
+          <Sparkles size={16} />
         </button>
         <button type="button" className="icon-btn sm" title="App settings" onClick={onOpenSettings}>
           <Settings size={16} />
