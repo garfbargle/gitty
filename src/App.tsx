@@ -80,6 +80,12 @@ import {
 } from "./lib/keyboardFocus";
 import { KeyboardSheet } from "./components/KeyboardSheet";
 import { sortRepos } from "./lib/repoSort";
+import {
+  addCustomAction,
+  loadCustomActions,
+  makeCustomAction,
+  saveCustomActions,
+} from "./lib/customActions";
 import { GraphView } from "./components/GraphView";
 import { RemoveWorktreeConfirmDialog } from "./components/RemoveWorktreeConfirmDialog";
 import "./App.css";
@@ -333,6 +339,9 @@ function App() {
   /// working-tree strip, or the full branch graph over `graphCommits`.
   const [historyView, setHistoryView] = useState<"strip" | "graph">("strip");
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
+  /// Commands the user typed for this repository. Detection can legitimately
+  /// find nothing, so these stand on their own — see lib/customActions.
+  const [customActions, setCustomActions] = useState<RepoAction[]>([]);
   /// Other checkouts of this repository. Drives the branch switcher (a branch
   /// open in another folder can't be checked out here, so we offer to open that
   /// folder instead) and the graph's "open elsewhere" marker.
@@ -346,6 +355,10 @@ function App() {
   const [selectedRepoActionId, setSelectedRepoActionId] = useState("");
   const [terminalSessions, setTerminalSessions] = useState<ActionExecutionState[]>([]);
   const [drawerSessionId, setDrawerSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCustomActions(loadCustomActions(selectedPath));
+  }, [selectedPath]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -387,21 +400,28 @@ function App() {
     };
   }, [selectedPath, snapshot?.branch, worktreeRefresh]);
 
+  /// What the Run button offers: what the project declares, plus whatever the
+  /// user typed here. Either half can be empty.
+  const availableActions = useMemo(
+    () => [...repoActions, ...customActions],
+    [repoActions, customActions],
+  );
+
   useEffect(() => {
-    if (!selectedPath || repoActions.length === 0) {
+    if (!selectedPath || availableActions.length === 0) {
       setSelectedRepoActionId("");
       return;
     }
 
     const storedActionId = localStorage.getItem(`gitty.defaultAction:${selectedPath}`);
     const preferredAction =
-      repoActions.find((action) => action.id === storedActionId) ||
-      repoActions.find((action) => action.command.includes("tauri build")) ||
-      repoActions.find((action) => action.command.includes("dev")) ||
-      repoActions.find((action) => action.command.includes("build")) ||
-      repoActions[0];
+      availableActions.find((action) => action.id === storedActionId) ||
+      availableActions.find((action) => action.command.includes("tauri build")) ||
+      availableActions.find((action) => action.command.includes("dev")) ||
+      availableActions.find((action) => action.command.includes("build")) ||
+      availableActions[0];
     setSelectedRepoActionId(preferredAction.id);
-  }, [selectedPath, repoActions]);
+  }, [selectedPath, availableActions]);
 
   useEffect(() => {
     const pendingOutput = new Map<string, ActionLogEntry[]>();
@@ -515,20 +535,6 @@ function App() {
     [selectedPath]
   );
 
-  const handleRunCustomCommand = useCallback(
-    (cmd: string) => {
-      const customAction: RepoAction = {
-        id: `custom:${Date.now()}`,
-        name: cmd,
-        command: cmd,
-        category: "custom",
-        description: "Custom command",
-      };
-      handleRunAction(customAction);
-    },
-    [handleRunAction]
-  );
-
   const handleSelectRepoAction = useCallback(
     (action: RepoAction) => {
       setSelectedRepoActionId(action.id);
@@ -537,9 +543,38 @@ function App() {
     [selectedPath],
   );
 
+  /// A command the user typed is kept for next time, becomes the button's
+  /// default, and runs straight away — typing it is already the intent to run.
+  const handleRunCustomCommand = useCallback(
+    (cmd: string, name?: string) => {
+      const trimmed = cmd.trim();
+      if (!trimmed) return;
+      const existing = customActions.find((action) => action.command === trimmed);
+      const action = existing ?? makeCustomAction(trimmed, name);
+      if (!existing) {
+        const next = addCustomAction(customActions, action);
+        setCustomActions(next);
+        saveCustomActions(selectedPath, next);
+      }
+      handleSelectRepoAction(action);
+      handleRunAction(action);
+    },
+    [customActions, selectedPath, handleRunAction, handleSelectRepoAction],
+  );
+
+  const handleRemoveCustomAction = useCallback(
+    (actionId: string) => {
+      const next = customActions.filter((action) => action.id !== actionId);
+      setCustomActions(next);
+      saveCustomActions(selectedPath, next);
+    },
+    [customActions, selectedPath],
+  );
+
   useShortcut("runAction", () => {
     const selectedAction =
-      repoActions.find((action) => action.id === selectedRepoActionId) ?? repoActions[0];
+      availableActions.find((action) => action.id === selectedRepoActionId) ??
+      availableActions[0];
     if (!selectedPath || !selectedAction) return;
     handleRunAction(selectedAction);
   });
@@ -3345,12 +3380,13 @@ function App() {
               forceSuggested={pushRejected}
               sidebarVisible={sidebarVisible}
               onToggleSidebar={toggleSidebar}
-              repoActions={repoActions}
+              repoActions={availableActions}
               selectedRepoActionId={selectedRepoActionId}
               activeExecution={runningExecution}
               onRunAction={handleRunAction}
               onSelectRepoAction={handleSelectRepoAction}
               onRunCustomCommand={handleRunCustomCommand}
+              onRemoveCustomAction={handleRemoveCustomAction}
               onRepoChange={(path) => void selectRepo(path)}
               onOpenWorktree={(path) => void openCheckout(path)}
               onBranchChange={(branch) => {

@@ -80,7 +80,8 @@ type TopBarProps = {
   activeExecution?: ActionExecutionState | null;
   onRunAction?: (action: RepoAction) => void;
   onSelectRepoAction?: (action: RepoAction) => void;
-  onRunCustomCommand?: (command: string) => void;
+  onRunCustomCommand?: (command: string, name?: string) => void;
+  onRemoveCustomAction?: (actionId: string) => void;
 };
 
 export function TopBar({
@@ -135,6 +136,7 @@ export function TopBar({
   onRunAction,
   onSelectRepoAction,
   onRunCustomCommand,
+  onRemoveCustomAction,
 }: TopBarProps) {
   const inPreview = !!viewingCommit;
   const previewBranchLabel = branch.includes("detached") ? "latest" : branch;
@@ -166,6 +168,7 @@ export function TopBar({
             onRunAction={onRunAction}
             onSelectAction={onSelectRepoAction}
             onRunCustomCommand={onRunCustomCommand}
+            onRemoveCustomAction={onRemoveCustomAction}
           />
         ) : null}
 

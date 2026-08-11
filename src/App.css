@@ -1102,6 +1102,48 @@ button:focus-visible {
   background: var(--bg-active);
 }
 
+/* A saved command and its remove affordance share one row. */
+.repo-runner-row {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.repo-runner-row .repo-runner-item {
+  min-width: 0;
+}
+
+.repo-runner-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  opacity: 0;
+  padding: 5px;
+}
+
+.repo-runner-row:hover .repo-runner-remove,
+.repo-runner-remove:focus-visible {
+  opacity: 1;
+}
+
+.repo-runner-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.repo-runner-empty {
+  color: var(--text-muted, #888);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+
 .repo-runner-cat-icon {
   flex-shrink: 0;
 }

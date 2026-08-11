@@ -8,6 +8,7 @@ import {
   FileCode,
   Terminal,
   Plus,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ActionExecutionState, RepoAction } from "../types";
@@ -20,6 +21,7 @@ type RepoRunnerProps = {
   onRunAction: (action: RepoAction) => void;
   onSelectAction: (action: RepoAction) => void;
   onRunCustomCommand?: (command: string) => void;
+  onRemoveCustomAction?: (actionId: string) => void;
 };
 
 function getCategoryIcon(category: RepoAction["category"], size: number) {
@@ -45,6 +47,7 @@ export function RepoRunner({
   onRunAction,
   onSelectAction,
   onRunCustomCommand,
+  onRemoveCustomAction,
 }: RepoRunnerProps) {
   const [open, setOpen] = useState(false);
   const [customCommandInput, setCustomCommandInput] = useState("");
@@ -72,12 +75,20 @@ export function RepoRunner({
     };
   }, [open]);
 
-  if (!repoPath || actions.length === 0) return null;
+  if (!repoPath) return null;
 
+  // A project that declares no scripts still gets the button — the menu opens
+  // straight onto the "type a command" field instead of a list.
   const selectedAction =
-    actions.find((a) => a.id === selectedActionId) ?? actions[0];
+    actions.find((a) => a.id === selectedActionId) ?? actions[0] ?? null;
+  const hasActions = actions.length > 0;
 
   const isRunning = activeExecution?.status === "running";
+
+  function openCustomPrompt() {
+    setOpen(true);
+    setShowCustomPrompt(true);
+  }
 
   function handleSelectAction(action: RepoAction) {
     onSelectAction(action);
@@ -86,20 +97,20 @@ export function RepoRunner({
 
   function handleCustomSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!customCommandInput.trim()) return;
-    const customAction: RepoAction = {
-      id: `custom:${Date.now()}`,
-      name: customCommandInput.trim(),
-      command: customCommandInput.trim(),
-      category: "custom",
-      description: "Custom command",
-    };
+    const command = customCommandInput.trim();
+    if (!command) return;
     setShowCustomPrompt(false);
     setOpen(false);
     if (onRunCustomCommand) {
-      onRunCustomCommand(customCommandInput.trim());
+      onRunCustomCommand(command);
     } else {
-      onRunAction(customAction);
+      onRunAction({
+        id: `custom:${Date.now()}`,
+        name: command,
+        command,
+        category: "custom",
+        description: "Custom command",
+      });
     }
     setCustomCommandInput("");
   }
@@ -118,7 +129,7 @@ export function RepoRunner({
     cargo: "Cargo Commands",
     make: "Makefile Targets",
     script: "Shell Scripts",
-    custom: "Custom Commands",
+    custom: "Your Commands",
   };
 
   return (
@@ -126,17 +137,26 @@ export function RepoRunner({
       <button
         type="button"
         className={`repo-runner-main ${isRunning ? "running" : ""}`}
-        title={`Run ${selectedAction.command}`}
-        aria-label={`Run ${selectedAction.command}`}
-        disabled={!repoPath}
-        onClick={() => onRunAction(selectedAction)}
+        title={
+          selectedAction ? `Run ${selectedAction.command}` : "Add a command to run"
+        }
+        aria-label={
+          selectedAction ? `Run ${selectedAction.command}` : "Add a command to run"
+        }
+        onClick={() =>
+          selectedAction ? onRunAction(selectedAction) : openCustomPrompt()
+        }
       >
         {isRunning ? (
           <Loader2 size={13} className="spin text-blue" />
-        ) : (
+        ) : selectedAction ? (
           <Play size={13} className="play-icon" />
+        ) : (
+          <Plus size={13} className="repo-runner-cat-icon custom" />
         )}
-        <span className="repo-runner-label">{selectedAction.name}</span>
+        <span className="repo-runner-label">
+          {selectedAction ? selectedAction.name : "Add a command"}
+        </span>
       </button>
       <button
         type="button"
@@ -145,42 +165,64 @@ export function RepoRunner({
         aria-haspopup="listbox"
         title="Choose a command to run"
         aria-label="Choose a command to run"
-        onClick={() => setOpen((val) => !val)}
+        onClick={() => {
+          setOpen((val) => !val);
+          if (!hasActions) setShowCustomPrompt(true);
+        }}
       >
         <ChevronDown size={12} />
       </button>
 
       {open ? (
         <div className="repo-runner-menu" role="listbox">
-          {Object.entries(categories).map(([catKey, catActions]) => (
-            <div key={catKey} className="repo-runner-group">
-              <div className="repo-runner-group-title">
-                {categoryLabels[catKey] || catKey}
-              </div>
-              {catActions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  role="option"
-                  aria-selected={action.id === selectedAction.id}
-                  className={`repo-runner-item ${
-                    action.id === selectedAction.id ? "active" : ""
-                  }`}
-                  onClick={() => handleSelectAction(action)}
-                >
-                  {getCategoryIcon(action.category, 14)}
-                  <div className="repo-runner-item-content">
-                    <div className="repo-runner-item-name">{action.name}</div>
-                    {action.description ? (
-                      <div className="repo-runner-item-cmd">
-                        {action.description}
+          {hasActions ? (
+            Object.entries(categories).map(([catKey, catActions]) => (
+              <div key={catKey} className="repo-runner-group">
+                <div className="repo-runner-group-title">
+                  {categoryLabels[catKey] || catKey}
+                </div>
+                {catActions.map((action) => (
+                  <div key={action.id} className="repo-runner-row">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={action.id === selectedAction?.id}
+                      className={`repo-runner-item ${
+                        action.id === selectedAction?.id ? "active" : ""
+                      }`}
+                      onClick={() => handleSelectAction(action)}
+                    >
+                      {getCategoryIcon(action.category, 14)}
+                      <div className="repo-runner-item-content">
+                        <div className="repo-runner-item-name">{action.name}</div>
+                        {action.description ? (
+                          <div className="repo-runner-item-cmd">
+                            {action.description}
+                          </div>
+                        ) : null}
                       </div>
+                    </button>
+                    {action.category === "custom" && onRemoveCustomAction ? (
+                      <button
+                        type="button"
+                        className="repo-runner-remove"
+                        title={`Remove ${action.name}`}
+                        aria-label={`Remove ${action.name}`}
+                        onClick={() => onRemoveCustomAction(action.id)}
+                      >
+                        <X size={12} />
+                      </button>
                     ) : null}
                   </div>
-                </button>
-              ))}
+                ))}
+              </div>
+            ))
+          ) : (
+            <div className="repo-runner-empty">
+              No commands found in this folder. Type one below — it's saved here
+              for next time.
             </div>
-          ))}
+          )}
 
           <div className="repo-runner-divider" />
 
@@ -205,7 +247,7 @@ export function RepoRunner({
               onClick={() => setShowCustomPrompt(true)}
             >
               <Plus size={14} className="repo-runner-cat-icon custom" />
-              <span>Run custom command…</span>
+              <span>Add a command…</span>
             </button>
           )}
         </div>
