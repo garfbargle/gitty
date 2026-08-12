@@ -1,3 +1,4 @@
+mod git_bin;
 mod discovery;
 mod editors;
 mod repo_icon;
@@ -15,7 +16,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
+    process::{Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -419,7 +420,7 @@ fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(&args)
@@ -463,7 +464,7 @@ fn git_output_result(
 /// large backup may take longer than two minutes while still making steady
 /// progress.
 fn git_network_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
-    let mut child = Command::new("git")
+    let mut child = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(&args)
@@ -574,7 +575,7 @@ fn git_network_owned_with_progress(
         command_args.insert(1, "--progress".to_string());
     }
 
-    let mut child = Command::new("git")
+    let mut child = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(&command_args)
@@ -683,7 +684,7 @@ fn git_network_owned_with_progress(
 /// exit into an error. Needed for commands like `merge` and `merge-tree` that
 /// signal conflicts via a non-zero exit while still producing useful stdout.
 fn git_raw(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -1858,6 +1859,71 @@ fn add_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     Ok(repos.into_iter().map(with_repo_status).collect())
 }
 
+/// Where cloned repositories live on platforms with no user-visible
+/// filesystem. Android only: a repo has to sit on app-private storage, because
+/// shared storage is FUSE-emulated and supports neither symlinks nor mode bits,
+/// both of which git needs. Returns None on desktop, where the user picks a
+/// folder instead.
+#[cfg(target_os = "android")]
+fn repo_store(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join("repos"))
+}
+
+#[cfg(not(target_os = "android"))]
+fn repo_store(_app: &AppHandle) -> Option<PathBuf> {
+    None
+}
+
+#[tauri::command]
+fn repo_store_root(app: AppHandle) -> Option<String> {
+    repo_store(&app).map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Folder name for a clone, taken from the last segment of the address. Also
+/// the guard against a crafted URL escaping the store.
+fn clone_dir_name(url: &str) -> Result<String, String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let trimmed = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    let name = trimmed.rsplit(['/', ':']).next().unwrap_or_default().trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("Could not work out a folder name from that address.".to_string());
+    }
+    Ok(name.to_string())
+}
+
+/// Clone into the app's repository store.
+///
+/// On Android this is the only way a repository can get in: there is no folder
+/// picker that yields a usable filesystem path, and a repo cannot live on
+/// shared storage anyway.
+#[tauri::command]
+async fn clone_repo(app: AppHandle, url: String) -> Result<Vec<RepoEntry>, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("Enter a repository address.".to_string());
+    }
+    let store = repo_store(&app)
+        .ok_or_else(|| "This build has no repository store; choose a folder instead.".to_string())?;
+    let name = clone_dir_name(&url)?;
+    let destination = store.join(&name);
+    if destination.exists() {
+        return Err(format!("{name} is already here."));
+    }
+
+    let clone_store = store.clone();
+    let clone_url = url.clone();
+    let clone_name = name.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::create_dir_all(&clone_store)
+            .map_err(|err| format!("Could not create the repository store: {err}"))?;
+        git_network_owned(&clone_store, vec!["clone".to_string(), clone_url, clone_name]).map(|_| ())
+    })
+    .await
+    .map_err(|err| format!("Clone did not finish: {err}"))??;
+
+    add_repo(app, destination.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn remove_repo(app: AppHandle, path: String) -> Result<Vec<RepoEntry>, String> {
     let mut repos = load_repos_from_disk(&app)?;
@@ -2272,7 +2338,7 @@ fn is_image_path(path: &str) -> bool {
 }
 
 fn git_show_bytes(repo_path: &Path, spec: &str) -> Option<Vec<u8>> {
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(["show", spec])
@@ -2294,7 +2360,7 @@ fn untracked_file_diff(repo_path: &Path, file_path: &str) -> Result<Option<Strin
         return Ok(None);
     }
 
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args([
@@ -2397,7 +2463,7 @@ fn git_apply_patch(
         args.push("--reverse".to_string());
     }
 
-    let mut child = Command::new("git")
+    let mut child = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(&args)
@@ -2854,7 +2920,7 @@ fn unmerged_files(repo_path: &Path) -> Vec<String> {
 /// Runs git with editors disabled so rebase/commit steps never block on an
 /// interactive prompt. Used for the update (rebase) flow.
 fn git_rebase(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -3750,7 +3816,7 @@ fn write_subtree_manifest(
 /// Whether this Git build ships the `git subtree` command (a contrib script some
 /// minimal installs omit).
 fn subtree_available() -> bool {
-    Command::new("git")
+    git_bin::command()
         .args(["subtree", "-h"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
@@ -3777,7 +3843,7 @@ fn ensure_subtree_available() -> Result<(), String> {
 /// internal squash/merge/commit steps never block. Returns (success, stdout,
 /// stderr) like the other conflict-aware runners.
 fn git_subtree(repo_path: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
-    let output = Command::new("git")
+    let output = git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(args)
@@ -6288,6 +6354,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(RepoDiscovery::default())
         .manage(tidy::TidyScan::default())
+        .setup(|app| {
+            // No-op on desktop. On Android this unpacks the bundled git's
+            // symlink farm; failing loudly here beats every git call failing
+            // later for no visible reason.
+            git_bin::init(app.handle())?;
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -6300,6 +6373,8 @@ pub fn run() {
             set_repo_icon,
             clear_repo_icon,
             add_repo,
+            clone_repo,
+            repo_store_root,
             remove_repo,
             reorder_repos,
             start_repo_discovery,

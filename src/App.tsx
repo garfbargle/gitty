@@ -23,6 +23,7 @@ import { ResetToCommitDialog } from "./components/ResetToCommitDialog";
 import { DiscardFilesConfirmDialog } from "./components/DiscardFilesConfirmDialog";
 import { TagCreateDialog } from "./components/TagCreateDialog";
 import { BranchCreateDialog } from "./components/BranchCreateDialog";
+import { CloneDialog } from "./components/CloneDialog";
 import { TagDeleteDialog } from "./components/TagDeleteDialog";
 import { ActionRunnerDrawer } from "./components/ActionRunnerDrawer";
 import { ActivityFeed } from "./components/ActivityFeed";
@@ -268,6 +269,28 @@ function App() {
   const [discardFilesTarget, setDiscardFilesTarget] = useState<string[]>([]);
   const [tagCreateCommit, setTagCreateCommit] = useState<CommitEntry | null>(null);
   const [branchCreateOpen, setBranchCreateOpen] = useState(false);
+  // Set only where the platform has no user-visible filesystem (Android),
+  // in which case repositories are copied into the app rather than picked
+  // from a folder. Null on desktop, which keeps the folder picker.
+  const [repoStoreRoot, setRepoStoreRoot] = useState<string | null>(null);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneBusy, setCloneBusy] = useState(false);
+
+  // Ask the backend once whether this platform keeps repositories inside the
+  // app. Deliberately not a build-time check: the same frontend ships to both.
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<string | null>("repo_store_root")
+      .then((root) => {
+        if (!cancelled) setRepoStoreRoot(root ?? null);
+      })
+      .catch(() => {
+        /* desktop builds simply have no store */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // When set, the branch dialog forks from this commit rather than HEAD.
   const [branchFromCommit, setBranchFromCommit] = useState<CommitEntry | null>(null);
   // When set, the reset dialog offers to move HEAD to this commit.
@@ -1560,12 +1583,30 @@ function App() {
   }
 
   async function chooseRepoFolder() {
+    // Android has no folder picker that yields a usable filesystem path, and a
+    // repository cannot live on shared storage anyway, so there the only way in
+    // is to copy one from its address.
+    if (repoStoreRoot) {
+      setCloneOpen(true);
+      return;
+    }
     const folder = await open({
       directory: true,
       multiple: false,
       title: "Choose a Git repository",
     });
     if (typeof folder === "string") await addRepo(folder);
+  }
+
+  async function cloneIntoStore(url: string) {
+    setCloneBusy(true);
+    const result = await run(() => invoke<RepoEntry[]>("clone_repo", { url }));
+    setCloneBusy(false);
+    if (!result) return;
+    setCloneOpen(false);
+    setRepos(result);
+    const added = result[result.length - 1];
+    if (added) await selectRepo(added.path);
   }
 
   async function inspectCommit(commit: CommitEntry, path = selectedPath) {
@@ -3948,6 +3989,15 @@ function App() {
               ),
             )
           }
+        />
+      ) : null}
+      {repoStoreRoot ? (
+        <CloneDialog
+          open={cloneOpen}
+          storeRoot={repoStoreRoot}
+          loading={cloneBusy}
+          onConfirm={(url) => void cloneIntoStore(url)}
+          onCancel={() => setCloneOpen(false)}
         />
       ) : null}
     </main>

@@ -606,9 +606,7 @@ fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn git_owned(repo_path: &Path, args: Vec<String>) -> Result<String, String> {
-    use std::process::Command;
-
-    let output = Command::new("git")
+    let output = crate::git_bin::command()
         .arg("-C")
         .arg(repo_path)
         .args(&args)
