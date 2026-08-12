@@ -72,6 +72,10 @@ rust {
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
+    // ViewCompat/WindowInsetsCompat, which MainActivity uses to read the window
+    // insets. It arrives transitively through appcompat too, but the version
+    // that resolves to is not this module's to depend on by accident.
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")

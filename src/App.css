@@ -97,6 +97,31 @@
   --space-6: 32px;
   --space-8: 48px;
 
+  /* ---- Window insets ----------------------------------------------------
+     Where the system is already drawing: the Android status bar, the gesture
+     handle, a display cutout, and the soft keyboard (folded into the bottom by
+     MainActivity.kt, since an edge-to-edge window does not resize for it).
+
+     Written from native code, because CSS `env(safe-area-inset-*)` is not
+     dependable in Android WebView -- it reports 0 on many versions and was off
+     by a few pixels at the top until WebView 140. The 0px defaults here are
+     what every desktop build uses, so nothing below has to ask which platform
+     it is on: it just pads by these. */
+  --android-inset-top: 0px;
+  --android-inset-right: 0px;
+  --android-inset-bottom: 0px;
+  --android-inset-left: 0px;
+
+  /* The height a centred overlay actually has to work with. Equal to the
+     viewport on desktop, and on Android it shrinks as the keyboard comes up,
+     because the keyboard is folded into the bottom inset.
+
+     `vh` here and `dvh` in the @supports below: the bundle ships down to macOS
+     11, whose WebKit has no `dvh`, and a custom property holding an unparseable
+     length is not caught at parse time -- it fails at use time, which would
+     leave every `max-height` built on it computing to `none`. */
+  --safe-height: calc(100vh - var(--android-inset-top) - var(--android-inset-bottom));
+
   /* ---- Layout -----------------------------------------------------------
      Sidebar and commit panel widths are variables so they can respond to the
      viewport and, later, to the user dragging them. */
@@ -139,9 +164,26 @@
      always fits — it has no time line, so it sits inside this height. */
   --timeline-node-height: 47px;
 
+  /* ---- Diff gutters -----------------------------------------------------
+     Two line-number columns and a +/- sign. At the default 36/36/16 they cost
+     88px before a character of code, which is a fifth of the diff pane once
+     the viewport is tablet width, so they step down with it. */
+  --diff-gutter-width: 36px;
+  --diff-sign-width: 16px;
+
+  /* Thickness of the draggable band between the two panes. A variable because
+     a finger needs roughly twice what a cursor does. */
+  --split-divider-size: 10px;
+
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --safe-height: calc(100dvh - var(--android-inset-top) - var(--android-inset-bottom));
+  }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -186,10 +228,25 @@
 
 body {
   margin: 0;
-  min-width: 1100px;
+  /* No `min-width`. This carried 1100px, which is wider than the Fold's inner
+     display in portrait (~800px) and wider than the desktop window's own 960px
+     minimum, so the document was simply larger than the viewport and the app
+     could be panned around underneath the system bars. That panning is what
+     read as the app being "zoomable". The layout below now goes down to ~600px
+     on its own, so the floor has nothing left to protect. */
   min-height: 100vh;
   background: var(--bg-base);
   color: var(--text);
+  /* Android WebView inflates text on its own when it judges a column too wide
+     for the screen. The type scale above is deliberate and does not want a
+     second opinion. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* The shell is a fixed viewport, not a document. Nothing here is meant to
+     scroll the page, and when something overflows anyway the honest failure is
+     a clipped panel rather than a whole app that slides under the status bar. */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -240,7 +297,16 @@ button:focus-visible {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  /* Side insets are held here; the top and bottom ones are not. Each edge is
+     paid for by whichever surface actually meets it -- the top bar, the
+     sidebar, the panels -- so that a panel's background carries on behind the
+     status bar and the gesture handle rather than stopping short of it and
+     leaving a strip of a different colour. A cutout on a long edge has no such
+     surface to hand the job to. */
+  padding-left: var(--android-inset-left);
+  padding-right: var(--android-inset-right);
   transition: grid-template-columns 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -259,6 +325,12 @@ button:focus-visible {
   min-width: 0;
   overflow: hidden;
   position: relative;
+  /* The gesture handle is cleared once, for the whole column, rather than by
+     each surface that might happen to be last. What sits against the bottom
+     edge changes with state -- the diff, the commit panel, or the activity
+     feed when there is one -- and paying for the inset in each of them would
+     double up the moment two are stacked. */
+  padding-bottom: var(--android-inset-bottom);
 }
 
 .main-area.repo-switching {
@@ -299,6 +371,12 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* The sidebar spans the full height, so it meets both bars itself rather
+     than through the top bar and the main column. Its own background paints
+     across the padding, so the strip behind the gesture handle stays sidebar
+     coloured instead of showing the base through. */
+  padding-top: var(--android-inset-top);
+  padding-bottom: var(--android-inset-bottom);
 }
 
 /* The label and the controls are different kinds of thing and now read that
@@ -1215,7 +1293,12 @@ button:focus-visible {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 260px;
+  /* Grows by the inset rather than absorbing it, so the terminal keeps its
+     260px of readable output instead of losing the last two lines behind the
+     gesture handle. The drawer is `fixed`, so the main column's own bottom
+     padding does not reach it. */
+  height: calc(260px + var(--android-inset-bottom));
+  padding-bottom: var(--android-inset-bottom);
   background: #0f172a;
   color: #f8fafc;
   border-top: 1px solid #1e293b;
@@ -1366,9 +1449,11 @@ button:focus-visible {
   display: inline-flex;
   height: 32px;
   justify-content: center;
-  left: 12px;
+  left: calc(12px + var(--android-inset-left));
   position: absolute;
-  top: 12px;
+  /* Shown only in the empty state, where there is no top bar to carry the
+     status-bar inset for it. */
+  top: calc(12px + var(--android-inset-top));
   width: 32px;
   z-index: 2;
 }
@@ -1386,8 +1471,10 @@ button:focus-visible {
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  min-height: 48px;
-  padding: 0 14px;
+  /* The status bar sits inside the bar rather than above it: the panel colour
+     runs to the top of the screen and the controls begin below the clock. */
+  min-height: calc(48px + var(--android-inset-top));
+  padding: var(--android-inset-top) 14px 0;
 }
 
 .top-bar-left,
@@ -2048,7 +2135,12 @@ button:focus-visible {
   box-shadow: var(--shadow), 0 8px 24px rgba(0, 0, 0, 0.12);
   display: grid;
   gap: 2px;
+  /* Capped before it is measured, so the clamping in ContextMenu.tsx has a
+     height it can actually fit on screen; a long menu scrolls instead of
+     running off the bottom with its last items unreachable. */
+  max-height: calc(var(--safe-height) - var(--space-4));
   min-width: 180px;
+  overflow-y: auto;
   padding: 4px;
   position: fixed;
   z-index: 100;
@@ -2160,10 +2252,18 @@ button:focus-visible {
   flex-direction: column;
   flex-shrink: 0;
   gap: var(--timeline-stack-gap);
-  /* Fixed, so a tag, a long subject, or the absence of a timestamp can never
-     make one node taller than another. Selection draws into this same box on
-     every node. */
-  height: var(--timeline-node-height);
+  /* A floor, not a fixed height. It was fixed, so that a tag, a long subject or
+     a missing timestamp could never make one node taller than another -- and it
+     still does that, because every node's content grows by the same factor.
+
+     What it cannot also do is cap the height. The stack is sized in pixels but
+     the text inside it is not: Android applies the system font scale to the
+     webview, so a device set one notch above default renders this content
+     taller than the box and "no changes" was being sliced through the middle.
+     Measured on a Fold at both 1.08x and 1.3x. Nothing moves as a result -- the
+     dot is at the top of the stack, so the growth is downward and the rail
+     still meets every node at the same y. */
+  min-height: var(--timeline-node-height);
   padding: 0 var(--space-3);
   position: relative;
   text-align: center;
@@ -2321,7 +2421,12 @@ button:focus-visible {
      the node's own keeps the content box at --timeline-node-height (border-box),
      so Now still lines up with every commit while its surface runs edge to edge. */
   margin-block: calc(var(--space-2) * -1);
-  height: calc(var(--timeline-node-height) + var(--space-2) * 2);
+  /* Same floor-not-cap reasoning as .timeline-node above. `stretch` is what
+     keeps the promise the comment makes: the surface still spans the band
+     exactly, because it now matches the track's height rather than a constant
+     that the track may have outgrown. */
+  align-self: stretch;
+  min-height: calc(var(--timeline-node-height) + var(--space-2) * 2);
   padding-block: var(--space-2);
 }
 
@@ -2436,6 +2541,11 @@ button:focus-visible {
 
 .node-subject {
   color: var(--text-secondary);
+  /* A column flex item shrinks before it overflows, so when the node was
+     height-capped this line gave up its own height first and clipped itself
+     against `overflow: hidden` -- the text was there, with its lower half cut
+     off. It should keep its line box and let the node grow instead. */
+  flex-shrink: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-tight);
@@ -3042,10 +3152,24 @@ button.context-chip.pullable.busy,
   overflow: auto;
 }
 
+/* The stage toggle. It had no rule anywhere, which left it matching the generic
+   `input, select, textarea` block above -- a 34px min-height and 7px of padding
+   applied to a checkbox, and a hit area about 13px across on the axis that
+   counts. It is the most-tapped control in the app. */
+.change-item > input[type="checkbox"] {
+  accent-color: var(--accent);
+  block-size: 18px;
+  flex: 0 0 auto;
+  inline-size: 18px;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+}
+
 .change-item {
   align-items: center;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   padding: 2px 8px;
 }
@@ -3358,7 +3482,9 @@ button.context-chip.pullable.busy,
 
 .diff-line {
   display: grid;
-  grid-template-columns: 36px 36px 16px 1fr;
+  grid-template-columns:
+    var(--diff-gutter-width) var(--diff-gutter-width)
+    var(--diff-sign-width) minmax(0, 1fr);
   min-height: 22px;
 }
 
@@ -3772,7 +3898,7 @@ button.context-chip.pullable.busy,
 .reset-toggle {
   display: grid;
   gap: 6px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .reset-toggle button {
@@ -3922,14 +4048,14 @@ button.context-chip.pullable.busy,
   border-bottom: 1px solid var(--border);
   border-top: 1px solid var(--border);
   cursor: row-resize;
-  height: 10px;
+  height: var(--split-divider-size);
 }
 
 .split-pane-horizontal .split-divider {
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
   cursor: col-resize;
-  width: 10px;
+  width: var(--split-divider-size);
 }
 
 .split-divider-grip {
@@ -4127,11 +4253,14 @@ button.context-chip.pullable.busy,
   flex-direction: column;
   gap: 0;
   left: 50%;
-  max-height: min(80vh, 560px);
+  max-height: min(calc(var(--safe-height) - var(--space-6)), 560px);
   max-width: 420px;
   overflow: hidden;
   position: fixed;
-  top: 50%;
+  /* Centred on the safe area, not the window. Without the correction a dialog
+     centres behind the soft keyboard, which is exactly when it holds a text
+     field worth reading. */
+  top: calc(50% + (var(--android-inset-top) - var(--android-inset-bottom)) / 2);
   transform: translate(-50%, -50%);
   width: calc(100% - 40px);
   z-index: 101;
@@ -4746,12 +4875,16 @@ button.context-chip.pullable.busy,
   flex-direction: column;
   gap: 16px;
   left: 50%;
-  max-height: min(80vh, 560px);
+  max-height: min(calc(var(--safe-height) - var(--space-6)), 560px);
   max-width: 440px;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 20px;
   position: fixed;
-  top: 50%;
+  /* Centred on the safe area, not the window. Without the correction a dialog
+     centres behind the soft keyboard, which is exactly when it holds a text
+     field worth reading. */
+  top: calc(50% + (var(--android-inset-top) - var(--android-inset-bottom)) / 2);
   transform: translate(-50%, -50%);
   width: calc(100% - 40px);
   z-index: 111;
@@ -5896,12 +6029,65 @@ button.context-chip.pullable.busy,
    steps give the sidebar and commit panel a share of the extra width, and pull
    them back in below the default window size. */
 
-/* Narrow windows: the app's minWidth is 960, so this is as small as it gets. */
+/* Narrow desktop windows. No longer the floor: the body's 1100px `min-width`
+   is gone, so the tiers below carry on down to tablet width. */
 @media (max-width: 1100px) {
   :root {
     --sidebar-width: var(--sidebar-width-min);
     --commit-panel-width: 240px;
     --conflict-list-width: 180px;
+  }
+}
+
+/* Tablet width. The Fold's inner display is close to square -- roughly 760 to
+   840px on either axis -- so this is the tier the app spends most of its life
+   in on Android, and in a half-screen DeX window besides. Every fixed track
+   gives back what it can; the diff is what the remaining width is for. */
+@media (max-width: 1000px) {
+  :root {
+    --sidebar-width: 168px;
+    --commit-panel-width: 216px;
+    --conflict-list-width: 164px;
+    --diff-gutter-width: 30px;
+    --diff-sign-width: 14px;
+  }
+
+  /* The right-hand group is deliberately unshrinkable (see .top-bar-right), and
+     at this width it no longer fits beside the breadcrumbs. Wrapping honours
+     that: Push and Pull keep their full size and take a second row instead of
+     being squeezed off the edge. */
+  .top-bar {
+    flex-wrap: wrap;
+    padding-bottom: var(--space-1-5);
+    row-gap: var(--space-1-5);
+  }
+
+  /* The split between the file list and the diff is a percentage, so the file
+     list shrinks with the window: at 30% of a tablet-width workspace it lands
+     around 120px, which truncates every name to about four characters and
+     leaves the list unable to do the one thing it is for. A floor in pixels
+     holds it open; the diff beside it carries `min-width: 0` and gives up the
+     difference, and on a desktop window 30% is already wider than this so
+     nothing changes there. */
+  .split-pane-horizontal > .split-pane-primary {
+    min-width: 216px;
+  }
+}
+
+/* Three fixed columns of conflict UI -- file list, resolver, integration panel
+   -- cannot share this width; the resolver would be left with about 200px. The
+   panel takes a row of its own underneath instead, capped so the resolver keeps
+   the majority of the height. */
+@media (max-width: 880px) {
+  .merge-conflict-grid {
+    grid-template-columns: var(--conflict-list-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .merge-conflict-grid > .integration-panel {
+    border-top: 1px solid var(--border);
+    grid-column: 1 / -1;
+    max-height: 38vh;
   }
 }
 
@@ -5923,6 +6109,186 @@ button.context-chip.pullable.busy,
   :root {
     --sidebar-width: 300px;
     --commit-panel-width: 360px;
+  }
+}
+
+/* ───────────────────── Scroll containment ─────────────────────
+   Every one of these is a scroller nested inside another scroller -- a preview
+   inside a dialog, a menu over the workspace, a log pane inside a drawer. When
+   a touch scroll reaches the end of the inner one the gesture chains outward
+   and the surface behind it moves instead, which on a dialog reads as the app
+   coming apart underneath the thing you are reading. Containment ends the
+   gesture at the boundary.
+
+   `overscroll-behavior` is inert for a mouse wheel over a scroller that has
+   somewhere left to go, so this costs the desktop build nothing. */
+.settings-modal-body,
+.settings-icon-grid,
+.backup-result,
+.reset-all-preview,
+.reset-target-message,
+.commit-inspector-body,
+.action-runner-terminal,
+.activity-feed-scroll,
+.activity-feed-tabs,
+.repo-picker-menu,
+.ide-picker-menu,
+.repo-runner-menu,
+.linked-updates-menu,
+.push-btn-menu,
+.pull-btn-menu,
+.context-menu,
+.conflict-file-list,
+.commit-panel,
+.change-items,
+.diff-scroll,
+.repo-list,
+.toast {
+  overscroll-behavior: contain;
+}
+
+/* ───────────────────── Touch ─────────────────────
+   Gated on `pointer: coarse`, which is the question actually being asked:
+   whether the primary pointer is a finger. It stays false in DeX and on any
+   desktop build even though those are the same binary, so none of this trades
+   away the dense mouse layout to pay for the touch one.
+
+   Two separate problems live here. The first is reachability -- controls that
+   exist only while something is hovered, which on a touchscreen means they do
+   not exist. The second is size. */
+
+@media (pointer: coarse) {
+  /* ---- Reachability ----
+     These three are revealed by :hover with `pointer-events: none` until then,
+     so on touch the actions behind them -- save a discovered repository, remove
+     a saved one, delete a custom command -- had no path at all. Saving a
+     discovered repo has no other entry point anywhere in the app. */
+  .repo-save-btn,
+  .repo-remove-btn,
+  .repo-runner-remove {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Both of those float over the right-hand end of the row they belong to, so
+     the row has to actually give up the space now that they are always there. */
+  .repo-item-main {
+    padding-right: 44px;
+  }
+
+  /* Dimmed rather than hidden, but at 18px and 35% opacity the distinction was
+     academic. */
+  .change-summary-dismiss {
+    opacity: 0.75;
+  }
+
+  /* These three rows open a menu on a long press (see lib/useLongPress.ts).
+     Android starts a text selection on the same gesture, so without this the
+     menu opens on top of selection handles and a highlighted file name. */
+  .change-item,
+  .repo-item,
+  .timeline-node {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  /* ---- Size ----
+     Raised toward a ~44px target, in place rather than through an invisible
+     overlay: neighbouring controls here are only a few pixels apart, and
+     overlapping hit areas trade a target that is too small for one that belongs
+     to the wrong button. */
+  .icon-btn,
+  .view-mode-toggle,
+  .sidebar-restore-btn {
+    height: 40px;
+    width: 40px;
+  }
+
+  .icon-btn.sm,
+  .repo-sort-control,
+  .repo-save-btn,
+  .repo-remove-btn {
+    height: 36px;
+    width: 36px;
+  }
+
+  .ghost-btn,
+  .add-repo-btn,
+  .settings-btn,
+  .ide-picker,
+  .repo-runner {
+    min-height: 40px;
+  }
+
+  .ghost-btn.sm {
+    min-height: 36px;
+  }
+
+  /* The stage toggle and the row it sits on -- the pair tapped more than
+     anything else in the app. */
+  .change-item > input[type="checkbox"] {
+    block-size: 24px;
+    inline-size: 24px;
+  }
+
+  .change-path,
+  .repo-item-main {
+    min-height: 40px;
+  }
+
+  .repo-item.saved {
+    min-height: 44px;
+  }
+
+  /* Menu rows: a mis-tap in the push menu is a force push. */
+  .context-menu-item,
+  .push-btn-menu-item,
+  .pull-btn-menu-item,
+  .linked-updates-item {
+    min-height: 44px;
+  }
+
+  /* The chevrons that open those menus were 28px wide. */
+  .push-btn-chevron,
+  .pull-btn-chevron {
+    min-width: 40px;
+  }
+
+  .view-switch button,
+  .conflict-choose,
+  .merge-secondary,
+  .conflict-file-list li button,
+  .tidy-repo-head {
+    min-height: 38px;
+  }
+
+  /* The small icon buttons scattered through the activity feed, the summary
+     panel and the runner drawer. All were between 16 and 24px. */
+  .activity-feed-tab-close,
+  .activity-feed-actions button,
+  .activity-feed-terminal-tab,
+  .change-summary-dismiss,
+  .change-summary-icon-btn,
+  .action-runner-btn,
+  .action-runner-close-btn,
+  .graph-legend-dismiss {
+    min-height: 34px;
+    min-width: 34px;
+  }
+
+  .settings-switch {
+    height: 22px;
+    width: 22px;
+  }
+
+  .settings-input-compact {
+    min-height: 38px;
+  }
+
+  /* A 10px band with a 3px grip is not something a finger can catch. The
+     divider already sets `touch-action: none`, so the drag itself works. */
+  .split-divider {
+    --split-divider-size: 22px;
   }
 }
 
@@ -6379,7 +6745,7 @@ button.context-chip.pullable.busy,
    repository groups at the settings width is a column of truncated names, and
    the whole point of this surface is being able to take it in. */
 .settings-modal.tidy-modal {
-  max-height: min(86vh, 720px);
+  max-height: min(calc(var(--safe-height) - var(--space-6)), 720px);
   max-width: 620px;
 }
 

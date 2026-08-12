@@ -9,7 +9,13 @@
   display: flex;
   inset: 0;
   justify-content: center;
-  padding: var(--space-6);
+  /* The scrim covers the screen; the sheet inside it stays clear of the system
+     bars. Flex centring already keeps it off the edges -- the insets just move
+     those edges in. */
+  padding: calc(var(--space-6) + var(--android-inset-top))
+    calc(var(--space-6) + var(--android-inset-right))
+    calc(var(--space-6) + var(--android-inset-bottom))
+    calc(var(--space-6) + var(--android-inset-left));
   position: fixed;
   z-index: 60;
 }
@@ -19,9 +25,10 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 10px);
   box-shadow: var(--shadow), 0 24px 64px rgba(0, 0, 0, 0.35);
-  max-height: 80vh;
+  max-height: 100%;
   max-width: 720px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--space-5);
   width: 100%;
 }

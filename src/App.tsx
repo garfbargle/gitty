@@ -173,12 +173,22 @@ const repoSortModes = new Set<RepoSortMode>([
   "changes",
 ]);
 
+/// Below this the four columns the workspace wants -- repositories, files,
+/// diff, commit -- cannot all be useful at once, and the repository list is the
+/// one with an alternative: the picker in the top bar names the same repos.
+/// Matches the tablet breakpoint in App.css.
+const NARROW_VIEWPORT_PX = 1000;
+
 function readSidebarVisible(): boolean {
   try {
-    return localStorage.getItem(SIDEBAR_VISIBLE_KEY) !== "false";
+    const saved = localStorage.getItem(SIDEBAR_VISIBLE_KEY);
+    // An explicit choice outranks the viewport, in both directions and however
+    // small the window; toggling the sidebar writes this key.
+    if (saved !== null) return saved !== "false";
   } catch {
-    return true;
+    // Storage unavailable: fall through to the width-based default.
   }
+  return typeof window === "undefined" || window.innerWidth > NARROW_VIEWPORT_PX;
 }
 
 function readRepoSortMode(): RepoSortMode {

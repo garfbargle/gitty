@@ -18,6 +18,7 @@ import {
   tagRefs,
 } from "../lib/git";
 import { usePriorityPlus } from "../lib/usePriorityPlus";
+import { useLongPress, type LongPressPoint } from "../lib/useLongPress";
 import { ContextMenu } from "./ContextMenu";
 import { TagBadge } from "./TagBadge";
 
@@ -135,6 +136,9 @@ export function HistoryTimeline({
     items: ReturnType<typeof buildCommitTagMenuItems>;
   } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // Branch-from, reset-to and the tag actions live only in this menu, which
+  // until now opened only on right-click.
+  const bindLongPress = useLongPress();
   const tagActionsEnabled = !!(onCreateTag && onDeleteTag);
   const ancestry = useMemo(() => ancestryTimelineCommits(commits), [commits]);
   const ahead = useMemo(() => aheadTimelineCommits(aheadCommits), [aheadCommits]);
@@ -375,12 +379,10 @@ export function HistoryTimeline({
     onSelectWorkingTree();
   }
 
-  function openTagContextMenu(event: React.MouseEvent, commit: CommitEntry) {
-    event.preventDefault();
-    event.stopPropagation();
+  function openTagContextMenu(point: LongPressPoint, commit: CommitEntry) {
     setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       items: buildCommitTagMenuItems(commit, {
         onBranchFrom,
         onResetTo,
@@ -426,7 +428,12 @@ export function HistoryTimeline({
           else nodeRefs.current.delete(commit.hash);
         }}
         onClick={() => selectCommit(commit)}
-        onContextMenu={(event) => openTagContextMenu(event, commit)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openTagContextMenu({ x: event.clientX, y: event.clientY }, commit);
+        }}
+        {...bindLongPress((point) => openTagContextMenu(point, commit))}
         title={`${commit.shortHash} · ${commit.subject} · ${formatDate(commit.date)}${tagSummary}${isAhead ? " · ahead on branch" : ""}${unpushed ? " · not pushed yet" : ""}`}
       >
         {/* The push line, drawn on the oldest commit the remote does not have.

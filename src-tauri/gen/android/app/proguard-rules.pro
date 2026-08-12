@@ -19,3 +19,11 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# MainActivity publishes the window insets to the webview over a
+# @JavascriptInterface. R8 renames methods it cannot see called from Kotlin, and
+# the only caller is JavaScript, so without this the release build loses the
+# insets and the chrome sits under the status bar.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

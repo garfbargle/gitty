@@ -11,6 +11,7 @@ import { isStaged, isUnstaged, statusCode } from "../lib/git";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { FilePathLabel } from "./FilePathLabel";
 import { SHORTCUT } from "../lib/shortcuts";
+import { useLongPress, type LongPressPoint } from "../lib/useLongPress";
 
 export type { ChangeSelectionEntry } from "../types";
 
@@ -101,14 +102,16 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
   } | null>(null);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // The per-file menu is otherwise right-click only, which a touchscreen has no
+  // way to express.
+  const bindLongPress = useLongPress();
 
-  function openFileContextMenu(event: React.MouseEvent, filePath: string) {
+  function openFileContextMenu(point: LongPressPoint, filePath: string) {
     if (!repoPath) return;
-    event.preventDefault();
     const absolutePath = joinRepoPath(repoPath, filePath);
     setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       items: [
         {
           label: "Open in Finder",
@@ -310,7 +313,11 @@ export const ChangesList = forwardRef<ChangesListHandle, ChangesListProps>(funct
           if (node) itemRefs.current.set(entry.key, node);
           else itemRefs.current.delete(entry.key);
         }}
-        onContextMenu={(event) => openFileContextMenu(event, entry.file.path)}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          openFileContextMenu({ x: event.clientX, y: event.clientY }, entry.file.path);
+        }}
+        {...bindLongPress((point) => openFileContextMenu(point, entry.file.path))}
       >
         {!isCommitView ? (
           <input

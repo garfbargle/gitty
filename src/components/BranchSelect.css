@@ -65,6 +65,8 @@
   max-height: 340px;
   min-width: 260px;
   overflow-y: auto;
+  /* Scrolls over the workspace; see the containment note in App.css. */
+  overscroll-behavior: contain;
   padding: var(--space-1);
   position: absolute;
   top: calc(100% + 4px);
@@ -140,4 +142,18 @@
 .branch-option-worktree:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+/* See the touch note in App.css: `pointer: coarse` is the finger-primary case,
+   and stays false in DeX. The branch list is a scrolling list of small rows,
+   which is the shape that suffers most from a target sized for a cursor. */
+@media (pointer: coarse) {
+  .branch-option {
+    min-height: 40px;
+  }
+
+  .branch-option-worktree {
+    min-height: 32px;
+    padding: var(--space-1) var(--space-2);
+  }
 }

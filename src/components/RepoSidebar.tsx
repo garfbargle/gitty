@@ -16,6 +16,7 @@ import { shortenPath } from "../lib/git";
 import { revealInFinder } from "../lib/finder";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { RepoIcon } from "./RepoIcon";
+import { useLongPress, type LongPressPoint } from "../lib/useLongPress";
 
 /// Shown in the picker's options and in the control's tooltip. The header
 /// itself renders the icon only, so these are the single source of the
@@ -105,6 +106,9 @@ export const RepoSidebar = memo(function RepoSidebar({
   }, [contentPath, optimisticPath]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // Right-click is the only way into this menu with a mouse; on touch there is
+  // no equivalent, and "Repository settings" lives nowhere else on a saved row.
+  const bindLongPress = useLongPress();
 
   const handleSelect = useCallback(
     (path: string) => {
@@ -115,8 +119,7 @@ export const RepoSidebar = memo(function RepoSidebar({
     [contentPath, onSelect, selectedPath],
   );
 
-  function openRepoContextMenu(event: React.MouseEvent, path: string, isSaved: boolean) {
-    event.preventDefault();
+  function openRepoContextMenu(point: LongPressPoint, path: string, isSaved: boolean) {
     const items: ContextMenuItem[] = [
       {
         label: "Open in Finder",
@@ -130,8 +133,8 @@ export const RepoSidebar = memo(function RepoSidebar({
       });
     }
     setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x: point.x,
+      y: point.y,
       items,
     });
   }
@@ -214,7 +217,11 @@ export const RepoSidebar = memo(function RepoSidebar({
               setDragPath(null);
               setDragOverPath(null);
             }}
-            onContextMenu={(event) => openRepoContextMenu(event, repo.path, true)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              openRepoContextMenu({ x: event.clientX, y: event.clientY }, repo.path, true);
+            }}
+            {...bindLongPress((point) => openRepoContextMenu(point, repo.path, true))}
           >
             <button
               className="repo-item-main"
@@ -276,7 +283,11 @@ export const RepoSidebar = memo(function RepoSidebar({
               className={`repo-item discovered ${repo.path === activePath ? "active" : ""}`}
               key={repo.id}
               title={repo.path}
-              onContextMenu={(event) => openRepoContextMenu(event, repo.path, false)}
+              onContextMenu={(event) => {
+              event.preventDefault();
+              openRepoContextMenu({ x: event.clientX, y: event.clientY }, repo.path, false);
+            }}
+            {...bindLongPress((point) => openRepoContextMenu(point, repo.path, false))}
             >
               <button
                 className="repo-item-main"
