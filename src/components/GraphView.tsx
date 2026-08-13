@@ -54,6 +54,7 @@ const RAIL_NEAR_Y = 604;
 const MAX_SCENE_COMMITS = 80;
 const MIN_ZOOM = 0.65;
 const MAX_ZOOM = 2.8;
+const DEFAULT_ZOOM = 1.16;
 const MIN_TRAVEL = -0.18;
 const MAX_TRAVEL = 0.78;
 
@@ -121,7 +122,7 @@ export function GraphView({
   onFocusedChange,
 }: GraphViewProps) {
   const [inspectedHash, setInspectedHash] = useState(selectedHash ?? "");
-  const [camera, setCamera] = useState<Camera>({ travel: 0, scale: 1 });
+  const [camera, setCamera] = useState<Camera>({ travel: 0, scale: DEFAULT_ZOOM });
   const cameraRef = useRef(camera);
   const activePointers = useRef(new Map<number, PointerPosition>());
   const panStart = useRef<{ pointer: PointerPosition; camera: Camera } | null>(null);
@@ -409,7 +410,7 @@ export function GraphView({
           <button
             type="button"
             className="constellation-control"
-            onClick={() => updateCamera({ travel: 0, scale: 1 })}
+            onClick={() => updateCamera({ travel: 0, scale: DEFAULT_ZOOM })}
             title="Reset time position and zoom"
             aria-label="Reset time position and zoom"
           >
