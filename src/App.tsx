@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -155,6 +155,7 @@ function emptySummaryCache(): SummaryCache {
 
 const SNAPSHOT_SUPERSEDED = "__superseded__";
 const SIDEBAR_VISIBLE_KEY = "gitty.sidebarVisible";
+const SIDEBAR_WIDTH_KEY = "gitty.sidebarWidth";
 const REPO_SORT_KEY = "gitty.repoSort";
 const STATUS_MESSAGE_DISMISS_MS = 4_000;
 // Fetch shortly after returning to Gitty, then periodically while it stays
@@ -189,6 +190,15 @@ function readSidebarVisible(): boolean {
     // Storage unavailable: fall through to the width-based default.
   }
   return typeof window === "undefined" || window.innerWidth > NARROW_VIEWPORT_PX;
+}
+
+function readSidebarWidth(): number | null {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(saved) && saved >= 180 && saved <= 520 ? saved : null;
+  } catch {
+    return null;
+  }
 }
 
 function readRepoSortMode(): RepoSortMode {
@@ -366,11 +376,14 @@ function App() {
   }, []);
   const [navZone, setNavZone] = useState<NavZone>("files");
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(readSidebarWidth);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
   /// Gitty opens on the repository-wide map. Home is the focused, current-folder
   /// view with its changes and the compact timeline.
   const [historyView, setHistoryView] = useState<"strip" | "graph">("graph");
+  const [graphFocused, setGraphFocused] = useState(false);
   // A commit chosen from the map is an inspection, not a mode switch. Its back
   // affordance returns to the map; Home is the separate route to live changes.
   const [returnToMapAfterPreview, setReturnToMapAfterPreview] = useState(false);
@@ -624,6 +637,28 @@ function App() {
         // ignore storage failures
       }
       return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (historyView !== "graph") setGraphFocused(false);
+  }, [historyView]);
+
+  const resizeSidebar = useCallback((width: number) => {
+    const next = Math.min(520, Math.max(180, Math.round(width)));
+    setSidebarWidth(next);
+  }, []);
+
+  const finishSidebarResize = useCallback(() => {
+    setResizingSidebar(false);
+    setSidebarWidth((width) => {
+      if (width === null) return width;
+      try {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+      } catch {
+        // A non-persistent resize still improves the current session.
+      }
+      return width;
     });
   }, []);
 
@@ -3354,7 +3389,14 @@ function App() {
     visibleTerminalSessions.find((session) => session.runId === drawerSessionId) ?? null;
 
   return (
-    <main className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}`}>
+    <main
+      className={`app-shell${sidebarVisible ? "" : " sidebar-hidden"}${graphFocused ? " graph-focus-mode" : ""}${resizingSidebar ? " sidebar-resizing" : ""}`}
+      style={
+        sidebarWidth === null
+          ? undefined
+          : ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties)
+      }
+    >
       <RepoSidebar
         repos={sortedRepos}
         discoveredRepos={sortedDiscoveredRepos}
@@ -3380,6 +3422,38 @@ function App() {
         onRescanDiscovery={rescanDiscovery}
         onHide={toggleSidebar}
       />
+      {sidebarVisible ? (
+        <div
+          className="sidebar-resize-handle"
+          role="separator"
+          aria-label="Resize repository sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={180}
+          aria-valuemax={520}
+          aria-valuenow={sidebarWidth ?? undefined}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setResizingSidebar(true);
+          }}
+          onPointerMove={(event) => {
+            if (!resizingSidebar) return;
+            resizeSidebar(event.clientX);
+          }}
+          onPointerUp={finishSidebarResize}
+          onPointerCancel={finishSidebarResize}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const current = sidebarWidth ?? 220;
+            resizeSidebar(current + (event.key === "ArrowLeft" ? -20 : 20));
+          }}
+        >
+          <span aria-hidden="true" />
+        </div>
+      ) : null}
 
       <section className={`main-area${repoSwitching ? " repo-switching" : ""}`}>
         {!sidebarVisible && !displaySnapshot && !repoSwitching ? (
@@ -3667,6 +3741,8 @@ function App() {
                       void inspectCommit(commit);
                     }}
                     onOpenWorktree={(path) => void openCheckout(path)}
+                    focused={graphFocused}
+                    onFocusedChange={setGraphFocused}
                   />
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />
