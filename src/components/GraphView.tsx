@@ -49,7 +49,8 @@ type BranchPath = {
 
 const CANVAS_W = 1200;
 const CANVAS_H = 650;
-const FLOOR_HORIZON_Y = 174;
+const FLOOR_HORIZON_Y = 96;
+const RAIL_NEAR_Y = 604;
 const MAX_SCENE_COMMITS = 80;
 const MIN_ZOOM = 0.65;
 const MAX_ZOOM = 2.8;
@@ -258,8 +259,16 @@ export function GraphView({
       // Travelling moves the viewer down the history rail, rather than
       // translating this scene like a flat map.
       const relativeAge = Math.max(0, Math.min(1.25, age - camera.travel));
-      const distance = Math.sqrt(relativeAge);
-      const scale = 1 - distance * 0.61;
+      // Linear time distance avoids the infinite near-camera acceleration a
+      // square-root curve creates. The rational projection still makes deep
+      // history recede, but it does so with a continuous, controllable rate.
+      const distance = relativeAge;
+      // Project the history down the same depth axis as the floor. Unlike a
+      // linear Y offset, this asymptotically approaches the horizon: the
+      // trunk travels *into* the vanishing point instead of continuing above
+      // it like a vertical timeline.
+      const depth = 1 / (1 + distance * 2.9);
+      const scale = 0.36 + depth * 0.64;
       const branch = branchFor.get(row.commit.hash);
       const trunkCommit = trunk.has(row.commit.hash);
       const laneSide = row.lane % 2 === 0 ? -1 : 1;
@@ -271,8 +280,8 @@ export function GraphView({
       const elevation = trunkCommit ? 0 : 17 + Math.min(33, Math.abs(offset) * 0.07);
       nodes.set(row.commit.hash, {
         commit: row.commit,
-        x: CANVAS_W / 2 + offset * scale,
-        y: 592 - distance * 520 - elevation * scale,
+        x: CANVAS_W / 2 + offset * depth,
+        y: FLOOR_HORIZON_Y + (RAIL_NEAR_Y - FLOOR_HORIZON_Y) * depth - elevation * depth,
         scale,
         colour: trunkCommit ? "#60a5fa" : branch?.colour ?? row.color,
         trunk: trunkCommit,
