@@ -11,8 +11,9 @@ register: product
 ## Purpose
 
 A cross-platform desktop Git client (Tauri 2, React 19, Rust) that shells out to
-the system `git` binary rather than embedding a Git library. One screen, one
-always-visible timeline, two verbs on it.
+the system `git` binary rather than embedding a Git library. It opens on a map
+of the repository: the trunk at the centre and the folders carrying work around
+it. Home is the focused view of the folder open now and its changes.
 
 ## Users
 
@@ -43,10 +44,11 @@ From `docs/SIMPLIFICATION_PLAN.md`, unchanged:
    folder deletes it from disk, so it gets a dialog that says so, names the
    folder, and states what is not deleted. A trash icon beside a row is not an
    ask.
-4. **No lane forest in the strip.** The timeline carries main, the current
-   branch, and at most one sibling lane. This constrains the horizontal strip.
-   It does not constrain the on-demand Branches graph, which exists precisely to
-   be the dense view.
+4. **The workspace map is the default.** It shows the trunk, every open folder,
+   which folder is open here, local uncommitted changes, and whether a folder's
+   committed work is already in the trunk. The commit graph sits beneath it for
+   detail. Home remains compact: the current folder, its changes, and the
+   focused timeline — no lane forest there.
 5. **Worktrees are a hidden engine**, so work on another branch never changes the
    user's checkout underneath them.
 6. **Push force is always `--force-with-lease`.**
@@ -71,9 +73,10 @@ one branch drawn there is no identity to carry, so colour stays free for state.
 The graph draws many branches, so there colour does identity work and stays with
 a branch for its whole run.
 
-**Two densities, one grammar.** Timeline is the default and stays as designed:
-your branch, the trunk, your upstream, one sibling. Branches is on demand and
-dense.
+**Two densities, one grammar.** The workspace map and its dense graph are the
+default: they establish the shape of work across folders. Home is deliberately
+compact: your current folder, its changes, your branch, the trunk, your
+upstream, and at most one sibling.
 
 ## Interface rules
 

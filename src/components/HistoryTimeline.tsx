@@ -85,6 +85,8 @@ type HistoryTimelineProps = {
   inPreview?: boolean;
   onOpenVersion?: () => void;
   onReturnToWorkingTree?: () => void;
+  /** A commit chosen from the repository map returns there, not merely to now. */
+  returnLabel?: string;
   /// A live integration op, drawn as a preview node on the track.
   integrationPreview?: {
     kind: "update" | "merge";
@@ -128,6 +130,7 @@ export function HistoryTimeline({
   inPreview,
   onOpenVersion,
   onReturnToWorkingTree,
+  returnLabel,
   integrationPreview,
 }: HistoryTimelineProps) {
   const [contextMenu, setContextMenu] = useState<{
@@ -615,7 +618,7 @@ export function HistoryTimeline({
               aria-pressed={historyView === "strip"}
               onClick={() => onHistoryViewChange("strip")}
             >
-              Timeline
+              Home
             </button>
             <button
               type="button"
@@ -623,7 +626,7 @@ export function HistoryTimeline({
               aria-pressed={historyView === "graph"}
               onClick={() => onHistoryViewChange("graph")}
             >
-              Branches
+              Workspace
             </button>
           </div>
         ) : null}
@@ -855,11 +858,11 @@ export function HistoryTimeline({
               <button
                 type="button"
                 className="timeline-action return-to-now"
-                title="Back to your current work"
+                title={returnLabel ? "Return to the repository map" : "Back to your current work"}
                 onClick={onReturnToWorkingTree}
               >
                 <span className="working-dot" />
-                Back to now
+                {returnLabel ?? "Back to now"}
                 {changeCount > 0 ? <em>{changeCount}</em> : null}
               </button>
             ) : null}

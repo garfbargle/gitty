@@ -4695,6 +4695,14 @@ struct WorktreeEntry {
     /// Lives under Gitty's own scratch namespace (a merge or commit preview),
     /// not something the user created. Hidden from the user's list.
     internal: bool,
+    /// Changed or untracked files in this checkout. `None` is deliberately
+    /// distinct from zero: a missing folder or a failed status read must never
+    /// be presented as clean.
+    change_count: Option<usize>,
+    /// Whether this checkout's HEAD is already contained by the primary
+    /// checkout's HEAD. This makes finished work visible without guessing from
+    /// branch names or last-used dates.
+    merged_into_main: Option<bool>,
 }
 
 /// Parses `git worktree list --porcelain`. Blocks are separated by blank lines
@@ -4730,6 +4738,8 @@ fn parse_worktree_list(output: &str, repo_path: &Path) -> Vec<WorktreeEntry> {
                 detached: false,
                 locked: false,
                 prunable: false,
+                change_count: None,
+                merged_into_main: None,
             });
         } else if let Some(entry) = current.as_mut() {
             if let Some(rest) = line.strip_prefix("HEAD ") {
@@ -4776,7 +4786,23 @@ fn list_worktrees_blocking(path: String) -> Result<Vec<WorktreeEntry>, String> {
     let repo = normalize_repo(&path)?;
     let repo_path = PathBuf::from(&repo.path);
     let output = git(&repo_path, &["worktree", "list", "--porcelain"])?;
-    Ok(parse_worktree_list(&output, &repo_path))
+    let mut entries = parse_worktree_list(&output, &repo_path);
+    let main_head = entries.iter().find(|entry| entry.is_main).map(|entry| entry.head.clone());
+
+    for entry in &mut entries {
+        let folder = PathBuf::from(&entry.path);
+        if !entry.internal && !entry.prunable && folder.exists() {
+            entry.change_count = uncommitted_count(&folder);
+        }
+        if !entry.internal && !entry.prunable && !entry.is_main && !entry.head.is_empty() {
+            entry.merged_into_main = main_head
+                .as_deref()
+                .filter(|head| !head.is_empty())
+                .map(|head| is_ancestor(&repo_path, &entry.head, head));
+        }
+    }
+
+    Ok(entries)
 }
 
 /// Open a branch in its own folder. `create_branch` starts a new branch at the
@@ -6649,6 +6675,41 @@ locked under review
             .find(|entry| !entry.is_main)
             .expect("linked worktree present");
         assert_eq!(added.branch.as_deref(), Some("feature"));
+
+        let _ = fs::remove_dir_all(&target);
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn lists_folder_changes_and_whether_its_work_is_in_main() {
+        let repo = scratch_repo("map-state");
+        let target = scratch_folder(&repo, "map-state-feature");
+
+        let before = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
+        let feature = before
+            .iter()
+            .find(|entry| entry.branch.as_deref() == Some("feature"))
+            .expect("feature folder");
+        assert_eq!(feature.change_count, Some(0));
+        assert_eq!(feature.merged_into_main, Some(true));
+
+        fs::write(target.join("a.txt"), "feature work").expect("write work");
+        let changed = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
+        let feature = changed
+            .iter()
+            .find(|entry| entry.branch.as_deref() == Some("feature"))
+            .expect("feature folder");
+        assert_eq!(feature.change_count, Some(1));
+
+        run_git(&target, &["add", "a.txt"]);
+        run_git(&target, &["commit", "-qm", "feature work"]);
+        let unmerged = list_worktrees_blocking(repo.to_string_lossy().to_string()).expect("list");
+        let feature = unmerged
+            .iter()
+            .find(|entry| entry.branch.as_deref() == Some("feature"))
+            .expect("feature folder");
+        assert_eq!(feature.change_count, Some(0));
+        assert_eq!(feature.merged_into_main, Some(false));
 
         let _ = fs::remove_dir_all(&target);
         let _ = fs::remove_dir_all(&repo);

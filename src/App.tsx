@@ -368,9 +368,12 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(readSidebarVisible);
   const [keyboardSheetOpen, setKeyboardSheetOpen] = useState(false);
   const [repoSortMode, setRepoSortMode] = useState<RepoSortMode>(readRepoSortMode);
-  /// Preview of the two densities in docs/GRAPH_VISUAL_LANGUAGE.md: the
-  /// working-tree strip, or the full branch graph over `graphCommits`.
-  const [historyView, setHistoryView] = useState<"strip" | "graph">("strip");
+  /// Gitty opens on the repository-wide map. Home is the focused, current-folder
+  /// view with its changes and the compact timeline.
+  const [historyView, setHistoryView] = useState<"strip" | "graph">("graph");
+  // A commit chosen from the map is an inspection, not a mode switch. Its back
+  // affordance returns to the map; Home is the separate route to live changes.
+  const [returnToMapAfterPreview, setReturnToMapAfterPreview] = useState(false);
   const [repoActions, setRepoActions] = useState<RepoAction[]>([]);
   /// Commands the user typed for this repository. Detection can legitimately
   /// find nothing, so these stand on their own — see lib/customActions.
@@ -431,7 +434,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, snapshot?.branch, worktreeRefresh]);
+  }, [selectedPath, snapshot?.branch, snapshot?.changes, worktreeRefresh]);
 
   /// What the Run button offers: what the project declares, plus whatever the
   /// user typed here. Either half can be empty.
@@ -1222,6 +1225,10 @@ function App() {
     resetSummaryCache();
     setChangeSummaryVisible(false);
     setNavZone("files");
+    // A repository switch is a new orientation point, not a continuation of a
+    // commit inspection from somewhere else. Start at the map every time.
+    setHistoryView("graph");
+    setReturnToMapAfterPreview(false);
     setRepoSettingsOpen(false);
     setIntegrationOp(null);
     setConflictFiles([]);
@@ -3479,7 +3486,10 @@ function App() {
             <div className="working-view">
                 <HistoryTimeline
                   historyView={historyView}
-                  onHistoryViewChange={setHistoryView}
+                  onHistoryViewChange={(view) => {
+                    setHistoryView(view);
+                    if (view === "strip") setReturnToMapAfterPreview(false);
+                  }}
                   lastFetchedAt={displaySnapshot.lastFetchedAt}
                   currentBranch={displaySnapshot.branch}
                   worktrees={worktrees}
@@ -3502,7 +3512,14 @@ function App() {
                   onMergeIntoMain={() => void mergeIntoMain()}
                   inPreview={!!viewingCommit}
                   onOpenVersion={() => void openCommitInFolder()}
-                  onReturnToWorkingTree={() => void selectWorkingTree()}
+                  returnLabel={returnToMapAfterPreview ? "Back to map" : undefined}
+                  onReturnToWorkingTree={() => {
+                    void selectWorkingTree();
+                    if (returnToMapAfterPreview) {
+                      setReturnToMapAfterPreview(false);
+                      setHistoryView("graph");
+                    }
+                  }}
                   onInteract={() => setNavZone("timeline")}
                   onSelect={(commit) => void inspectCommit(commit)}
                   onSelectWorkingTree={() => void selectWorkingTree()}
@@ -3637,17 +3654,19 @@ function App() {
                   <GraphView
                     commits={displaySnapshot.graphCommits ?? []}
                     headHash={displaySnapshot.commits[0]?.hash}
-                    headBranch={displaySnapshot.branch}
                     selectedHash={selectedCommit?.hash}
                     unpushedTags={unpushedTagSet}
                     worktrees={worktrees}
                     onSelect={(commit) => {
-                      // Picking a commit here is picking it in the app, not just
-                      // in this view: land on it in the normal view, the same
-                      // state as selecting it on the timeline.
+                      // Detail is temporary: selecting a commit opens the
+                      // existing inspection surface, whose Back action returns
+                      // to this spatial map rather than stranding the user in
+                      // the compact Home timeline.
+                      setReturnToMapAfterPreview(true);
                       setHistoryView("strip");
                       void inspectCommit(commit);
                     }}
+                    onOpenWorktree={(path) => void openCheckout(path)}
                   />
                 ) : showGittyEmptyState && !integrationOp ? (
                   <GittyEmptyState projectName={displaySnapshot.repo.name} />

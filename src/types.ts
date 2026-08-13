@@ -308,6 +308,10 @@ export type WorktreeEntry = {
   prunable: boolean;
   /// Gitty's own scratch checkout (merge or commit preview), not the user's.
   internal: boolean;
+  /** Changed or untracked files in this folder. Absent when Git could not read it. */
+  changeCount?: number | null;
+  /** Whether this folder's checked-out commit is already part of the trunk. */
+  mergedIntoMain?: boolean | null;
 };
 
 /// How sure Gitty is that a folder can go.
