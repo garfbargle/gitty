@@ -37,10 +37,15 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      # NDK r28+ is required: it is the first release that links with 16 KB
+      # page alignment, which Android 15+ devices with 16 KB pages need in order
+      # to load the library at all. It also matches the NDK
+      # scripts/android-git/build.sh used for the bundled git, so every .so in
+      # the APK comes from the same toolchain.
       - name: Install Android SDK and NDK
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       - name: Configure Rust for Android
         run: |
@@ -50,23 +55,74 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      # The bundled git is committed, not built here: scripts/android-git/build.sh
+      # needs macOS and cross-compiles OpenSSL, curl and git. If a checkout is
+      # missing it the build still succeeds and produces an APK that dies on
+      # launch, so it is checked before anything is built rather than after.
       - name: Verify tracked Android project
         run: |
+          set -euo pipefail
           test -f src-tauri/gen/android/gradlew
           test -f src-tauri/gen/android/app/build.gradle.kts
+          JNI=src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+          for lib in libgit.so libgit-remote-http.so libgit-subtree.so libgit-sh-i18n--envsubst.so; do
+            if [ ! -f "$JNI/$lib" ]; then
+              echo "Missing $JNI/$lib -- run scripts/android-git/build.sh and commit the result." >&2
+              exit 1
+            fi
+          done
 
       - name: Build unsigned release APK
         run: npx tauri android build --apk --target aarch64
 
       - name: Verify unsigned APK
         run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
           APK="$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' -print -quit)"
           test -n "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$APK" | grep -q "package: name='app.gitty.desktop'"
-          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$APK" >/dev/null 2>&1; then
+          "$BT/aapt2" dump badging "$APK" | grep -q "package: name='app.gitty.desktop'"
+          if "$BT/apksigner" verify "$APK" >/dev/null 2>&1; then
             echo "Expected an unsigned APK, but apksigner verified it as signed." >&2
             exit 1
           fi
+
+          # Everything below is about the bundled git surviving into the APK.
+          # None of it is visible from a green build: the app installs fine and
+          # then aborts in the Tauri setup hook on first launch, because
+          # git_bin::init cannot find libgit.so in nativeLibraryDir.
+          for lib in libgit.so libgit-remote-http.so libgit-subtree.so libgit-sh-i18n--envsubst.so; do
+            if ! unzip -l "$APK" "lib/arm64-v8a/$lib" | grep -q "$lib"; then
+              echo "Missing lib/arm64-v8a/$lib in the APK -- the app will crash on launch." >&2
+              exit 1
+            fi
+          done
+
+          # Android only permits exec from nativeLibraryDir, and the packaged
+          # libs are only written there when extractNativeLibs is on. Without
+          # it they stay inside the zip and nothing is extracted.
+          if ! "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" \
+               | grep -q 'extractNativeLibs(0x010104ea)=true'; then
+            echo "extractNativeLibs is not true -- the bundled git would never reach the filesystem." >&2
+            exit 1
+          fi
+
+          # 16 KB page alignment, for the same reason the NDK is pinned to r28+.
+          # A 4 KB-aligned library is refused by the loader on a 16 KB-page
+          # device, which is another crash with no message.
+          READELF="$(ls "$NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | head -1)"
+          rm -rf apk-libs
+          unzip -q -o "$APK" 'lib/arm64-v8a/*' -d apk-libs
+          for f in apk-libs/lib/arm64-v8a/*; do
+            # git-subtree is a shell script, not an object file; skip non-ELF.
+            "$READELF" -l "$f" >/dev/null 2>&1 || continue
+            BAD="$("$READELF" -l "$f" | awk '/LOAD/ && $NF != "0x4000" { print $NF }' | sort -u | tr '\n' ' ')"
+            if [ -n "$BAD" ]; then
+              echo "$f has LOAD segments aligned to $BAD, expected 0x4000 (16 KB)." >&2
+              exit 1
+            fi
+          done
+
           mkdir -p library-artifact
           cp "$APK" library-artifact/gitty-release-unsigned.apk
 

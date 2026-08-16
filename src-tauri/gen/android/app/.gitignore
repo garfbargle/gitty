@@ -1,5 +1,10 @@
 /src/main/**/generated
-/src/main/jniLibs/**/*.so
+# The Rust library is produced by `tauri android build` on every run.
+# The bundled git executables next to it are NOT generated -- they come from
+# scripts/android-git/build.sh and are committed, because CI builds from a
+# clean checkout and an APK without them crashes on launch (git_bin::init
+# fails, and the Tauri setup hook aborts the process).
+/src/main/jniLibs/**/libgitty_lib.so
 /src/main/assets/tauri.conf.json
 /tauri.build.gradle.kts
 /proguard-tauri.pro

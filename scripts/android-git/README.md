@@ -157,6 +157,13 @@ Notes for anyone touching this:
   `build.gradle.kts` — re-apply `minSdk 28`, `useLegacyPackaging`,
   `extractNativeLibs`, `resizeableActivity`, the extended `configChanges`, and
   the non-required touchscreen feature.
+- **The four `lib*.so` under `jniLibs/arm64-v8a/` are committed**, for the same
+  reason. CI builds from a clean checkout on Linux and this script only runs on
+  macOS, so anything it produces has to be in the repo or it is simply not in
+  the APK — and an APK without it installs fine and then aborts on launch, in
+  the Tauri setup hook, with `Could not locate the bundled git in
+  nativeLibraryDir`. Only `libgitty_lib.so` is gitignored there; Tauri rebuilds
+  that one every time. After re-running this script, commit the result.
 - **`app_data_dir()` on Android returns the data dir root**
   (`/data/user/0/<pkg>`), not `files/`. The farm therefore lands at
   `/data/user/0/<pkg>/usr/libexec/git-core`.
@@ -172,6 +179,24 @@ Build and install:
 ./scripts/android-git/build.sh                          # git + deps, installs into gen/android
 npx tauri android build --debug --target aarch64 --apk
 ```
+
+## In CI
+
+`.github/workflows/library-unsigned-apk.yml` builds the release APK the Library
+distributes. It does not run this script — it consumes the committed binaries —
+and it checks four things that are otherwise invisible from a green build,
+because every one of them fails only once a device tries to launch the app:
+
+- the four `lib*.so` exist in the checkout, before anything is built
+- they are present in the finished APK under `lib/arm64-v8a/`
+- `extractNativeLibs` is still `true` in the merged manifest
+- every ELF in `lib/arm64-v8a/` has 16 KB-aligned `LOAD` segments
+
+The last one is why CI pins the NDK to **r28+** (`28.2.13676358`) rather than
+whatever is current: r27 links at 4 KB, and a 4 KB-aligned library is refused
+outright by the loader on an Android 15+ device with 16 KB pages. Keep the CI
+NDK and the one at the top of `build.sh` on the same major version, so the whole
+APK comes from one toolchain.
 
 Verify the farm on a connected device:
 

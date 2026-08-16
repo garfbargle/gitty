@@ -46,6 +46,13 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
+            packaging {
+                // git-subtree is a shell script that only happens to be named
+                // lib*.so, so it is not something the symbol stripper can read.
+                // AGP only warns and packages it unchanged, but saying so here
+                // keeps that from being an accident.
+                jniLibs.keepDebugSymbols.add("*/*/libgit-subtree.so")
+            }
         }
     }
     // The bundled git ships as lib*.so under jniLibs. Android only permits
