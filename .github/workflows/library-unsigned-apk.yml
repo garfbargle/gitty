@@ -22,13 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set release version
-        run: node scripts/sync-version-from-tag.mjs "v${{ inputs.version }}"
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
+
+      - name: Set release version
+        run: node scripts/sync-version-from-tag.mjs "v${{ inputs.version }}"
 
       - uses: actions/setup-java@v5
         with:
