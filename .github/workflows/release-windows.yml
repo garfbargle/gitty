@@ -4,12 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag (e.g. v0.1.1)"
+        description: "Release version (for example 0.27.1)"
         required: true
         type: string
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write
@@ -26,15 +23,9 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - name: Sync app version from tag
+      - name: Set release version
         shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ github.event.inputs.version }}"
-          else
-            TAG="${GITHUB_REF_NAME}"
-          fi
-          node scripts/sync-version-from-tag.mjs "$TAG"
+        run: node scripts/sync-version-from-tag.mjs "v${{ inputs.version }}"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -51,10 +42,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
-          releaseName: Gitty ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          tagName: v${{ inputs.version }}
+          releaseName: Gitty v${{ inputs.version }}
           releaseBody: |
-            Windows release for Gitty ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}.
+            Windows release for Gitty v${{ inputs.version }}.
 
             **Installers**
             - `Gitty_*_x64-setup.exe` — NSIS installer (recommended)
