@@ -1,10 +1,6 @@
 name: Library release APK
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/library-unsigned-apk.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -32,9 +28,7 @@ jobs:
           cache: npm
 
       - name: Set release version
-        env:
-          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '0.27.0' }}
-        run: node scripts/sync-version-from-tag.mjs "v${RELEASE_VERSION}"
+        run: node scripts/sync-version-from-tag.mjs "v${{ inputs.version }}"
 
       - uses: actions/setup-java@v5
         with:
