@@ -1,0 +1,11 @@
+{
+  "name": "Gitty",
+  "tagline": "A friendly cross-platform Git client.",
+  "description": "A desktop and Android Git client focused on making everyday repository work approachable.",
+  "category": "Developer Tools",
+  "accent": "#7BA8FF",
+  "featured": false,
+  "sourceVisible": true,
+  "provenance": "library-managed",
+  "assetPattern": "^gitty-.*\\.apk$"
+}
