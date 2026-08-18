@@ -6,11 +6,15 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { ExternalLink, Maximize2, Minimize2, RotateCcw, X } from "lucide-react";
-import type { CommitEntry, WorktreeEntry } from "../types";
-import { buildGraphRows, laneColor } from "../lib/graph";
+import type { BranchEntry, CommitEntry, WorktreeEntry } from "../types";
+import {
+  buildGraphScene,
+  TRUNK_COLOUR,
+  type SceneCommit,
+  type SceneTip,
+} from "../lib/graphScene";
 
 type GraphViewProps = {
   /** Multi-branch history, newest first. */
@@ -19,118 +23,157 @@ type GraphViewProps = {
   selectedHash?: string;
   /** Retained while tag controls stay owned by the Home timeline. */
   unpushedTags?: Set<string>;
+  branches?: BranchEntry[];
   worktrees?: WorktreeEntry[];
   onSelect: (commit: CommitEntry) => void;
   /** Opens a different checkout; it never checks a branch out over this one. */
   onOpenWorktree?: (path: string) => void;
+  /** Switches this folder to a branch. Uncommitted work comes along. */
+  onSwitchBranch?: (branch: string) => void;
   focused?: boolean;
   onFocusedChange?: (focused: boolean) => void;
 };
 
-type SceneNode = {
-  commit: CommitEntry;
-  x: number;
-  y: number;
-  scale: number;
-  colour: string;
-  trunk: boolean;
-  current: boolean;
-  index: number;
-  elevation: number;
-};
+// ---- World → screen -----------------------------------------------------
+//
+// History is a rail you look along. "Now" is at the bottom of the view, close
+// to you and drawn large; the past runs away from you into a vanishing point
+// near the top. The trunk is the centre rail, straight into that point; every
+// other line of work sits in a lane beside it, converging with it in the
+// distance. Travelling moves you along the rail, so the far, compressed past
+// comes forward and opens up as you go back.
+const NEAR_ROW_PX = 46; // least spacing between the two nearest rows, at zoom 1
+const MAX_NEAR_ROW_PX = 74; // most, when a short history is spread to fill the tunnel
+const LANE_W = 200; // lane spacing at the near plane
+const ELEVATION = 40; // how far floating work is lifted off the floor, at the near plane
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.6;
+const DEFAULT_ZOOM = 1;
+const MAX_SCENE_COMMITS = 100;
+const CHIP_MIN_DEPTH = 0.4; // below this scale a chip is unreadable, so it is not drawn
 
-type BranchPath = {
-  hashes: Set<string>;
-  offset: number;
-  /** Used to order sibling departures along their shared time rail. */
-  firstCommitTime: number;
-  colour: string;
-};
-
-const CANVAS_W = 1200;
-const CANVAS_H = 650;
-const FLOOR_HORIZON_Y = 96;
-const RAIL_NEAR_Y = 604;
-const MAX_SCENE_COMMITS = 80;
-const MIN_ZOOM = 0.65;
-const MAX_ZOOM = 2.8;
-const DEFAULT_ZOOM = 1.16;
-const MIN_TRAVEL = -0.18;
-const MAX_TRAVEL = 0.78;
-
-// This deliberately is not a free two-dimensional camera. History is a rail:
-// you can move along time and change how close the rail feels, but never pull
-// the graph away from the world it belongs to.
-type Camera = { travel: number; scale: number };
+type Camera = { travel: number; pan: number; zoom: number };
 type PointerPosition = { x: number; y: number };
+type Projected = { x: number; y: number; floor: number; s: number; d: number };
+
+const HOME_CAMERA: Camera = { travel: 0, pan: 0, zoom: DEFAULT_ZOOM };
 
 function clampZoom(value: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
-}
-
-function clampTravel(value: number) {
-  return Math.min(MAX_TRAVEL, Math.max(MIN_TRAVEL, value));
 }
 
 function pointerDistance(points: PointerPosition[]) {
   return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
 }
 
-function lineToRoot(head: string, commitsByHash: Map<string, CommitEntry>, trunk: Set<string>) {
-  const hashes = new Set<string>();
-  let cursor: string | undefined = head;
-  while (cursor && !hashes.has(cursor)) {
-    hashes.add(cursor);
-    if (trunk.has(cursor)) break;
-    cursor = commitsByHash.get(cursor)?.parents[0];
-  }
-  return hashes;
+type Projector = {
+  vpX: number;
+  vpY: number;
+  nearY: number;
+  /// Depth scale for a row: 1 at the near plane, → 0 at the horizon.
+  scale: (row: number) => number;
+  project: (row: number, lane: number, elevation: number) => Projected;
+};
+
+function makeProjector(width: number, height: number, camera: Camera, rowCount: number): Projector {
+  const vpX = width / 2 + camera.pan;
+  const vpY = Math.round(height * 0.15);
+  const nearY = height - 96;
+  const span = nearY - vpY;
+  // How fast rows recede. A short history is spread out so it fills the
+  // tunnel; a long one is packed so that forty-odd commits are in view before
+  // the rest converges. Zoom is focal length on top of that: zooming in
+  // spreads the rows out (fewer, larger), zooming out packs more in.
+  const reach = Math.max(1, Math.min(rowCount - 1, 40));
+  const natural = Math.min(MAX_NEAR_ROW_PX / span, Math.max(NEAR_ROW_PX / span, 3 / reach));
+  const k = natural / camera.zoom;
+  const scale = (row: number) => 1 / (1 + k * Math.max(row - camera.travel, -0.9 / k));
+  return {
+    vpX,
+    vpY,
+    nearY,
+    scale,
+    project: (row, lane, elevation) => {
+      const d = row - camera.travel;
+      const s = scale(row);
+      const floor = vpY + span * s;
+      return { x: vpX + lane * LANE_W * s, y: floor - elevation * ELEVATION * s, floor, s, d };
+    },
+  };
 }
 
-function labelForFolder(entry: WorktreeEntry) {
-  if (entry.isMain) return entry.branch ?? "main";
-  return entry.branch ?? `detached at ${entry.head.slice(0, 7)}`;
+/// Curve between two commits. Same lane: straight. Different lanes: leaves and
+/// arrives along the rail, so a fork peels off the trunk and a merge settles
+/// back onto it rather than cutting across as a diagonal.
+function edgePath(from: { x: number; y: number }, to: { x: number; y: number }) {
+  if (Math.abs(from.x - to.x) < 0.5) return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
+  const k = Math.max(10, Math.abs(to.y - from.y) * 0.5);
+  return `M ${from.x} ${from.y} C ${from.x} ${from.y - k}, ${to.x} ${to.y + k}, ${to.x} ${to.y}`;
 }
 
-function folderState(entry: WorktreeEntry) {
-  if (entry.isCurrent) return "open here";
-  if (entry.isMain) return "trunk";
-  if ((entry.changeCount ?? 0) > 0) {
-    return `${entry.changeCount} uncommitted ${entry.changeCount === 1 ? "change" : "changes"}`;
+function tipLabel(tip: SceneTip, headBranch: string | null) {
+  if (tip.worktree?.branch && tip.branches.includes(tip.worktree.branch)) return tip.worktree.branch;
+  if (headBranch && tip.branches.includes(headBranch)) return headBranch;
+  if (tip.branches.length > 0) return tip.branches[0];
+  if (tip.worktree?.detached) return `detached at ${tip.hash.slice(0, 7)}`;
+  if (tip.remotes.length > 0) return tip.remotes[0];
+  if (tip.tags.length > 0) return tip.tags[0];
+  return tip.hash.slice(0, 7);
+}
+
+function tipState(tip: SceneTip, entry: SceneCommit, trunkName: string) {
+  const folder = tip.worktree;
+  if (folder?.isCurrent) {
+    const changes = folder.changeCount ?? 0;
+    return changes > 0 ? `open here · ${changes} uncommitted ${changes === 1 ? "change" : "changes"}` : "open here";
   }
-  if (entry.mergedIntoMain === true) return "merged into main";
-  return "open in another folder";
+  if (folder) {
+    const changes = folder.changeCount ?? 0;
+    if (changes > 0) return `${changes} uncommitted ${changes === 1 ? "change" : "changes"} · other folder`;
+    return "open in another folder";
+  }
+  if (tip.isTrunkTip) return "trunk";
+  if (entry.trunk) return `on ${trunkName}`;
+  if (tip.branches.length === 0 && tip.remotes.length > 0) {
+    const remote = tip.remotes[0].split("/")[0];
+    return `on ${remote}`;
+  }
+  const strand = entry.strand;
+  if (!strand) return "";
+  if (!strand.floating) return `merged into ${trunkName}`;
+  const ahead = strand.hashes.length;
+  return `${ahead} ${ahead === 1 ? "commit" : "commits"} ahead of ${trunkName}`;
 }
 
 /**
- * A history graph viewed in perspective instead of as a ledger.
+ * The repository as a rail you look along, not a ledger you scroll.
  *
- * The trunk is the stable centre line. Recent commits sit close to the viewer,
- * large and widely spaced; old history compresses into the distance. Actual
- * parent edges still do the important work: a branch visibly leaves the trunk,
- * and a merge visibly returns to it. Folder labels are anchored to their real
- * checked-out commits rather than floating in a separate summary.
+ * `main` is the straight centre rail running into the distance. Every other
+ * line of work sits in a lane beside it: a merged branch lies on the floor and
+ * curves back in, an open branch floats above it and ends in a chip you can
+ * switch to. Scrolling travels you back and forward in time.
  */
 export function GraphView({
   commits,
   headHash,
   selectedHash,
+  branches = [],
   worktrees = [],
   onSelect,
   onOpenWorktree,
+  onSwitchBranch,
   focused = false,
   onFocusedChange,
 }: GraphViewProps) {
   const [inspectedHash, setInspectedHash] = useState(selectedHash ?? "");
-  const [camera, setCamera] = useState<Camera>({ travel: 0, scale: DEFAULT_ZOOM });
+  const [camera, setCamera] = useState<Camera>(HOME_CAMERA);
+  const [viewport, setViewport] = useState({ width: 900, height: 560 });
   const cameraRef = useRef(camera);
   const activePointers = useRef(new Map<number, PointerPosition>());
   const panStart = useRef<{ pointer: PointerPosition; camera: Camera } | null>(null);
-  const pinchStart = useRef<{
-    distance: number;
-    camera: Camera;
-  } | null>(null);
+  const pinchStart = useRef<{ distance: number; camera: Camera } | null>(null);
   const panned = useRef(false);
+  const rowCountRef = useRef(0);
   const updateCamera = useCallback((next: Camera) => {
     cameraRef.current = next;
     setCamera(next);
@@ -147,197 +190,229 @@ export function GraphView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [focused, onFocusedChange]);
-  const scene = useMemo(() => {
-    const rows = buildGraphRows(commits, headHash).slice(0, MAX_SCENE_COMMITS);
-    const commitsByHash = new Map(commits.map((commit) => [commit.hash, commit]));
-    const visibleFolders = worktrees.filter((entry) => !entry.internal && !entry.prunable);
-    const mainFolder = visibleFolders.find((entry) => entry.isMain);
 
-    // The main folder's first-parent lineage is the central trunk, regardless
-    // of which folder happens to be open in Gitty right now.
-    const trunk = new Set<string>();
-    let trunkCursor = mainFolder?.head;
-    while (trunkCursor && commitsByHash.has(trunkCursor) && !trunk.has(trunkCursor)) {
-      trunk.add(trunkCursor);
-      trunkCursor = commitsByHash.get(trunkCursor)?.parents[0];
-    }
+  // Smooth motion: wheel and zoom set a target and the camera eases toward
+  // it, so a notched mouse wheel glides instead of jumping. Drags and pinches
+  // set the camera directly (the pointer already is the easing).
+  const targetRef = useRef<Camera>(HOME_CAMERA);
+  const animationRef = useRef<number | null>(null);
+  const settleCamera = useCallback(() => {
+    animationRef.current = null;
+    const target = targetRef.current;
+    const current = cameraRef.current;
+    const next: Camera = {
+      travel: current.travel + (target.travel - current.travel) * 0.22,
+      pan: current.pan + (target.pan - current.pan) * 0.22,
+      zoom: current.zoom + (target.zoom - current.zoom) * 0.22,
+    };
+    const done = Math.abs(target.travel - next.travel) < 0.002
+      && Math.abs(target.pan - next.pan) < 0.2
+      && Math.abs(target.zoom - next.zoom) < 0.001;
+    updateCamera(done ? target : next);
+    if (!done) animationRef.current = requestAnimationFrame(settleCamera);
+  }, [updateCamera]);
+  const glideTo = useCallback((next: Camera) => {
+    const travel = Math.min(Math.max(next.travel, -1), Math.max(0, rowCountRef.current - 2));
+    targetRef.current = { ...next, zoom: clampZoom(next.zoom), travel };
+    if (animationRef.current === null) animationRef.current = requestAnimationFrame(settleCamera);
+  }, [settleCamera]);
+  const jumpTo = useCallback((next: Camera) => {
+    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+    targetRef.current = next;
+    updateCamera(next);
+  }, [updateCamera]);
+  useEffect(() => () => {
+    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+  }, []);
 
-    // Git may return worktrees in a different order between refreshes. Sort
-    // them before assigning lanes so a branch keeps a stable visual lane.
-    const activeFolders = visibleFolders
-      .filter((entry) => !entry.isMain && entry.mergedIntoMain !== true)
-      .sort((left, right) => `${labelForFolder(left)}\u0000${left.path}`.localeCompare(
-        `${labelForFolder(right)}\u0000${right.path}`,
-      ));
-    const paths: BranchPath[] = activeFolders.map((entry, index) => {
-      const ring = Math.floor(index / 2);
-      const side = index % 2 === 0 ? -1 : 1;
-      const hashes = lineToRoot(entry.head, commitsByHash, trunk);
-      const firstCommitTime = Math.min(
-        ...[...hashes]
-          .filter((hash) => !trunk.has(hash))
-          .map((hash) => Date.parse(commitsByHash.get(hash)?.date ?? ""))
-          .filter(Number.isFinite),
-      );
-      return {
-        hashes,
-        // The map is the whole workspace surface, not a thumbnail. Spread
-        // open lines across it so their divergence can be read at a glance.
-        offset: side * (270 + ring * 120),
-        firstCommitTime: Number.isFinite(firstCommitTime) ? firstCommitTime : Number.MAX_SAFE_INTEGER,
-        colour: laneColor(index + 1),
-      };
+  // The stage may not exist on first render (history still loading), so its
+  // listeners are attached through a callback ref rather than a mount effect.
+  const stageCleanup = useRef<(() => void) | null>(null);
+  const attachStage = useCallback((element: HTMLDivElement | null) => {
+    stageCleanup.current?.();
+    stageCleanup.current = null;
+    if (!element) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box && box.width > 0 && box.height > 0) {
+        setViewport({ width: Math.round(box.width), height: Math.round(box.height) });
+      }
     });
-    const branchFor = new Map<string, BranchPath>();
-    for (const path of paths) {
-      for (const hash of path.hashes) {
-        if (!trunk.has(hash) && !branchFor.has(hash)) branchFor.set(hash, path);
-      }
-    }
+    observer.observe(element);
 
-    // Not every historical branch has an open worktree. Give those graph-only
-    // lanes stable identities too, so merged and closed branches participate
-    // in the same time-ordered departure calculation.
-    const graphOnlyPaths = new Map<number, BranchPath>();
-    for (const row of rows) {
-      if (trunk.has(row.commit.hash) || branchFor.has(row.commit.hash)) continue;
-      const lane = Math.max(1, row.lane);
-      let path = graphOnlyPaths.get(lane);
-      if (!path) {
-        const ring = Math.floor((lane - 1) / 2);
-        const side = lane % 2 === 0 ? 1 : -1;
-        const commitTime = Date.parse(row.commit.date);
-        path = {
-          hashes: new Set<string>(),
-          offset: side * (270 + ring * 120),
-          firstCommitTime: Number.isFinite(commitTime) ? commitTime : Number.MAX_SAFE_INTEGER,
-          colour: row.color,
-        };
-        graphOnlyPaths.set(lane, path);
+    // Wheel is attached natively and non-passively: React's synthetic wheel
+    // listener is passive, so preventDefault there is ignored and the page
+    // scrolls instead of the graph travelling.
+    function moveThroughTime(event: globalThis.WheelEvent) {
+      event.preventDefault();
+      const target = targetRef.current;
+      if (event.ctrlKey || event.metaKey) {
+        glideTo({ ...target, zoom: target.zoom * Math.exp(-event.deltaY * 0.004) });
+        return;
       }
-      path.hashes.add(row.commit.hash);
-      const commitTime = Date.parse(row.commit.date);
-      if (Number.isFinite(commitTime)) {
-        path.firstCommitTime = Math.min(path.firstCommitTime, commitTime);
-      }
-      branchFor.set(row.commit.hash, path);
-    }
-
-    // A fork joins the *same* trunk rail, but sibling branches should not all
-    // leave from one pixel. Their first commit orders small fore/aft offsets
-    // along that rail, which keeps the connection smooth and reproducible.
-    const railOffsets = new Map<string, number>();
-    const departuresByTrunk = new Map<string, { childHash: string; branch: BranchPath }[]>();
-    for (const row of rows) {
-      if (trunk.has(row.commit.hash)) continue;
-      const branch = branchFor.get(row.commit.hash);
-      if (!branch) continue;
-      for (const parentHash of row.commit.parents) {
-        if (!trunk.has(parentHash)) continue;
-        const departures = departuresByTrunk.get(parentHash) ?? [];
-        departures.push({ childHash: row.commit.hash, branch });
-        departuresByTrunk.set(parentHash, departures);
-      }
-    }
-    for (const [parentHash, departures] of departuresByTrunk) {
-      departures
-        .sort((left, right) => left.branch.firstCommitTime - right.branch.firstCommitTime
-          || left.childHash.localeCompare(right.childHash))
-        .forEach((departure, index) => {
-          railOffsets.set(
-            `${departure.childHash}:${parentHash}`,
-            (index - (departures.length - 1) / 2) * 24,
-          );
-        });
-    }
-
-    const nodes = new Map<string, SceneNode>();
-    const count = Math.max(rows.length - 1, 1);
-    rows.forEach((row, index) => {
-      const age = index / count;
-      // A square-root perspective gives nearby commits room and lets a deep
-      // past remain visible rather than becoming a second scrollable list.
-      // Travelling moves the viewer down the history rail, rather than
-      // translating this scene like a flat map.
-      const relativeAge = Math.max(0, Math.min(1.25, age - camera.travel));
-      // Linear time distance avoids the infinite near-camera acceleration a
-      // square-root curve creates. The rational projection still makes deep
-      // history recede, but it does so with a continuous, controllable rate.
-      const distance = relativeAge;
-      // Project the history down the same depth axis as the floor. Unlike a
-      // linear Y offset, this asymptotically approaches the horizon: the
-      // trunk travels *into* the vanishing point instead of continuing above
-      // it like a vertical timeline.
-      const depth = 1 / (1 + distance * 2.9);
-      const scale = 0.36 + depth * 0.64;
-      const branch = branchFor.get(row.commit.hash);
-      const trunkCommit = trunk.has(row.commit.hash);
-      const laneSide = row.lane % 2 === 0 ? -1 : 1;
-      const fallbackOffset = laneSide * (220 + row.lane * 100);
-      const offset = trunkCommit ? 0 : branch?.offset ?? fallbackOffset;
-      // Non-trunk work floats slightly above the shared floor. This is a
-      // visual Z axis, not fabricated history: it makes a branch's return to
-      // the trunk read as a ramp rather than another line in the same plane.
-      const elevation = trunkCommit ? 0 : 17 + Math.min(33, Math.abs(offset) * 0.07);
-      nodes.set(row.commit.hash, {
-        commit: row.commit,
-        x: CANVAS_W / 2 + offset * depth,
-        y: FLOOR_HORIZON_Y + (RAIL_NEAR_Y - FLOOR_HORIZON_Y) * depth - elevation * depth,
-        scale,
-        colour: trunkCommit ? "#60a5fa" : branch?.colour ?? row.color,
-        trunk: trunkCommit,
-        current: row.commit.hash === headHash,
-        index,
-        elevation,
+      // Scrolling up — the way you reach older entries in any list — carries
+      // you down the rail into the past; scrolling down brings you back to now.
+      const step = event.deltaMode === 1 ? event.deltaY * 18 : event.deltaY;
+      glideTo({
+        ...target,
+        travel: target.travel - step / 40,
+        pan: target.pan - (event.deltaMode === 1 ? event.deltaX * 18 : event.deltaX),
       });
-    });
+    }
+    element.addEventListener("wheel", moveThroughTime, { passive: false });
 
-    return { nodes, railOffsets, rows, visibleFolders, mainFolder };
-  }, [camera.travel, commits, headHash, worktrees]);
+    stageCleanup.current = () => {
+      observer.disconnect();
+      element.removeEventListener("wheel", moveThroughTime);
+    };
+  }, [glideTo]);
 
-  const cursor = Math.max(
-    0,
-    scene.rows.findIndex((row) => row.commit.hash === selectedHash),
+  const scene = useMemo(
+    () => buildGraphScene(commits.slice(0, MAX_SCENE_COMMITS), { headHash, branches, worktrees }),
+    [commits, headHash, branches, worktrees],
   );
-  const inspectedCommit = scene.nodes.get(inspectedHash)?.commit ?? null;
-  const inspectedFolder = scene.visibleFolders.find((entry) => entry.head === inspectedHash) ?? null;
+  rowCountRef.current = scene.commits.length;
 
+  const headBranch = useMemo(() => {
+    const current = worktrees.find((entry) => entry.isCurrent)?.branch;
+    if (current) return current;
+    return branches.find((branch) => !branch.isRemote && branch.isCurrent)?.name ?? null;
+  }, [branches, worktrees]);
+
+  // ---- Screen positions ------------------------------------------------
+  const { width, height } = viewport;
+  const projector = useMemo(
+    () => makeProjector(width, height, camera, scene.commits.length),
+    [width, height, camera, scene.commits.length],
+  );
+  const positions = useMemo(() => {
+    const map = new Map<string, Projected>();
+    for (const entry of scene.commits) {
+      map.set(entry.commit.hash, projector.project(entry.row, entry.lane, entry.elevation));
+    }
+    return map;
+  }, [scene, projector]);
+  // Anything behind the camera is not drawn.
+  const visible = (point: Projected) => point.s < 6 && point.y < height + 80;
+
+  const cursorIndex = Math.max(0, scene.commits.findIndex((entry) => entry.commit.hash === selectedHash));
+  const inspected = scene.byHash.get(inspectedHash) ?? null;
+  const inspectedTip = scene.tips.find((tip) => tip.hash === inspectedHash) ?? null;
+
+  // ---- Chips -----------------------------------------------------------
+  // A chip sits in the margin outside every lane that is busy around its
+  // row, tethered to its commit, so it never lies across another line of
+  // work. Chips shrink a little with distance and are dropped once too far
+  // to read; chips on one side that would overlap are nudged apart, and one
+  // that would have to move too far is dropped rather than mislabelling.
+  const chips = useMemo(() => {
+    type Chip = {
+      tip: SceneTip;
+      entry: SceneCommit;
+      label: string;
+      state: string;
+      extra: number;
+      side: -1 | 1;
+      width: number;
+      height: number;
+      scale: number;
+      x: number;
+      y: number;
+      anchor: Projected;
+    };
+    const laid: Chip[] = [];
+    for (const tip of scene.tips) {
+      if (!tip.labelled) continue;
+      const entry = scene.byHash.get(tip.hash);
+      const point = positions.get(tip.hash);
+      if (!entry || !point) continue;
+      if (point.s < CHIP_MIN_DEPTH || !visible(point)) continue;
+      const label = tipLabel(tip, headBranch);
+      const state = tipState(tip, entry, scene.trunkName);
+      const extra = tip.branches.length + tip.remotes.length + tip.tags.length
+        - (tip.branches.includes(label) || tip.remotes.includes(label) || tip.tags.includes(label) ? 1 : 0);
+      const nameWidth = label.length * 7.4 + (extra > 0 ? 30 : 0);
+      const chipWidth = Math.min(280, Math.max(120, Math.max(nameWidth, state.length * 6.1) + 24));
+      const chipHeight = state ? 40 : 26;
+      const chipScale = Math.max(0.74, Math.min(1, point.s));
+
+      const busy = (side: -1 | 1) => {
+        let outermost = 0;
+        for (const strand of scene.strands) {
+          if (Math.sign(strand.lane) !== side) continue;
+          if (strand.minRow - 1 > entry.row || strand.maxRow + 1 < entry.row) continue;
+          outermost = Math.max(outermost, Math.abs(strand.lane));
+        }
+        return outermost;
+      };
+      let side: -1 | 1;
+      if (entry.lane !== 0) side = entry.lane < 0 ? -1 : 1;
+      else {
+        const left = busy(-1);
+        const right = busy(1);
+        side = left === right ? (tip.isTrunkTip ? 1 : -1) : left < right ? -1 : 1;
+      }
+      const outermost = Math.max(busy(side), Math.abs(entry.lane));
+      const edgeX = projector.vpX + side * outermost * LANE_W * point.s;
+      const halfWidth = (chipWidth * chipScale) / 2;
+      // Keep the chip inside the view: it may sit over the far lanes rather
+      // than be cut off at the edge.
+      const x = Math.max(halfWidth + 6, Math.min(width - halfWidth - 6, edgeX + side * (16 + halfWidth)));
+      laid.push({ tip, entry, label, state, extra, side, width: chipWidth, height: chipHeight, scale: chipScale, x, y: point.y, anchor: point });
+    }
+    const kept: Chip[] = [];
+    for (const side of [-1, 1] as const) {
+      // Nearest first: the chip closest to the viewer keeps its place and
+      // farther ones make way, upward, toward the horizon.
+      const column = laid.filter((chip) => chip.side === side).sort((a, b) => b.y - a.y);
+      let previousTop = Infinity;
+      for (const chip of column) {
+        const half = (chip.height * chip.scale) / 2;
+        const wanted = chip.y;
+        if (chip.y + half > previousTop - 6) chip.y = previousTop - 6 - half;
+        if (wanted - chip.y > 90) continue;
+        previousTop = chip.y - half;
+        kept.push(chip);
+      }
+    }
+    return kept;
+  }, [scene, positions, headBranch, projector, width]);
+
+  // ---- Interaction -----------------------------------------------------
   function moveFocus(index: number, delta: number, element: SVGGElement) {
-    const next = Math.max(0, Math.min(scene.rows.length - 1, index + delta));
+    const next = Math.max(0, Math.min(scene.commits.length - 1, index + delta));
     const graph = element.closest<SVGSVGElement>(".constellation-canvas");
     graph?.querySelectorAll<SVGGElement>(".constellation-commit")[next]?.focus();
   }
 
-  function inspectCommit(
-    event: ReactKeyboardEvent<SVGGElement>,
-    node: SceneNode,
-  ) {
+  function commitKeyDown(event: ReactKeyboardEvent<SVGGElement>, entry: SceneCommit) {
     const delta = event.key === "ArrowUp" || event.key === "ArrowLeft" ? 1
       : event.key === "ArrowDown" || event.key === "ArrowRight" ? -1
         : 0;
     if (delta !== 0) {
       event.preventDefault();
       event.stopPropagation();
-      moveFocus(node.index, delta, event.currentTarget);
+      moveFocus(entry.row, delta, event.currentTarget);
     }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      setInspectedHash(node.commit.hash);
+      setInspectedHash(entry.commit.hash);
     }
   }
 
   function beginGesture(event: ReactPointerEvent<SVGSVGElement>) {
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // Capture is taken only once this turns into a drag: capturing here would
+    // make the browser deliver the eventual click to the SVG instead of the
+    // commit or chip under the pointer.
     activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const pointers = [...activePointers.current.values()];
     if (pointers.length === 1) {
       panStart.current = { pointer: pointers[0], camera: cameraRef.current };
       pinchStart.current = null;
     } else if (pointers.length === 2) {
-      pinchStart.current = {
-        distance: pointerDistance(pointers),
-        camera: cameraRef.current,
-      };
+      pinchStart.current = { distance: pointerDistance(pointers), camera: cameraRef.current };
       panStart.current = null;
     }
   }
@@ -347,22 +422,31 @@ export function GraphView({
     activePointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const pointers = [...activePointers.current.values()];
     if (pointers.length >= 2 && pinchStart.current) {
-      const scale = clampZoom(
-        pinchStart.current.camera.scale * (pointerDistance(pointers) / pinchStart.current.distance),
+      const zoom = clampZoom(
+        pinchStart.current.camera.zoom * (pointerDistance(pointers) / pinchStart.current.distance),
       );
-      if (Math.abs(scale - cameraRef.current.scale) > 0.01) panned.current = true;
-      updateCamera({
-        scale,
-        travel: pinchStart.current.camera.travel,
-      });
+      if (Math.abs(zoom - cameraRef.current.zoom) > 0.01) {
+        panned.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+      jumpTo({ ...pinchStart.current.camera, zoom });
       return;
     }
     if (pointers.length === 1 && panStart.current) {
+      const dx = pointers[0].x - panStart.current.pointer.x;
       const dy = pointers[0].y - panStart.current.pointer.y;
-      if (Math.abs(dy) > 3) panned.current = true;
-      updateCamera({
-        ...panStart.current.camera,
-        travel: clampTravel(panStart.current.camera.travel - dy * 0.0018),
+      if (Math.hypot(dx, dy) > 3) {
+        panned.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } else if (!panned.current) {
+        return;
+      }
+      const start = panStart.current.camera;
+      // Dragging down pulls the distant past toward you.
+      jumpTo({
+        ...start,
+        travel: Math.min(Math.max(start.travel + dy / NEAR_ROW_PX, -1), Math.max(0, rowCountRef.current - 2)),
+        pan: start.pan + dx,
       });
     }
   }
@@ -379,40 +463,62 @@ export function GraphView({
     window.setTimeout(() => { panned.current = false; }, 0);
   }
 
-  function moveThroughTime(event: ReactWheelEvent<SVGSVGElement>) {
-    event.preventDefault();
-    if (event.ctrlKey || event.metaKey) {
-      const factor = Math.exp(-event.deltaY * 0.002);
-      updateCamera({ ...cameraRef.current, scale: clampZoom(cameraRef.current.scale * factor) });
-      return;
-    }
-    // A wheel, trackpad, or DeX pointer moves only along the time rail. Use
-    // whichever axis the input device provides most strongly.
-    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX)
-      ? event.deltaY
-      : event.deltaX;
-    updateCamera({
-      ...cameraRef.current,
-      // Scroll forward should bring the next section of history toward the
-      // viewer, matching the floor lines streaming out from the horizon.
-      travel: clampTravel(cameraRef.current.travel - delta * 0.0018),
-    });
-  }
-
-  if (scene.rows.length === 0) {
+  if (scene.commits.length === 0) {
     return <div className="constellation-empty">No history to draw yet.</div>;
   }
 
+  // ---- Floor -----------------------------------------------------------
+  const { vpX, vpY, nearY } = projector;
+  const oldestRow = scene.commits.length - 1;
+  const railLanes = Math.max(scene.lanesLeft, scene.lanesRight, 2) + 3;
+  const rungRows: number[] = [];
+  for (let row = Math.floor(camera.travel) - 1; row <= oldestRow + 40; row += 1) {
+    const s = projector.scale(row);
+    if (s < 0.06) break;
+    if (vpY + (nearY - vpY) * s > height + 40) continue;
+    rungRows.push(row);
+  }
+
+  // Day markers along the left edge, so travel has a sense of when.
+  const dayMarkers: Array<{ y: number; label: string; s: number }> = [];
+  let lastDay = "";
+  let lastY = Infinity;
+  for (const entry of scene.commits) {
+    const date = new Date(entry.commit.date);
+    if (Number.isNaN(date.getTime())) continue;
+    const point = positions.get(entry.commit.hash)!;
+    if (!visible(point) || point.s < 0.28) continue;
+    const day = date.toDateString();
+    if (day === lastDay || lastY - point.floor < 18) continue;
+    lastDay = day;
+    lastY = point.floor;
+    dayMarkers.push({
+      y: point.floor,
+      s: point.s,
+      label: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    });
+  }
+
+  const inspectedLabel = inspectedTip ? tipLabel(inspectedTip, headBranch) : "";
+  const inspectedSwitchable = inspectedTip
+    && !inspectedTip.worktree
+    && inspectedTip.branches.length > 0
+    && !(inspectedTip.isHead && inspectedTip.branches.includes(headBranch ?? ""))
+    ? inspectedLabel
+    : null;
+
+  const oldestTrunk = [...scene.trunkHashes].map((hash) => scene.byHash.get(hash)!).sort((a, b) => b.row - a.row)[0];
+
   return (
     <section className={`constellation-view${focused ? " focused" : ""}`} aria-label="Repository map">
-      <div className="constellation-stage">
+      <div className="constellation-stage" ref={attachStage}>
         <div className="constellation-controls" aria-label="Graph view controls">
           <button
             type="button"
             className="constellation-control"
-            onClick={() => updateCamera({ travel: 0, scale: DEFAULT_ZOOM })}
-            title="Reset time position and zoom"
-            aria-label="Reset time position and zoom"
+            onClick={() => glideTo(HOME_CAMERA)}
+            title="Back to now"
+            aria-label="Back to now: reset time position and zoom"
           >
             <RotateCcw size={15} />
           </button>
@@ -431,174 +537,277 @@ export function GraphView({
           ) : null}
         </div>
         <p className="constellation-navigation-hint" aria-hidden="true">
-          Drag or scroll to travel through time · pinch or Ctrl+scroll to zoom
+          Scroll or drag to travel through time · pinch or Ctrl+scroll to zoom
         </p>
         <svg
           className="constellation-canvas"
-          viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
-          preserveAspectRatio="none"
+          viewBox={`0 0 ${width} ${height}`}
+          width={width}
+          height={height}
           role="img"
-          aria-label="A perspective graph of branches, merges, commits, and open folders"
+          aria-label={`A map of branches around ${scene.trunkName}: merged branches curve back into it, open branches float beside it`}
           onPointerDown={beginGesture}
           onPointerMove={moveGesture}
           onPointerUp={endGesture}
           onPointerCancel={endGesture}
-          onWheel={moveThroughTime}
         >
           <defs>
-            <radialGradient id="constellation-glow" cx="50%" cy="75%" r="65%">
-              <stop offset="0" stopColor="#3b82f6" stopOpacity="0.14" />
-              <stop offset="1" stopColor="#3b82f6" stopOpacity="0" />
+            <radialGradient id="constellation-horizon-glow" cx={vpX / width} cy={vpY / height} r="0.55">
+              <stop offset="0" stopColor="var(--accent)" stopOpacity="0.22" />
+              <stop offset="0.5" stopColor="var(--accent)" stopOpacity="0.05" />
+              <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
             </radialGradient>
-            <linearGradient id="constellation-floor" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="var(--border)" stopOpacity="0" />
-              <stop offset="1" stopColor="var(--border)" stopOpacity="0.75" />
+            <linearGradient id="constellation-floor-shade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--text)" stopOpacity="0" />
+              <stop offset="1" stopColor="var(--text)" stopOpacity="0.07" />
+            </linearGradient>
+            <linearGradient id="constellation-now-fade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--bg-base)" stopOpacity="0" />
+              <stop offset="1" stopColor="var(--bg-base)" stopOpacity="1" />
             </linearGradient>
           </defs>
-          <rect width={CANVAS_W} height={CANVAS_H} fill="url(#constellation-glow)" />
-          <g className="constellation-depth-grid" aria-hidden>
+
+          <rect x="0" y="0" width={width} height={height} fill="url(#constellation-horizon-glow)" />
+
+          <g className="constellation-floor" aria-hidden>
+            {/* The floor: a plane running from the near edge into the vanishing point. */}
             <path
-              className="constellation-floor-fill"
-              d={`M 600 ${FLOOR_HORIZON_Y} L ${CANVAS_W + 100} ${CANVAS_H} L -100 ${CANVAS_H} Z`}
-              fill="url(#constellation-floor)"
+              className="plane"
+              d={`M ${vpX} ${vpY} L ${vpX + railLanes * LANE_W * 2.4} ${height + 40} L ${vpX - railLanes * LANE_W * 2.4} ${height + 40} Z`}
+              fill="url(#constellation-floor-shade)"
             />
-            {Array.from({ length: 13 }, (_, index) => index).map((index) => {
-              // As the rail advances, fresh grid lines emerge at the horizon
-              // and stream past the viewer. It gives movement perspective
-              // without ever detaching the graph from its background.
-              const depth = 0.035 + ((index / 13 + camera.travel * 0.82) % 1 + 1) % 1;
-              const y = FLOOR_HORIZON_Y + (CANVAS_H - FLOOR_HORIZON_Y) * Math.pow(depth, 0.64);
-              return <path key={index} d={`M -80 ${y} L ${CANVAS_W + 80} ${y}`} />;
+            {rungRows.map((row) => {
+              const s = projector.scale(row);
+              const y = vpY + (nearY - vpY) * s;
+              const half = railLanes * LANE_W * s;
+              return (
+                <path
+                  key={`rung-${row}`}
+                  className={row % 5 === 0 ? "major" : undefined}
+                  d={`M ${vpX - half} ${y} L ${vpX + half} ${y}`}
+                  style={{ opacity: 0.05 + 0.16 * s }}
+                />
+              );
             })}
-            {[-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5].map((lane) => (
-              <path key={lane} d={`M 600 ${FLOOR_HORIZON_Y} L ${600 + lane * 250} ${CANVAS_H}`} />
+            {Array.from({ length: railLanes * 2 + 1 }, (_, index) => index - railLanes).map((lane) => {
+              const far = 2.4;
+              return (
+                <path
+                  key={`rail-${lane}`}
+                  className={lane === 0 ? "trunk-rail" : undefined}
+                  d={`M ${vpX} ${vpY} L ${vpX + lane * LANE_W * far} ${vpY + (nearY - vpY) * far}`}
+                />
+              );
+            })}
+          </g>
+
+          {/* A time ruler down the left edge: which day each row belongs to. */}
+          <g className="constellation-day-markers" aria-hidden>
+            {dayMarkers.map((marker) => (
+              <g key={`${marker.label}-${marker.y}`} transform={`translate(14 ${marker.y})`} style={{ opacity: 0.35 + 0.65 * marker.s }}>
+                <line x1="0" y1="0" x2="10" y2="0" />
+                <text x="14" y="3.5">{marker.label}</text>
+              </g>
             ))}
           </g>
 
-          <g transform={`translate(${CANVAS_W / 2} ${CANVAS_H}) scale(${camera.scale}) translate(${-CANVAS_W / 2} ${-CANVAS_H})`}>
-          <g className="constellation-edges" aria-hidden>
-            {[...scene.nodes.values()].flatMap((node) =>
-              node.commit.parents.map((parentHash, parentIndex) => {
-                const parent = scene.nodes.get(parentHash);
-                if (!parent) return null;
-                // Forks remain attached to the centre line, but sibling
-                // branches depart a few moments before/after one another.
-                // This is a time offset along the shared rail, not a sideways
-                // elbow, so the tube stays continuous and smooth.
-                const railOffset = !node.trunk && parent.trunk
-                  ? scene.railOffsets.get(`${node.commit.hash}:${parentHash}`) ?? 0
-                  : 0;
-                const end = parent.trunk && railOffset !== 0
-                  ? { x: parent.x, y: parent.y + railOffset * parent.scale }
-                  : parent;
-                const dx = end.x - node.x;
-                const path = `M ${node.x} ${node.y} C ${node.x + dx * 0.14} ${node.y - 46 * node.scale}, ${end.x - dx * 0.14} ${end.y + 36 * parent.scale}, ${end.x} ${end.y}`;
-                const className = `${node.trunk ? "trunk" : "branch"}${node.elevation > 0 ? " elevated" : ""}`;
-                return [
-                  <path
-                    key={`${node.commit.hash}-${parentHash}-${parentIndex}-depth`}
-                    d={path}
-                    style={{ stroke: node.colour }}
-                    className={`${className} constellation-edge-depth`}
-                  />,
-                  <path
-                    key={`${node.commit.hash}-${parentHash}-${parentIndex}`}
-                    d={path}
-                    style={{ stroke: node.colour, opacity: node.trunk ? 0.9 : 0.72 }}
-                    className={className}
-                  />,
-                ];
-              }),
-            )}
-          </g>
-
-          <g className="constellation-nodes">
-            {[...scene.nodes.values()].map((node) => {
-              const active = node.commit.hash === selectedHash;
-              const radius = 6 + node.scale * 6;
+          {/* Floating work casts a shadow onto the floor: a faint copy of the
+              line where it would lie if it were merged. */}
+          <g className="constellation-shadows" aria-hidden>
+            {scene.strands.filter((strand) => strand.floating).map((strand) => {
+              const points = strand.hashes
+                .map((hash) => positions.get(hash))
+                .filter((point): point is Projected => !!point && visible(point));
+              if (points.length === 0) return null;
+              const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.floor}`).join(" ");
               return (
-                <g
-                  key={node.commit.hash}
-                  className={`constellation-commit${node.trunk ? " trunk" : ""}${node.current ? " current" : ""}${active ? " active" : ""}`}
-                  transform={`translate(${node.x} ${node.y}) scale(${node.scale})`}
-                  style={{ opacity: node.current || active ? 1 : (node.trunk ? 0.72 : 0.48) + node.scale * 0.28 }}
-                  role="button"
-                  tabIndex={node.index === cursor ? 0 : -1}
-                  onClick={() => {
-                    if (!panned.current) setInspectedHash(node.commit.hash);
-                  }}
-                  onKeyDown={(event) => inspectCommit(event, node)}
-                >
-                  <title>{`${node.commit.shortHash} · ${node.commit.subject}`}</title>
-                  {node.current ? <circle r={radius + 8} className="constellation-current-ring" /> : null}
-                  <circle r={radius} style={{ fill: node.colour, stroke: node.colour }} />
-                  {node.trunk && node.commit.parents.length > 1 ? (
-                    <path className="constellation-merge-mark" d="M -3 0 L -0.5 2.6 L 4 -3" />
-                  ) : null}
+                <g key={strand.id}>
+                  <path d={path} />
+                  {points.map((point, index) => (
+                    <ellipse key={index} cx={point.x} cy={point.floor} rx={7 * point.s} ry={2.6 * point.s} />
+                  ))}
                 </g>
               );
             })}
           </g>
 
-          <g className="constellation-folder-labels">
-            {scene.visibleFolders.map((entry, index) => {
-              const node = scene.nodes.get(entry.head);
-              if (!node) return null;
-              const dirty = (entry.changeCount ?? 0) > 0;
-              const merged = entry.mergedIntoMain === true;
-              const label = labelForFolder(entry);
-              const state = folderState(entry);
-              const left = node.x < CANVAS_W / 2 || entry.isMain;
-              const direction = left ? -1 : 1;
-              const width = Math.min(250, Math.max(126, label.length * 7.2 + 38));
-              const x = node.x + direction * (22 + width / 2) * node.scale;
-              // Labels step away from nearby endpoints rather than sitting on
-              // the same plane as the node they explain.
-              const labelOffset = 28 + Math.floor(index / 2) * 9;
-              const y = node.y + (index % 2 === 0 ? -labelOffset : labelOffset) * node.scale;
-              const tone = entry.isCurrent ? "current" : dirty ? "dirty" : merged ? "merged" : "open";
+          <g className="constellation-edges" aria-hidden>
+            {/* The trunk runs on into the vanishing point beyond what is loaded. */}
+            {oldestTrunk && oldestTrunk.commit.parents.length === 0 ? (() => {
+              const point = positions.get(oldestTrunk.commit.hash)!;
+              return <path className="stub trunk" d={`M ${point.x} ${point.y} L ${vpX} ${vpY}`} style={{ stroke: TRUNK_COLOUR, strokeWidth: 3 * point.s }} />;
+            })() : null}
+            {scene.commits.flatMap((entry) => {
+              const from = positions.get(entry.commit.hash)!;
+              if (!visible(from)) return [];
+              return entry.commit.parents.flatMap((parentHash, parentIndex) => {
+                const parent = scene.byHash.get(parentHash);
+                const to = positions.get(parentHash);
+                if (!parent || !to) {
+                  // History continues past the window: fade out a stub.
+                  if (parentIndex > 0) return [];
+                  const beyond = projector.project(entry.row + 1.2, entry.lane, entry.elevation);
+                  return [
+                    <path
+                      key={`${entry.commit.hash}-stub`}
+                      className={`stub${entry.trunk ? " trunk" : ""}`}
+                      d={`M ${from.x} ${from.y} L ${beyond.x} ${beyond.y}`}
+                      style={{ stroke: entry.colour, strokeWidth: (entry.trunk ? 4 : 2.4) * from.s }}
+                    />,
+                  ];
+                }
+                // A merge's incoming side belongs to the line being merged,
+                // so it keeps that line's colour: the branch returns.
+                const incoming = parentIndex > 0;
+                const owner = incoming ? parent : entry;
+                // Bringing the trunk *into* a branch (an update) is
+                // bookkeeping, not a story beat: thin and quiet.
+                const update = incoming && parent.trunk && !entry.trunk;
+                const className = [
+                  owner.trunk ? "trunk" : "branch",
+                  update ? "update" : "",
+                  owner.elevation > 0 ? "floating" : "",
+                ].filter(Boolean).join(" ");
+                const d = edgePath(from, to);
+                const depth = (from.s + to.s) / 2;
+                const strokeWidth = (owner.trunk ? 4.2 : update ? 1.6 : 2.6) * Math.max(0.35, depth);
+                const opacity = update ? 0.35 : 0.45 + 0.55 * Math.min(1, depth);
+                return [
+                  update ? null : (
+                    <path
+                      key={`${entry.commit.hash}-${parentHash}-body`}
+                      className={`${className} body`}
+                      d={d}
+                      style={{ stroke: owner.colour, strokeWidth: strokeWidth * 3 }}
+                    />
+                  ),
+                  <path
+                    key={`${entry.commit.hash}-${parentHash}`}
+                    className={className}
+                    d={d}
+                    style={{ stroke: owner.colour, strokeWidth, opacity }}
+                  />,
+                ];
+              });
+            })}
+          </g>
+
+          <g className="constellation-nodes">
+            {[...scene.commits].reverse().map((entry) => {
+              const point = positions.get(entry.commit.hash)!;
+              if (!visible(point)) return null;
+              const isHead = entry.commit.hash === headHash;
+              const active = entry.commit.hash === selectedHash || entry.commit.hash === inspectedHash;
+              const merge = entry.commit.parents.length > 1;
+              const radius = (entry.trunk ? 6.5 : 5.5) * Math.max(0.3, point.s);
               return (
                 <g
-                  key={entry.path}
+                  key={entry.commit.hash}
+                  className={`constellation-commit${entry.trunk ? " trunk" : ""}${entry.elevation > 0 ? " floating" : ""}${isHead ? " current" : ""}${active ? " active" : ""}`}
+                  transform={`translate(${point.x} ${point.y})`}
+                  style={{ opacity: 0.4 + 0.6 * Math.min(1, point.s) }}
+                  role="button"
+                  tabIndex={entry.row === cursorIndex ? 0 : -1}
+                  onClick={() => {
+                    if (!panned.current) setInspectedHash(entry.commit.hash);
+                  }}
+                  onDoubleClick={() => {
+                    if (!panned.current) onSelect(entry.commit);
+                  }}
+                  onKeyDown={(event) => commitKeyDown(event, entry)}
+                >
+                  <title>{`${entry.commit.shortHash} · ${entry.commit.subject}`}</title>
+                  {entry.elevation > 0 ? (
+                    <line className="constellation-stem" x1="0" y1={radius} x2="0" y2={point.floor - point.y} />
+                  ) : null}
+                  {isHead ? <circle r={radius + 7 * point.s} className="constellation-current-ring" /> : null}
+                  <circle r={radius} style={{ fill: entry.colour, stroke: entry.colour, strokeWidth: 2 * Math.max(0.5, point.s) }} />
+                  {merge ? <circle r={radius * 0.42} className="constellation-merge-mark" /> : null}
+                </g>
+              );
+            })}
+          </g>
+
+          <g className="constellation-tips">
+            {chips.map(({ tip, entry, label, state, extra, side, width: chipWidth, height: chipHeight, scale: chipScale, x, y, anchor }) => {
+              const folder = tip.worktree;
+              const dirty = (folder?.changeCount ?? 0) > 0;
+              const remoteOnly = tip.branches.length === 0 && !folder && tip.remotes.length > 0;
+              const tone = folder?.isCurrent || (tip.isHead && !folder) ? "current"
+                : dirty ? "dirty"
+                  : remoteOnly ? "remote"
+                    : tip.isTrunkTip ? "trunk"
+                      : entry.trunk || (entry.strand && !entry.strand.floating) ? "merged"
+                        : "open";
+              const switchable = !folder && tip.branches.length > 0 && !(tip.isHead && tip.branches.includes(headBranch ?? ""));
+              const hint = folder?.isCurrent
+                ? `${label} is open here`
+                : folder
+                  ? `Double-click to open ${label}'s folder`
+                  : switchable
+                    ? `Double-click to switch to ${label}`
+                    : label;
+              const nearEdgeX = x - side * (chipWidth * chipScale) / 2;
+              return (
+                <g
+                  key={tip.hash}
                   className={`constellation-folder ${tone}`}
-                  transform={`translate(${x} ${y}) scale(${node.scale})`}
                   role="button"
                   tabIndex={0}
                   onClick={() => {
-                    if (!panned.current) setInspectedHash(node.commit.hash);
+                    if (!panned.current) setInspectedHash(tip.hash);
                   }}
                   onDoubleClick={() => {
-                    if (!entry.isCurrent) onOpenWorktree?.(entry.path);
+                    if (panned.current) return;
+                    if (folder && !folder.isCurrent) onOpenWorktree?.(folder.path);
+                    else if (switchable) onSwitchBranch?.(label);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setInspectedHash(node.commit.hash);
+                      setInspectedHash(tip.hash);
                     }
                   }}
                 >
-                  <title>{entry.isCurrent ? `${label} is open here` : `Double-click ${label} to open its folder safely`}</title>
-                  <rect x={-width / 2} y="-19" width={width} height="38" rx="7" />
-                  {dirty ? <circle cx={-width / 2 + 12} cy="-4" r="4" /> : null}
-                  <text className="constellation-folder-name" x={-width / 2 + (dirty ? 22 : 11)} y="-2">
-                    {label}
-                  </text>
-                  <text className="constellation-folder-state" x={-width / 2 + 11} y="12">
-                    {state}
-                  </text>
+                  <title>{hint}</title>
+                  <path
+                    className="constellation-tip-tether"
+                    d={`M ${anchor.x + side * 9 * anchor.s} ${anchor.y} C ${(anchor.x + nearEdgeX) / 2} ${anchor.y}, ${(anchor.x + nearEdgeX) / 2} ${y}, ${nearEdgeX} ${y}`}
+                  />
+                  <g transform={`translate(${x} ${y}) scale(${chipScale})`}>
+                    <rect x={-chipWidth / 2} y={-chipHeight / 2} width={chipWidth} height={chipHeight} rx="7" />
+                    {dirty ? <circle cx={-chipWidth / 2 + 12} cy={state ? -8 : 0} r="4" /> : null}
+                    <text
+                      className="constellation-folder-name"
+                      x={-chipWidth / 2 + (dirty ? 22 : 11)}
+                      y={state ? -3 : 4}
+                    >
+                      {label}
+                      {extra > 0 ? <tspan className="constellation-folder-extra">{` +${extra}`}</tspan> : null}
+                    </text>
+                    {state ? (
+                      <text className="constellation-folder-state" x={-chipWidth / 2 + 11} y="12">
+                        {state}
+                      </text>
+                    ) : null}
+                  </g>
                 </g>
               );
             })}
           </g>
 
-          {scene.mainFolder ? (
-            <text className="constellation-trunk-caption" x={CANVAS_W / 2} y="628" textAnchor="middle">
-              {labelForFolder(scene.mainFolder)} · trunk
+          {/* The bottom edge grounds "now". */}
+          <rect className="constellation-fade" x="0" y={height - 44} width={width} height="44" fill="url(#constellation-now-fade)" />
+          <text className="constellation-trunk-caption" x={vpX} y={height - 14} textAnchor="middle">
+            {scene.trunkName} · trunk
+          </text>
+          {camera.travel > 0.5 ? (
+            <text className="constellation-edge-caption" x={vpX} y={height - 30} textAnchor="middle">
+              {`${Math.round(camera.travel)} ${Math.round(camera.travel) === 1 ? "commit" : "commits"} back · press ↺ for now`}
             </text>
           ) : null}
-          </g>
         </svg>
-        {inspectedCommit ? (
+        {inspected ? (
           <aside className="constellation-inspector" aria-label="Selected commit details">
             <button
               type="button"
@@ -609,36 +818,61 @@ export function GraphView({
               <X size={14} />
             </button>
             <p className="constellation-inspector-kicker">
-              {inspectedFolder ? "Folder endpoint" : "Commit"}
+              {inspectedTip ? (inspectedTip.worktree ? "Folder" : "Branch tip") : inspected.trunk ? `On ${scene.trunkName}` : "Commit"}
             </p>
-            <h3>{inspectedFolder ? labelForFolder(inspectedFolder) : inspectedCommit.subject}</h3>
-            {inspectedFolder ? (
-              <p className="constellation-inspector-state">{folderState(inspectedFolder)}</p>
+            <h3>{inspectedTip ? inspectedLabel : inspected.commit.subject}</h3>
+            {inspectedTip ? (
+              <p className="constellation-inspector-state">{tipState(inspectedTip, inspected, scene.trunkName)}</p>
             ) : null}
+            {inspectedTip ? <p className="constellation-inspector-subject">{inspected.commit.subject}</p> : null}
             <dl>
-              <dt>Commit</dt><dd><code>{inspectedCommit.shortHash}</code></dd>
-              <dt>Author</dt><dd>{inspectedCommit.author}</dd>
-              <dt>When</dt><dd>{new Date(inspectedCommit.date).toLocaleString()}</dd>
-              <dt>Parents</dt><dd>{inspectedCommit.parents.length || "none"}</dd>
+              <dt>Commit</dt><dd><code>{inspected.commit.shortHash}</code></dd>
+              <dt>Author</dt><dd>{inspected.commit.author}</dd>
+              <dt>When</dt><dd>{new Date(inspected.commit.date).toLocaleString()}</dd>
+              {inspectedTip && (inspectedTip.branches.length + inspectedTip.remotes.length + inspectedTip.tags.length) > 1 ? (
+                <>
+                  <dt>Also here</dt>
+                  <dd>
+                    {[
+                      ...inspectedTip.branches.filter((name) => name !== inspectedLabel),
+                      ...inspectedTip.remotes.filter((name) => name !== inspectedLabel),
+                      ...inspectedTip.tags.filter((name) => name !== inspectedLabel).map((tag) => `tag ${tag}`),
+                    ].join(", ")}
+                  </dd>
+                </>
+              ) : null}
             </dl>
             <div className="constellation-inspector-actions">
-              <button type="button" className="constellation-inspector-detail" onClick={() => onSelect(inspectedCommit)}>
-                <ExternalLink size={13} /> View files and diff
-              </button>
-              {inspectedFolder && !inspectedFolder.isCurrent && onOpenWorktree ? (
+              {inspectedTip?.worktree && !inspectedTip.worktree.isCurrent && onOpenWorktree ? (
                 <button
                   type="button"
                   className="constellation-inspector-open"
-                  onClick={() => onOpenWorktree(inspectedFolder.path)}
+                  onClick={() => onOpenWorktree(inspectedTip.worktree!.path)}
                 >
-                  Open this folder safely
+                  Open this folder
                 </button>
               ) : null}
+              {inspectedSwitchable && onSwitchBranch ? (
+                <button
+                  type="button"
+                  className="constellation-inspector-open"
+                  onClick={() => onSwitchBranch(inspectedSwitchable)}
+                >
+                  Switch to {inspectedSwitchable}
+                </button>
+              ) : null}
+              <button type="button" className="constellation-inspector-detail" onClick={() => onSelect(inspected.commit)}>
+                <ExternalLink size={13} /> View files and diff
+              </button>
             </div>
+            {inspectedSwitchable && onSwitchBranch ? (
+              <p className="constellation-inspector-note">
+                Your uncommitted changes come along; what you committed on {headBranch ?? "this branch"} stays here to come back to.
+              </p>
+            ) : null}
           </aside>
         ) : null}
       </div>
-
     </section>
   );
 }

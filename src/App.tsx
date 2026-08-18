@@ -2051,6 +2051,20 @@ function App() {
     setMessage(`Opened ${target.shortHash} in a folder.`);
   }
 
+  /// Go to a branch the way the user means it: if it is already open in
+  /// another folder, go there (Git refuses to check it out twice anyway);
+  /// otherwise switch this folder to it.
+  async function switchToBranch(branch: string) {
+    const elsewhere = worktrees.find(
+      (entry) => !entry.isCurrent && entry.branch === branch,
+    );
+    if (elsewhere) {
+      await openCheckout(elsewhere.path);
+      return;
+    }
+    await checkoutBranch(branch);
+  }
+
   async function checkoutBranch(branch: string) {
     if (!selectedPath || !branch) return;
 
@@ -3521,19 +3535,7 @@ function App() {
               onRemoveCustomAction={handleRemoveCustomAction}
               onRepoChange={(path) => void selectRepo(path)}
               onOpenWorktree={(path) => void openCheckout(path)}
-              onBranchChange={(branch) => {
-                // Git can't check out a branch that's open in another folder.
-                // Rather than let it fail, go to that folder — which is what
-                // the user meant by selecting the branch.
-                const elsewhere = worktrees.find(
-                  (entry) => !entry.isCurrent && entry.branch === branch,
-                );
-                if (elsewhere) {
-                  void openCheckout(elsewhere.path);
-                  return;
-                }
-                void checkoutBranch(branch);
-              }}
+              onBranchChange={(branch) => void switchToBranch(branch)}
               viewingCommit={viewingCommit}
               onRefresh={() => void (fetchOnRefresh ? fetchRepo() : refreshRepo())}
               onPush={() => push(false)}
@@ -3730,7 +3732,9 @@ function App() {
                     headHash={displaySnapshot.commits[0]?.hash}
                     selectedHash={selectedCommit?.hash}
                     unpushedTags={unpushedTagSet}
+                    branches={displaySnapshot.branches}
                     worktrees={worktrees}
+                    onSwitchBranch={(branch) => void switchToBranch(branch)}
                     onSelect={(commit) => {
                       // Detail is temporary: selecting a commit opens the
                       // existing inspection surface, whose Back action returns
